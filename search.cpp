@@ -2,6 +2,8 @@
 #include <time.h>
 #include "kwirk.cpp"
 
+#define DUMPSTATS
+
 // ******************************************************************************************************
 
 State initialState;
@@ -329,7 +331,38 @@ void addNode(State* state, NODEI parent, Action action, unsigned int frame)
 
 // ******************************************************************************************************
 
-int run()
+#ifdef DUMPSTATS
+unsigned int treeCounts[sizeof CompressedState*8];
+
+void dumpStats(TREEI index, int level)
+{
+	treeCounts[level]++;
+	TreeNode* n = getTreeNode(index);
+	if (!n->isLeaf())
+	{
+		if (n->children[0])
+			dumpStats(n->children[0], level+1);
+		if (n->children[1])
+			dumpStats(n->children[1], level+1);
+	}
+}
+#endif
+
+void finalize()
+{
+	#ifdef DUMPSTATS
+	printf("Dumping stats...\n");
+	memset(treeCounts, 0, sizeof treeCounts);
+	dumpStats(0, 0);
+	for (int i=0; i<sizeof CompressedState*8; i++)
+		printf("%d ", treeCounts[i]);
+	printf("\nDone.\n");
+	#endif
+}
+
+// ******************************************************************************************************
+
+int run(int argc, const char* argv[])
 {
 	printf("Level %d: %dx%d, %d players, %d blocks, %d rotators\n", LEVEL, X, Y, PLAYERS, BLOCKS, ROTATORS);
 	printf("Compressed state size: %d (%d bits)\n\tFloor: %d bytes (%d bits)\n\tPlayers: %d bits\n\tBlocks: %d bits\n\tRotators: %d bits\n", 
@@ -344,6 +377,12 @@ int run()
 	
 	initialState.load();
 
+	int maxFrames = MAX_FRAMES;
+	if (argc>2)
+		error("Too many arguments");
+	if (argc==2)
+		maxFrames = strtol(argv[1], NULL, 10);
+
 	// initialize state
 	Node* firstNode = newNode();
 	firstNode->action = NONE;
@@ -356,17 +395,19 @@ int run()
 	treeHead->node = 0;
 	treeHead->filler = NODEI_FILLER;
 
-	for (int frame=0;frame<MAX_FRAMES;frame++)
+	for (int frame=0;frame<maxFrames;frame++)
 	{
 		QueueNode* q = queue[frame];
-		unsigned int queueCount = 0;
 		if (!q)
 			continue;
 		time_t t;
 		time(&t);
 		char* tstr = ctime(&t);
 		tstr[strlen(tstr)-1] = 0;
-		printf("[%s] Frame %d: %d tree nodes, %d state nodes, max tree depth=%d/%d", tstr, frame, treeNodeCount, nodeCount, maxTreeDepth, sizeof CompressedState*8);
+		printf("[%s] Frame %d/%d: %d tree nodes, %d state nodes, max tree depth=%d/%d", tstr, frame, maxFrames, treeNodeCount, nodeCount, maxTreeDepth, sizeof CompressedState*8);
+		unsigned int queueCount = 0;
+		NODEI oldNodes = nodeCount;
+		TREEI oldTreeNodes = treeNodeCount;
 		
 		while (q)
 		{
@@ -383,6 +424,7 @@ int run()
 				fclose(f);
 				//File.set(LEVEL ~ ".txt", chainToString(state));
 				printf("Done.\n");
+				finalize();
 				return 0;
 			}
 			else
@@ -408,13 +450,14 @@ int run()
 			q = q->next;
 			delete oldq;
 		}
-		printf(", %d nodes this frame\n", queueCount);
+		printf(", %d nodes processed, %d new tree nodes, %d new state nodes\n", queueCount, treeNodeCount-oldTreeNodes, nodeCount-oldNodes);
 	}
 	printf("Exit not found.\n");
+	finalize();
 	return 2;
 }
 
-int main() { return run(); }
+int main(int argc, const char* argv[]) { return run(argc, argv); }
 //#include "test_body.cpp"
 
 void dumpData(char* name)

@@ -56,7 +56,11 @@ char* format(char *fmt, ...)
 #define YBITS 5
 #endif
 
-#define HOLEBYTES (((X-2)*(Y-2)+7)/8)
+#ifndef HOLES
+#define HOLES 0
+#endif
+
+#define HOLEBYTES ((HOLES+7)/8)
 #define MAX_FRAMES (MAX_STEPS*18)
 
 #define	CELL_EMPTY        0x00
@@ -158,13 +162,17 @@ struct CompressedState
 	#include BOOST_PP_LOCAL_ITERATE()
 	#endif
 
+	#if (HOLES>0)
 	BYTE holes[HOLEBYTES];
+	#endif
 };
 
 INLINE bool operator==(CompressedState& a, CompressedState& b)
 {
 	return memcmp(&a, &b, sizeof CompressedState)==0;
 }
+
+bool holeMap[Y][X];
 
 struct State
 {
@@ -378,6 +386,7 @@ struct State
 		int maxPlayer = 0;
 		bool seenBlock[26];
 		int seenBlocks = 0;
+		int seenHoles = 0;
 
 		for (int i=0; i<26; i++)
 			seenBlock[i] = false;
@@ -385,6 +394,7 @@ struct State
 		for (int y=0;y<Y;y++)
 			for (int x=0;x<X;x++)
 			{
+				holeMap[y][x] = false;
 				char c = level[y][x];
 				switch (c)
 				{
@@ -396,6 +406,8 @@ struct State
 						break;
 					case 'O':
 						map[y][x] = CELL_HOLE;
+						holeMap[y][x] = true;
+						seenHoles++;
 						break;
 					case '1':
 						map[y][x] = CELL_EMPTY;
@@ -494,6 +506,7 @@ struct State
 		assert(maxPlayer+1 == PLAYERS, format("Mismatching number of players: is %d, should be %d", PLAYERS, maxPlayer+1));
 		assert(seenBlocks == BLOCKS, format("Mismatching number of blocks: is %d, should be %d", BLOCKS, seenBlocks));
 		assert(seenRotators == ROTATORS, format("Mismatching number of rotators: is %d, should be %d", ROTATORS, seenRotators));
+		assert(seenHoles == HOLES, format("Mismatching number of holes: is %d, should be %d", HOLES, seenHoles));
 
 #if (PLAYERS >= 2)
 		activePlayer = 0;
@@ -523,7 +536,9 @@ struct State
 		int seenRotators = 0;
 		struct { bool up, right, down, left; } rotators[ROTATORS];
 		#endif
-		unsigned int pos = 0;
+		#if (HOLES>0)
+		unsigned int holePos = 0;
+		#endif
 
 		for (int y=1;y<Y-1;y++)
 			for (int x=1;x<X-1;x++)
@@ -560,12 +575,19 @@ struct State
 				}
 				#endif
 
-				if ((m & CELL_MASK) == CELL_HOLE)
-					s->holes[pos/8] |= 1 << (pos%8);
-				pos++;
+				#if (HOLES>0)
+				if (holeMap[y][x])
+				{
+					if ((m & CELL_MASK) == CELL_HOLE)
+						s->holes[holePos/8] |= 1 << (holePos%8);
+					holePos++;
+				}
+				#endif
 			}
 		
-		assert(pos == (X-2)*(Y-2));
+		#if (HOLES>0)
+		assert(holePos == HOLES);
+		#endif
 
 		#if (BLOCKS > 0)
 		assert(seenBlocks <= BLOCKS, "Too many blocks");
