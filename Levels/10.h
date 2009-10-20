@@ -4,8 +4,8 @@
 #define PLAYERS 1
 #define BLOCKS 1
 #define ROTATORS 6
-#define BLOCKXBITS 1
-#define BLOCKYBITS 1
+#define BLOCKX 3
+#define BLOCKY 1
 #define MAX_STEPS 43
 const char level[Y][X+1] = {
 "###########",

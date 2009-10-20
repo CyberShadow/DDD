@@ -16,7 +16,7 @@ using namespace std;
 
 void error(char* message = NULL)
 {
-	puts(0); // newline
+	puts(""); // newline
 	if (message)
 		puts(message);
 	else
@@ -130,7 +130,7 @@ struct Player
 struct CompressedState
 {
 	// OPTIMIZATION TODO: check if order of these affects speed
-	// OPTIMIZATION TODO: allow BLOCKX/YBITS of 0 (same size)
+	// OPTIMIZATION TODO: get rid of exited
 
 	#if (PLAYERS>2)
 		unsigned activePlayer : 2;
@@ -154,9 +154,7 @@ struct CompressedState
 	#define BOOST_PP_LOCAL_LIMITS (0, BLOCKS-1)
 	#define BOOST_PP_LOCAL_MACRO(n) \
 		unsigned BOOST_PP_CAT(block, BOOST_PP_CAT(n, x)) : XBITS; \
-		unsigned BOOST_PP_CAT(block, BOOST_PP_CAT(n, y)) : YBITS; \
-		unsigned BOOST_PP_CAT(block, BOOST_PP_CAT(n, xs)) : BLOCKXBITS; \
-		unsigned BOOST_PP_CAT(block, BOOST_PP_CAT(n, ys)) : BLOCKYBITS;
+		unsigned BOOST_PP_CAT(block, BOOST_PP_CAT(n, y)) : YBITS;
 	#include BOOST_PP_LOCAL_ITERATE()
 	#endif
 
@@ -182,6 +180,7 @@ INLINE bool operator==(CompressedState& a, CompressedState& b)
 }
 
 bool holeMap[Y][X];
+int blockSizeIndex[BLOCKY][BLOCKX];
 
 struct State
 {
@@ -393,12 +392,11 @@ struct State
 	void load()
 	{
 		int maxPlayer = 0;
-		bool seenBlock[26];
 		int seenBlocks = 0;
 		int seenHoles = 0;
+		int blockSizeCount[BLOCKY][BLOCKX];
 
-		for (int i=0; i<26; i++)
-			seenBlock[i] = false;
+		memset(blockSizeCount, 0, sizeof blockSizeCount);
 
 		for (int y=0;y<Y;y++)
 			for (int x=0;x<X;x++)
@@ -461,10 +459,18 @@ struct State
 							(level[y  ][x+1]!=c ? OBJ_BLOCKRIGHT : 0) |
 							(level[y+1][x  ]!=c ? OBJ_BLOCKDOWN  : 0) |
 							(level[y  ][x-1]!=c ? OBJ_BLOCKLEFT  : 0);
-						if (!seenBlock[c-'a'])
+						if ((map[y][x] & (OBJ_BLOCKUP | OBJ_BLOCKLEFT)) == (OBJ_BLOCKUP | OBJ_BLOCKLEFT))
 						{
 							seenBlocks++;
-							seenBlock[c-'a'] = true;
+							int x2 = x;
+							while (level[y][x2+1] == c)
+								x2++;
+							assert(x2-x < BLOCKX, "Block too wide");
+							int y2 = y;
+							while (level[y2+1][x] == c)
+								y2++;
+							assert(y2-y < BLOCKY, "Block too tall");
+							blockSizeCount[y2-y][x2-x]++;
 						}
 						break;
 					case '^':
@@ -517,10 +523,19 @@ struct State
 				if (map[y][x] == OBJ_ROTATORCENTER)
 					seenRotators++;
 
+		int index = 0;
+		for (int y=0;y<BLOCKY;y++)
+			for (int x=0;x<BLOCKX;x++)
+			{
+				blockSizeIndex[y][x] = index;
+				index += blockSizeCount[y][x];
+			}
+
 		assert(maxPlayer+1 == PLAYERS, format("Mismatching number of players: is %d, should be %d", PLAYERS, maxPlayer+1));
 		assert(seenBlocks == BLOCKS, format("Mismatching number of blocks: is %d, should be %d", BLOCKS, seenBlocks));
 		assert(seenRotators == ROTATORS, format("Mismatching number of rotators: is %d, should be %d", ROTATORS, seenRotators));
 		assert(seenHoles == HOLES, format("Mismatching number of holes: is %d, should be %d", HOLES, seenHoles));
+
 
 #if (PLAYERS >= 2)
 		activePlayer = 0;
@@ -549,7 +564,11 @@ struct State
 		
 		#if (BLOCKS > 0)
 		int seenBlocks = 0;
-		struct { BYTE x, y, xs, ys; } blocks[BLOCKS];
+		struct { BYTE x, y; } blocks[BLOCKS];
+		int blockSizeCount[BLOCKY][BLOCKX];
+		
+		memset(blocks, 0xFF, sizeof blocks);
+		memset(blockSizeCount, 0, sizeof blockSizeCount);
 		#endif
 		#if (ROTATORS > 0)
 		int seenRotators = 0;
@@ -571,15 +590,17 @@ struct State
 					int x2 = x;
 					while ((map[y][x2] & OBJ_BLOCKRIGHT) == 0)
 						x2++;
-					assert(x2-x < (1<<BLOCKXBITS), "Block too wide");
 					int y2 = y;
 					while ((map[y2][x] & OBJ_BLOCKDOWN) == 0)
 						y2++;
-					assert(y2-y < (1<<BLOCKYBITS), "Block too tall");
-					blocks[seenBlocks].x = x-1;
-					blocks[seenBlocks].y = y-1;
-					blocks[seenBlocks].xs = x2-x; // 0 means width of 1, etc.
-					blocks[seenBlocks].ys = y2-y;
+					x2-=x;
+					y2-=y;
+					assert(x2 < BLOCKX, "Block too wide");
+					assert(y2 < BLOCKY, "Block too tall");
+					int index = blockSizeIndex[y2][x2] + blockSizeCount[y2][x2];
+					blocks[index].x = x-1;
+					blocks[index].y = y-1;
+					blockSizeCount[y2][x2]++;
 					seenBlocks++;
 				}
 				#endif
@@ -607,18 +628,10 @@ struct State
 		#if (BLOCKS > 0)
 		assert(seenBlocks <= BLOCKS, "Too many blocks");
 
-		for (unsigned int b = seenBlocks; b < BLOCKS; b++) // fill remaining with 1s
-			blocks[b].x  = (1<<XBITS)-1,
-			blocks[b].y  = (1<<YBITS)-1,
-			blocks[b].xs = (1<<BLOCKXBITS)-1,
-			blocks[b].ys = (1<<BLOCKYBITS)-1;
-
 		#define BOOST_PP_LOCAL_LIMITS (0, BLOCKS-1)
 		#define BOOST_PP_LOCAL_MACRO(n) \
-			s->BOOST_PP_CAT(block, BOOST_PP_CAT(n, x )) = blocks[n].x ; \
-			s->BOOST_PP_CAT(block, BOOST_PP_CAT(n, y )) = blocks[n].y ; \
-			s->BOOST_PP_CAT(block, BOOST_PP_CAT(n, xs)) = blocks[n].xs; \
-			s->BOOST_PP_CAT(block, BOOST_PP_CAT(n, ys)) = blocks[n].ys;
+			s->BOOST_PP_CAT(block, BOOST_PP_CAT(n, x)) = blocks[n].x ; \
+			s->BOOST_PP_CAT(block, BOOST_PP_CAT(n, y)) = blocks[n].y ;
 		#include BOOST_PP_LOCAL_ITERATE()
 		#endif
 

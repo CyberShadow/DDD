@@ -215,7 +215,7 @@ void addNode(State* state, NODEI parent, Action action, unsigned int frame)
 			// if (nodeCount > 40000) printf(" - Dead end. Other state:\n");
 			int steps = replayState(other, &otherState);
 			if (steps > MAX_STEPS) { dumpChain(stderr, other); error(format("replayState of another state failed")); }
-			
+
 			CompressedState compressedOtherState;
 			otherState.compress(&compressedOtherState); // OPTIMIZATION TODO?
 			// if (nodeCount > 40000) { printf("%s", state->toString()); dumpState(&compressedOtherState); printf("\n"); }
@@ -223,6 +223,10 @@ void addNode(State* state, NODEI parent, Action action, unsigned int frame)
 			// identical states?
 			if (compressedState == compressedOtherState)
 			{
+#ifdef DEBUG
+				if (memcmp(state, &otherState, sizeof State))
+					error("Compressed state collision");
+#endif
 				if (frame < other->frame)
 				{
 					other->parent = parent;
@@ -371,14 +375,13 @@ void finalize()
 
 int run(int argc, const char* argv[])
 {
-	printf("Level %d: %dx%d, %d players, %d blocks, %d rotators\n", LEVEL, X, Y, PLAYERS, BLOCKS, ROTATORS);
-	printf("Compressed state size: %d (%d bits)\n\tCoords    : %d + %d bits\n\tBlock size: %d + %d bits\n\tHoles     : %d bits\n\tPlayers   : %d bits\n\tBlocks    : %d bits\n\tRotators  : %d bits\n", 
+	printf("Level %d: %dx%d, %d players, %d blocks (%dx%d), %d rotators\n", LEVEL, X, Y, PLAYERS, BLOCKS, BLOCKX, BLOCKY, ROTATORS);
+	printf("Compressed state size: %d (%d bits)\n\tCoords    : %d + %d bits\n\tHoles     : %d bits\n\tPlayers   : %d bits\n\tBlocks    : %d bits\n\tRotators  : %d bits\n", 
 		sizeof CompressedState, sizeof CompressedState*8, 
 		XBITS, YBITS,
-		BLOCKXBITS, BLOCKYBITS,
 		HOLES, 
 		PLAYERS*(XBITS+YBITS+1), 
-		BLOCKS*(XBITS+YBITS+BLOCKXBITS+BLOCKYBITS),
+		BLOCKS*(XBITS+YBITS),
 		ROTATORS*4);
 
 	assert(sizeof TreeNode == 8);
