@@ -63,7 +63,6 @@ char* format(char *fmt, ...)
 #define HOLES 0
 #endif
 
-#define HOLEBYTES ((HOLES+7)/8)
 #define MAX_FRAMES (MAX_STEPS*18)
 
 #define	CELL_EMPTY        0x00
@@ -170,7 +169,10 @@ struct CompressedState
 	#endif
 
 	#if (HOLES>0)
-	BYTE holes[HOLEBYTES];
+	#define BOOST_PP_LOCAL_LIMITS (0, HOLES-1)
+	#define BOOST_PP_LOCAL_MACRO(n) \
+		unsigned BOOST_PP_CAT(hole, n) : 1;
+	#include BOOST_PP_LOCAL_ITERATE()
 	#endif
 };
 
@@ -550,6 +552,7 @@ struct State
 		#endif
 		#if (HOLES>0)
 		unsigned int holePos = 0;
+		bool holes[HOLES];
 		#endif
 
 		for (int y=1;y<Y-1;y++)
@@ -592,18 +595,10 @@ struct State
 
 				#if (HOLES>0)
 				if (holeMap[y][x])
-				{
-					if ((m & CELL_MASK) == CELL_HOLE)
-						s->holes[holePos/8] |= 1 << (holePos%8);
-					holePos++;
-				}
+					holes[holePos++] = (m & CELL_MASK) == CELL_HOLE;
 				#endif
 			}
 		
-		#if (HOLES>0)
-		assert(holePos == HOLES);
-		#endif
-
 		#if (BLOCKS > 0)
 		assert(seenBlocks <= BLOCKS, "Too many blocks");
 
@@ -623,11 +618,19 @@ struct State
 		#endif
 
 		#if (ROTATORS > 0)
-		assert(seenRotators == ROTATORS, "Vanished rotator");
+		assert(seenRotators == ROTATORS, "Vanished rotator?");
 		#define BOOST_PP_LOCAL_LIMITS (0, ROTATORS-1)
 		#define BOOST_PP_LOCAL_MACRO(n) \
 			s->BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, i)) = rotators[n].i; \
 			s->BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, j)) = rotators[n].j;
+		#include BOOST_PP_LOCAL_ITERATE()
+		#endif
+
+		#if (HOLES>0)
+		assert(holePos == HOLES);
+		#define BOOST_PP_LOCAL_LIMITS (0, HOLES-1)
+		#define BOOST_PP_LOCAL_MACRO(n) \
+			s->BOOST_PP_CAT(hole, n) = holes[n];
 		#include BOOST_PP_LOCAL_ITERATE()
 		#endif
 	}
