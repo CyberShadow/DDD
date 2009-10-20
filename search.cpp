@@ -365,8 +365,10 @@ void finalize()
 int run(int argc, const char* argv[])
 {
 	printf("Level %d: %dx%d, %d players, %d blocks, %d rotators\n", LEVEL, X, Y, PLAYERS, BLOCKS, ROTATORS);
-	printf("Compressed state size: %d (%d bits)\n\tFloor: %d bytes (%d bits)\n\tPlayers: %d bits\n\tBlocks: %d bits\n\tRotators: %d bits\n", 
+	printf("Compressed state size: %d (%d bits)\n\tCoords    : %d + %d bits\n\tBlock size: %d + %d bits\n\tFloor     : %d bytes (%d bits)\n\tPlayers   : %d bits\n\tBlocks    : %d bits\n\tRotators  : %d bits\n", 
 		sizeof CompressedState, sizeof CompressedState*8, 
+		XBITS, YBITS,
+		BLOCKXBITS, BLOCKYBITS,
 		HOLEBYTES, HOLEBYTES*8, 
 		PLAYERS*(XBITS+YBITS+1), 
 		BLOCKS*(XBITS+YBITS+BLOCKXBITS+BLOCKYBITS),

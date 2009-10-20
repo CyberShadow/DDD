@@ -14,6 +14,7 @@ using namespace std;
 
 void error(char* message = NULL)
 {
+	puts(0); // newline
 	if (message)
 		puts(message);
 	else
@@ -128,6 +129,7 @@ struct Player
 struct CompressedState
 {
 	// OPTIMIZATION TODO: check if order of these affects speed
+	// OPTIMIZATION TODO: allow BLOCKX/YBITS of 0 (same size)
 
 	#if (PLAYERS>2)
 		unsigned activePlayer : 2;
@@ -135,12 +137,17 @@ struct CompressedState
 		unsigned activePlayer : 1;
 	#endif
 	
+	#if (PLAYERS==1)
+		unsigned player0x : XBITS;
+		unsigned player0y : YBITS;
+	#else
 	#define BOOST_PP_LOCAL_LIMITS (0, PLAYERS-1)
 	#define BOOST_PP_LOCAL_MACRO(n) \
 		unsigned BOOST_PP_CAT(player, BOOST_PP_CAT(n, x)) : XBITS; \
 		unsigned BOOST_PP_CAT(player, BOOST_PP_CAT(n, y)) : YBITS; \
 		unsigned BOOST_PP_CAT(player, BOOST_PP_CAT(n, exited)) : 1;
 	#include BOOST_PP_LOCAL_ITERATE()
+	#endif
 
 	#if (BLOCKS>0)
 	#define BOOST_PP_LOCAL_LIMITS (0, BLOCKS-1)
@@ -519,12 +526,17 @@ struct State
 		s->activePlayer = activePlayer;
 		#endif
 
+		#if (PLAYERS==1)
+		s->player0x = players[0].x-1;
+		s->player0y = players[0].y-1;
+		#else
 		#define BOOST_PP_LOCAL_LIMITS (0, PLAYERS-1)
 		#define BOOST_PP_LOCAL_MACRO(n) \
 			s->BOOST_PP_CAT(player, BOOST_PP_CAT(n, x))=players[n].x-1; \
 			s->BOOST_PP_CAT(player, BOOST_PP_CAT(n, y))=players[n].y-1; \
 			s->BOOST_PP_CAT(player, BOOST_PP_CAT(n, exited))=players[n].exited();
 		#include BOOST_PP_LOCAL_ITERATE()
+		#endif
 		
 		#if (BLOCKS > 0)
 		int seenBlocks = 0;
@@ -549,11 +561,11 @@ struct State
 					int x2 = x;
 					while ((map[y][x2] & OBJ_BLOCKRIGHT) == 0)
 						x2++;
-					assert(x2-x <= (1<<BLOCKXBITS), "Block too wide");
+					assert(x2-x < (1<<BLOCKXBITS), "Block too wide");
 					int y2 = y;
 					while ((map[y2][x] & OBJ_BLOCKDOWN) == 0)
 						y2++;
-					assert(y2-y <= (1<<BLOCKYBITS), "Block too tall");
+					assert(y2-y < (1<<BLOCKYBITS), "Block too tall");
 					blocks[seenBlocks].x = x-1;
 					blocks[seenBlocks].y = y-1;
 					blocks[seenBlocks].xs = x2-x; // 0 means width of 1, etc.
