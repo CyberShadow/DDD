@@ -332,18 +332,24 @@ void addNode(State* state, NODEI parent, Action action, unsigned int frame)
 // ******************************************************************************************************
 
 #ifdef DUMPSTATS
-unsigned int treeCounts[sizeof CompressedState*8];
+unsigned int treeCounts0[sizeof CompressedState*8];
+unsigned int treeCounts1[sizeof CompressedState*8];
 
 void dumpStats(TREEI index, int level)
 {
-	treeCounts[level]++;
 	TreeNode* n = getTreeNode(index);
 	if (!n->isLeaf())
 	{
 		if (n->children[0])
+		{
+			treeCounts0[level]++;
 			dumpStats(n->children[0], level+1);
+		}
 		if (n->children[1])
+		{
+			treeCounts1[level]++;
 			dumpStats(n->children[1], level+1);
+		}
 	}
 }
 #endif
@@ -352,10 +358,11 @@ void finalize()
 {
 	#ifdef DUMPSTATS
 	printf("Dumping stats...\n");
-	memset(treeCounts, 0, sizeof treeCounts);
+	memset(treeCounts0, 0, sizeof treeCounts0);
+	memset(treeCounts1, 0, sizeof treeCounts1);
 	dumpStats(0, 0);
 	for (int i=0; i<sizeof CompressedState*8; i++)
-		printf("%d ", treeCounts[i]);
+		printf("%d/%d ", treeCounts0[i], treeCounts1[i]);
 	printf("\nDone.\n");
 	#endif
 }
