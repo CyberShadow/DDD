@@ -9,7 +9,9 @@
 #include <algorithm>
 using namespace std;
 
-//#define DEBUG
+#ifdef _MSC_VER
+#define DEBUG
+#endif
 #include "Levels/12.h"
 
 void error(char* message = NULL)
