@@ -411,6 +411,7 @@ struct State
 						map[y][x] = CELL_EMPTY;
 						break;
 					case '#':
+					case '+':
 						map[y][x] = CELL_WALL;
 						break;
 					case 'O':
@@ -479,6 +480,7 @@ struct State
 						map[y][x] = OBJ_ROTATORLEFT;
 						break;
 					case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I': case 'J': case 'K': case 'L': case 'M': case 'N':           case 'P': case 'Q': case 'R': case 'S': case 'T': case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
+					{
 						BYTE neighbors[4];
 						BYTE neighborCount = 0;
 						bool isCenter = false;
@@ -496,6 +498,9 @@ struct State
 						else
 							map[y][x] = OBJ_ROTATORUP + (2+neighbors[0])%4;
 						break;
+					}
+					default:
+						error(format("Unknown character in level: %c", c));
 				}
 			}
 
