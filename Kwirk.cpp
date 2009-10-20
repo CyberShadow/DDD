@@ -155,10 +155,8 @@ struct CompressedState
 	#if (ROTATORS>0)
 	#define BOOST_PP_LOCAL_LIMITS (0, ROTATORS-1)
 	#define BOOST_PP_LOCAL_MACRO(n) \
-		unsigned BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, up   )) : 1; \
-		unsigned BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, right)) : 1; \
-		unsigned BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, down )) : 1; \
-		unsigned BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, left )) : 1; 
+		unsigned BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, i)) : 1; \
+		unsigned BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, j)) : 1;
 	#include BOOST_PP_LOCAL_ITERATE()
 	#endif
 
@@ -534,7 +532,7 @@ struct State
 		#endif
 		#if (ROTATORS > 0)
 		int seenRotators = 0;
-		struct { bool up, right, down, left; } rotators[ROTATORS];
+		struct { bool i, j; } rotators[ROTATORS];
 		#endif
 		#if (HOLES>0)
 		unsigned int holePos = 0;
@@ -567,10 +565,13 @@ struct State
 				#if (ROTATORS > 0)
 				if ((m & OBJ_MASK) == OBJ_ROTATORCENTER)
 				{
-					rotators[seenRotators].up    = map[y-1][x  ]==OBJ_ROTATORUP;
-					rotators[seenRotators].right = map[y  ][x+1]==OBJ_ROTATORRIGHT;
-					rotators[seenRotators].down  = map[y+1][x  ]==OBJ_ROTATORDOWN;
-					rotators[seenRotators].left  = map[y  ][x-1]==OBJ_ROTATORLEFT;
+					bool a = (map[y-1][x  ]&OBJ_MASK)==OBJ_ROTATORUP;
+					bool b = (map[y  ][x+1]&OBJ_MASK)==OBJ_ROTATORRIGHT;
+					bool c = (map[y+1][x  ]&OBJ_MASK)==OBJ_ROTATORDOWN;
+					bool d = (map[y  ][x-1]&OBJ_MASK)==OBJ_ROTATORLEFT;
+					// minimized boolean function to uniquely identify the state of a rotator for any rotator type
+					rotators[seenRotators].i = (!c && !d) || (a && d);
+					rotators[seenRotators].j = (c && !d) || (a && !b);
 					seenRotators++;
 				}
 				#endif
@@ -611,10 +612,8 @@ struct State
 		assert(seenRotators == ROTATORS, "Vanished rotator");
 		#define BOOST_PP_LOCAL_LIMITS (0, ROTATORS-1)
 		#define BOOST_PP_LOCAL_MACRO(n) \
-			s->BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, up   )) = rotators[n].up   ; \
-			s->BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, right)) = rotators[n].right; \
-			s->BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, down )) = rotators[n].down ; \
-			s->BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, left )) = rotators[n].left ; 
+			s->BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, i)) = rotators[n].i; \
+			s->BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, j)) = rotators[n].j;
 		#include BOOST_PP_LOCAL_ITERATE()
 		#endif
 	}

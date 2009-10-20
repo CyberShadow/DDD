@@ -418,7 +418,7 @@ int run(int argc, const char* argv[])
 			int steps = replayState(np, &state);
 			if (state.playersLeft()==0)
 			{
-				printf("Exit found, writing path...\n");
+				printf("\nExit found, writing path...\n");
 				FILE* f = fopen(BOOST_PP_STRINGIZE(LEVEL) ".txt", "wt");
 				dumpChain(f, np);
 				fclose(f);
