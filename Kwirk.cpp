@@ -9,10 +9,12 @@
 #include <algorithm>
 using namespace std;
 
-#ifdef _MSC_VER
+//#ifdef _MSC_VER
+#ifndef __INTEL_COMPILER
 #define DEBUG
 #endif
-#include "Levels/12.h"
+
+#include "Levels/24.h"
 
 void error(char* message = NULL)
 {

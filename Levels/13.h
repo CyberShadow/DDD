@@ -6,6 +6,7 @@
 #define ROTATORS 0
 #define BLOCKX 3
 #define BLOCKY 3
+#define HOLES 40
 #define MAX_STEPS 243
 const char level[Y][X+1] = {
 "################",

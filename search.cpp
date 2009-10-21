@@ -416,7 +416,7 @@ int run(int argc, const char* argv[])
 		time(&t);
 		char* tstr = ctime(&t);
 		tstr[strlen(tstr)-1] = 0;
-		printf("[%s] Frame %d/%d: %d tree nodes, %d state nodes, max tree depth=%d/%d", tstr, frame, maxFrames, treeNodeCount, nodeCount, maxTreeDepth, sizeof CompressedState*8);
+		printf("[%s] Frame %d/%d: %d tree nodes, %d state nodes, max tree depth=%d/%d", tstr, frame, maxFrames, treeNodeCount, nodeCount, maxTreeDepth, sizeof CompressedState*8); fflush(stdout);
 		unsigned int queueCount = 0;
 		NODEI oldNodes = nodeCount;
 		TREEI oldTreeNodes = treeNodeCount;
