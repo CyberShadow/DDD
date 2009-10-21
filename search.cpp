@@ -69,7 +69,8 @@ int replayState(Node* n, State* state)
 	*state = initialState;
 	while (stepNr)
 	{
-		state->perform(actions[--stepNr]);
+		int res = state->perform(actions[--stepNr]);
+		assert(res>0, "Replay failed");
 		// if (nodeCount > 40000) printf("%c", actionNames[actions[stepNr]][0]);
 	}
 	// if (nodeCount > 40000) printf("\n");
@@ -94,7 +95,8 @@ void dumpChain(FILE* f, Node* n)
 	while (stepNr)
 	{
 		fprintf(f, "%s\n%s", actionNames[actions[stepNr]], state.toString());
-		state.perform(actions[--stepNr]);
+		int res = state.perform(actions[--stepNr]);
+		assert(res>0, "Replay failed");
 		if (actions[stepNr] < SWITCH)
 			totalSteps++;
 	}
@@ -446,15 +448,10 @@ int run(int argc, const char* argv[])
 					for (Action action = ACTION_FIRST; action <= ACTION_LAST; action++)
 					{
 						int result = newState.perform(action);
-						if (result >= 0)
-						{
+						if (result > 0)
 							addNode(&newState, n, action, frame+result);
+						if (result >= 0) // the state was altered
 							newState = state;
-						}
-						else
-						{
-							// preserve newState which hasn't changed
-						}
 					}	
 				}
 

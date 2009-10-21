@@ -2,23 +2,24 @@
 #define X 20
 #define Y 18
 #define PLAYERS 1
-#define BLOCKS 0
-#define ROTATORS 0
-#define BLOCKXBITS 1
-#define BLOCKYBITS 1
+#define BLOCKS 7
+#define ROTATORS 5
+#define BLOCKX 1
+#define BLOCKY 1
+#define HOLES 7
 #define MAX_STEPS 360
 const char level[Y][X+1] = {
 "####################",
 "#++++++++++++++++++#",
 "#+++############+++#",
 "#+++#####  #####+++#",
-"#+++##  a G b1##+++#",
+"#+++##  a ^ b1##+++#",
 "#+++## D  G  c##+++#",
 "#+++##DD d  F ##+++#",
-"#+++#  D#RRFF  #+++#",
+"#+++#  D#<RFF  #+++#",
 "#+++#  ##   eO #+++#",
 "#+++##     ## ##+++#",
-"#+++##OM  # f ##+++#",
+"#+++##O^  # f ##+++#",
 "#+++##OM gO   ##+++#",
 "#+++##O##  #####+++#",
 "#+++##O#########+++#",

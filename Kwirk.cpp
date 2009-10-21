@@ -14,7 +14,7 @@ using namespace std;
 #define DEBUG
 #endif
 
-#include "Levels/24.h"
+#include "Levels/26.h"
 
 void error(char* message = NULL)
 {
@@ -195,7 +195,7 @@ struct State
 	BYTE activePlayer;
 #endif
 	
-	/// Returns frame delay, or -1 if move is invalid
+	/// Returns frame delay, 0 if move is invalid and the state was altered, -1 if move is invalid and the state was not altered
 	int perform(Action action)
 	{
 		assert (action <= ACTION_LAST);
@@ -287,7 +287,11 @@ struct State
 				// fill holes
 				for (int y=y1; y<=y2; y++)
 					for (int x=x1; x<=x2; x++)
+					{
+						if (!holeMap[y][x])
+							return 0; // boring hole
 						map[y][x] = 0;
+					}
 				return DELAY_PUSH + DELAY_FILL;
 			}
 			else
@@ -418,6 +422,9 @@ struct State
 						map[y][x] = CELL_HOLE;
 						holeMap[y][x] = true;
 						seenHoles++;
+						break;
+					case '.': // boring hole
+						map[y][x] = CELL_HOLE;
 						break;
 					case '1':
 						map[y][x] = CELL_EMPTY;
