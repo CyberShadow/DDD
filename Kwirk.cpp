@@ -14,7 +14,7 @@ using namespace std;
 #define DEBUG
 #endif
 
-#include "Levels/26.h"
+#include "Levels/21.h"
 
 void error(char* message = NULL)
 {
@@ -42,27 +42,6 @@ char* format(char *fmt, ...)
 #else
 #define assert(expr,...) __assume((expr)!=0)
 #define INLINE __forceinline
-#endif
-
-
-#if (X-2<8)
-#define XBITS 3
-#elif (X-2<16)
-#define XBITS 4
-#else
-#define XBITS 5
-#endif
-
-#if (Y-2<8)
-#define YBITS 3
-#elif (Y-2<16)
-#define YBITS 4
-#else
-#define YBITS 5
-#endif
-
-#ifndef HOLES
-#define HOLES 0
 #endif
 
 #define MAX_FRAMES (MAX_STEPS*18)
@@ -129,60 +108,7 @@ struct Player
 	INLINE void exit() { x = 255; }
 };
 
-struct CompressedState
-{
-	// OPTIMIZATION TODO: check if order of these affects speed
-	// OPTIMIZATION TODO: get rid of exited
-
-	#if (PLAYERS>2)
-		unsigned activePlayer : 2;
-	#elif (PLAYERS>1)
-		unsigned activePlayer : 1;
-	#endif
-	
-	#if (PLAYERS==1)
-		unsigned player0x : XBITS;
-		unsigned player0y : YBITS;
-	#else
-	#define BOOST_PP_LOCAL_LIMITS (0, PLAYERS-1)
-	#define BOOST_PP_LOCAL_MACRO(n) \
-		unsigned BOOST_PP_CAT(player, BOOST_PP_CAT(n, x)) : XBITS; \
-		unsigned BOOST_PP_CAT(player, BOOST_PP_CAT(n, y)) : YBITS; \
-		unsigned BOOST_PP_CAT(player, BOOST_PP_CAT(n, exited)) : 1;
-	#include BOOST_PP_LOCAL_ITERATE()
-	#endif
-
-	#if (BLOCKS>0)
-	#define BOOST_PP_LOCAL_LIMITS (0, BLOCKS-1)
-	#define BOOST_PP_LOCAL_MACRO(n) \
-		unsigned BOOST_PP_CAT(block, BOOST_PP_CAT(n, x)) : XBITS; \
-		unsigned BOOST_PP_CAT(block, BOOST_PP_CAT(n, y)) : YBITS;
-	#include BOOST_PP_LOCAL_ITERATE()
-	#endif
-
-	#if (ROTATORS>0)
-	#define BOOST_PP_LOCAL_LIMITS (0, ROTATORS-1)
-	#define BOOST_PP_LOCAL_MACRO(n) \
-		unsigned BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, i)) : 1; \
-		unsigned BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, j)) : 1;
-	#include BOOST_PP_LOCAL_ITERATE()
-	#endif
-
-	#if (HOLES>0)
-	#define BOOST_PP_LOCAL_LIMITS (0, HOLES-1)
-	#define BOOST_PP_LOCAL_MACRO(n) \
-		unsigned BOOST_PP_CAT(hole, n) : 1;
-	#include BOOST_PP_LOCAL_ITERATE()
-	#endif
-};
-
-INLINE bool operator==(CompressedState& a, CompressedState& b)
-{
-	return memcmp(&a, &b, sizeof CompressedState)==0;
-}
-
 bool holeMap[Y][X];
-int blockSizeIndex[BLOCKY][BLOCKX];
 
 struct State
 {
@@ -398,11 +324,6 @@ struct State
 	void load()
 	{
 		int maxPlayer = 0;
-		int seenBlocks = 0;
-		int seenHoles = 0;
-		int blockSizeCount[BLOCKY][BLOCKX];
-
-		memset(blockSizeCount, 0, sizeof blockSizeCount);
 
 		for (int y=0;y<Y;y++)
 			for (int x=0;x<X;x++)
@@ -421,7 +342,6 @@ struct State
 					case 'O':
 						map[y][x] = CELL_HOLE;
 						holeMap[y][x] = true;
-						seenHoles++;
 						break;
 					case '.': // boring hole
 						map[y][x] = CELL_HOLE;
@@ -468,19 +388,6 @@ struct State
 							(level[y  ][x+1]!=c ? OBJ_BLOCKRIGHT : 0) |
 							(level[y+1][x  ]!=c ? OBJ_BLOCKDOWN  : 0) |
 							(level[y  ][x-1]!=c ? OBJ_BLOCKLEFT  : 0);
-						if ((map[y][x] & (OBJ_BLOCKUP | OBJ_BLOCKLEFT)) == (OBJ_BLOCKUP | OBJ_BLOCKLEFT))
-						{
-							seenBlocks++;
-							int x2 = x;
-							while (level[y][x2+1] == c)
-								x2++;
-							assert(x2-x < BLOCKX, "Block too wide");
-							int y2 = y;
-							while (level[y2+1][x] == c)
-								y2++;
-							assert(y2-y < BLOCKY, "Block too tall");
-							blockSizeCount[y2-y][x2-x]++;
-						}
 						break;
 					case '^':
 						map[y][x] = OBJ_ROTATORUP;
@@ -519,8 +426,6 @@ struct State
 				}
 			}
 
-		int seenRotators = 0;
-
 		for (int y=0;y<Y;y++)
 			for (int x=0;x<X;x++)
 				if (map[y][x] >= OBJ_ROTATORUP && map[y][x] <= OBJ_ROTATORLEFT)
@@ -528,138 +433,10 @@ struct State
 					BYTE d = (map[y][x]-OBJ_ROTATORUP+2)%4;
 					assert(map[y+DY[d]][x+DX[d]] == OBJ_ROTATORCENTER, "Invalid rotator configuration");
 				}
-				else
-				if (map[y][x] == OBJ_ROTATORCENTER)
-					seenRotators++;
-
-		int index = 0;
-		for (int y=0;y<BLOCKY;y++)
-			for (int x=0;x<BLOCKX;x++)
-			{
-				blockSizeIndex[y][x] = index;
-				index += blockSizeCount[y][x];
-			}
-
-		assert(maxPlayer+1 == PLAYERS, format("Mismatching number of players: is %d, should be %d", PLAYERS, maxPlayer+1));
-		assert(seenBlocks == BLOCKS, format("Mismatching number of blocks: is %d, should be %d", BLOCKS, seenBlocks));
-		assert(seenRotators == ROTATORS, format("Mismatching number of rotators: is %d, should be %d", ROTATORS, seenRotators));
-		assert(seenHoles == HOLES, format("Mismatching number of holes: is %d, should be %d", HOLES, seenHoles));
-
 
 #if (PLAYERS >= 2)
 		activePlayer = 0;
 #endif
-	}
-
-	void compress(CompressedState* s)
-	{
-		memset(s, 0, sizeof CompressedState);
-
-		#if (PLAYERS>1)
-		s->activePlayer = activePlayer;
-		#endif
-
-		#if (PLAYERS==1)
-		s->player0x = players[0].x-1;
-		s->player0y = players[0].y-1;
-		#else
-		#define BOOST_PP_LOCAL_LIMITS (0, PLAYERS-1)
-		#define BOOST_PP_LOCAL_MACRO(n) \
-			s->BOOST_PP_CAT(player, BOOST_PP_CAT(n, x))=players[n].x-1; \
-			s->BOOST_PP_CAT(player, BOOST_PP_CAT(n, y))=players[n].y-1; \
-			s->BOOST_PP_CAT(player, BOOST_PP_CAT(n, exited))=players[n].exited();
-		#include BOOST_PP_LOCAL_ITERATE()
-		#endif
-		
-		#if (BLOCKS > 0)
-		int seenBlocks = 0;
-		struct { BYTE x, y; } blocks[BLOCKS];
-		int blockSizeCount[BLOCKY][BLOCKX];
-		
-		memset(blocks, 0xFF, sizeof blocks);
-		memset(blockSizeCount, 0, sizeof blockSizeCount);
-		#endif
-		#if (ROTATORS > 0)
-		int seenRotators = 0;
-		struct { bool i, j; } rotators[ROTATORS];
-		#endif
-		#if (HOLES>0)
-		unsigned int holePos = 0;
-		bool holes[HOLES];
-		#endif
-
-		for (int y=1;y<Y-1;y++)
-			for (int x=1;x<X-1;x++)
-			{
-				BYTE m = map[y][x];
-
-				#if (BLOCKS > 0)
-				if ((m & (OBJ_BLOCKUP | OBJ_BLOCKLEFT)) == (OBJ_BLOCKUP | OBJ_BLOCKLEFT))
-				{
-					int x2 = x;
-					while ((map[y][x2] & OBJ_BLOCKRIGHT) == 0)
-						x2++;
-					int y2 = y;
-					while ((map[y2][x] & OBJ_BLOCKDOWN) == 0)
-						y2++;
-					x2-=x;
-					y2-=y;
-					assert(x2 < BLOCKX, "Block too wide");
-					assert(y2 < BLOCKY, "Block too tall");
-					int index = blockSizeIndex[y2][x2] + blockSizeCount[y2][x2];
-					blocks[index].x = x-1;
-					blocks[index].y = y-1;
-					blockSizeCount[y2][x2]++;
-					seenBlocks++;
-				}
-				#endif
-
-				#if (ROTATORS > 0)
-				if ((m & OBJ_MASK) == OBJ_ROTATORCENTER)
-				{
-					bool a = (map[y-1][x  ]&OBJ_MASK)==OBJ_ROTATORUP;
-					bool b = (map[y  ][x+1]&OBJ_MASK)==OBJ_ROTATORRIGHT;
-					bool c = (map[y+1][x  ]&OBJ_MASK)==OBJ_ROTATORDOWN;
-					bool d = (map[y  ][x-1]&OBJ_MASK)==OBJ_ROTATORLEFT;
-					// minimized boolean function to uniquely identify the state of a rotator for any rotator type
-					rotators[seenRotators].i = (!c && !d) || (a && d);
-					rotators[seenRotators].j = (c && !d) || (a && !b);
-					seenRotators++;
-				}
-				#endif
-
-				#if (HOLES>0)
-				if (holeMap[y][x])
-					holes[holePos++] = (m & CELL_MASK) == CELL_HOLE;
-				#endif
-			}
-		
-		#if (BLOCKS > 0)
-		assert(seenBlocks <= BLOCKS, "Too many blocks");
-
-		#define BOOST_PP_LOCAL_LIMITS (0, BLOCKS-1)
-		#define BOOST_PP_LOCAL_MACRO(n) \
-			s->BOOST_PP_CAT(block, BOOST_PP_CAT(n, x)) = blocks[n].x ; \
-			s->BOOST_PP_CAT(block, BOOST_PP_CAT(n, y)) = blocks[n].y ;
-		#include BOOST_PP_LOCAL_ITERATE()
-		#endif
-
-		#if (ROTATORS > 0)
-		assert(seenRotators == ROTATORS, "Vanished rotator?");
-		#define BOOST_PP_LOCAL_LIMITS (0, ROTATORS-1)
-		#define BOOST_PP_LOCAL_MACRO(n) \
-			s->BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, i)) = rotators[n].i; \
-			s->BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, j)) = rotators[n].j;
-		#include BOOST_PP_LOCAL_ITERATE()
-		#endif
-
-		#if (HOLES>0)
-		assert(holePos == HOLES);
-		#define BOOST_PP_LOCAL_LIMITS (0, HOLES-1)
-		#define BOOST_PP_LOCAL_MACRO(n) \
-			s->BOOST_PP_CAT(hole, n) = holes[n];
-		#include BOOST_PP_LOCAL_ITERATE()
-		#endif
 	}
 
 	char* toString()
@@ -712,3 +489,8 @@ struct State
 		return levelstr;
 	}
 };
+
+INLINE bool operator==(State& a, State& b)
+{
+	return memcmp(&a, &b, sizeof State)==0;
+}
