@@ -6,7 +6,7 @@
 #define ROTATORS 0
 #define BLOCKXBITS 1
 #define BLOCKYBITS 1
-#define MAX_STEPS 130
+#define MAX_STEPS 150
 const char level[Y][X+1] = {
 "###############",
 "#  2 ##########",

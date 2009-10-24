@@ -14,7 +14,7 @@ using namespace std;
 #define DEBUG
 #endif
 
-#include "Levels/21.h"
+#include "Levels/18.h"
 
 void error(char* message = NULL)
 {
@@ -104,7 +104,7 @@ struct Player
 	BYTE x, y;
 	
 	INLINE void set(int x, int y) { this->x = x; this->y = y; }
-	INLINE bool exited() { return x==255; }
+	INLINE bool exited() const { return x==255; }
 	INLINE void exit() { x = 255; }
 };
 
@@ -296,9 +296,11 @@ struct State
 		assert(0);
 #else
 		Player p = players[activePlayer];
-		assert(p.exited() || map[p.y][p.x]==0 || map[p.y][p.x]==(CELL_WALL | OBJ_EXIT));
 		if (!p.exited())
+		{
+			assert(map[p.y][p.x]==0 || map[p.y][p.x]==(CELL_WALL | OBJ_EXIT));
 			map[p.y][p.x] = CELL_WALL;
+		}
 		do { activePlayer = (activePlayer+1)%PLAYERS; } while (players[activePlayer].exited());
 		p = players[activePlayer];
 		assert(map[p.y][p.x]==CELL_WALL);
