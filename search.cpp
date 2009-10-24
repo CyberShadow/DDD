@@ -1,6 +1,6 @@
 #pragma pack(1)
 #include <time.h>
-#include "kwirk.cpp"
+#include "Kwirk.cpp"
 #include "hsiehhash.cpp"
 
 // ******************************************************************************************************
