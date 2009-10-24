@@ -1,5 +1,7 @@
-#pragma pack(1)
 #include <time.h>
+#include <boost/thread/thread.hpp>
+#include <boost/thread/mutex.hpp>
+#include "config.h"
 #include "Kwirk.cpp"
 #include "hsiehhash.cpp"
 
@@ -11,6 +13,7 @@ State initialState;
 
 typedef uint32_t NODEI;
 
+#pragma pack(1)
 struct Node
 {
 	// compiler hack - minimum bitfield size is 32 bits
@@ -32,21 +35,27 @@ struct Node
 
 Node* nodes[0x10000];
 NODEI nodeCount = 0;
+boost::mutex nodeMutex;
 
 Node* newNode()
 {
-	if ((nodeCount&0xFFFF) == 0)
-		nodes[nodeCount/0x10000] = new Node[0x10000];
-	Node* result = nodes[nodeCount/0x10000] + (nodeCount&0xFFFF);
+	Node* result;
+	/* LOCK */
+	{
+		boost::mutex::scoped_lock lock(nodeMutex);
+		if ((nodeCount&0xFFFF) == 0)
+			nodes[nodeCount/0x10000] = new Node[0x10000];
+		result = nodes[nodeCount/0x10000] + (nodeCount&0xFFFF);
+		nodeCount++;
+		if (nodeCount==0)
+			error("Node count overflow");
+	}
 #ifdef DEBUG
 	result->action = NONE;
 	result->parent = 0;
 	result->frame = 0;
 #endif
 	result->next = 0;
-	nodeCount++;
-	if (nodeCount==0)
-		error("Node count overflow");
 	extern uint32_t treeNodeCount;
 	// if (nodeCount > 40000) printf("\nNodes: %d/%d\n", nodeCount, treeNodeCount);
 	return result;
@@ -123,9 +132,11 @@ struct QueueNode
 };
 
 QueueNode* queue[MAX_FRAMES];
+boost::mutex queueMutex[MAX_FRAMES];
 
 void queueNode(NODEI node, int frame)
 {
+	boost::mutex::scoped_lock lock(queueMutex[frame]);
 	if (frame >= MAX_FRAMES)
 		return;
 	QueueNode* q = new QueueNode;
@@ -134,36 +145,96 @@ void queueNode(NODEI node, int frame)
 	queue[frame] = q;
 }
 
+NODEI dequeueNode(int frame)
+{
+	QueueNode* q;
+	/* LOCK */
+	{
+		boost::mutex::scoped_lock lock(queueMutex[frame]);
+		q = queue[frame];
+		if (q == NULL)
+			return 0;
+		queue[frame] = q->next;
+	}
+	NODEI result = q->node;
+	delete q;
+	return result;
+}
+
 // ******************************************************************************************************
 
 #define HASHSIZE 28
+#define PARTITIONS 1024*1024
 typedef uint32_t HASH;
 NODEI lookup[1<<HASHSIZE];
+boost::mutex lookupMutex[PARTITIONS];
 
 void addNode(State* state, NODEI parent, Action action, unsigned int frame)
 {
 	HASH hash = SuperFastHash((const char*)state, sizeof(State)) & ((1<<HASHSIZE)-1);
-	NODEI old = lookup[hash];
-	NODEI n = old;
-	while (n)
+	NODEI nn;
 	{
-		State other;
-		Node* np = getNode(n);
-		replayState(np, &other);
-		if (*state == other)
-			return;
-		n = np->next;
+		boost::mutex::scoped_lock lock(lookupMutex[hash % PARTITIONS]);
+
+		NODEI old = lookup[hash];
+		NODEI n = old;
+		while (n)
+		{
+			State other;
+			Node* np = getNode(n);
+			replayState(np, &other);
+			if (*state == other)
+				return;
+			n = np->next;
+		}
+		nn = nodeCount;
+		lookup[hash] = nn;
+		Node* np = newNode();
+		np->parent = parent;
+		np->frame = frame;
+		np->action = (unsigned)action;
+		np->next = old;
 	}
-	lookup[hash] = nodeCount;
-	queueNode(nodeCount, frame);
-	Node* np = newNode();
-	np->parent = parent;
-	np->frame = frame;
-	np->action = (unsigned)action;
-	np->next = old;
+	queueNode(nn, frame);
 }
 
 // ******************************************************************************************************
+
+int frame;
+
+void worker()
+{
+	NODEI n;
+	while((n=dequeueNode(frame))!=0)
+	{
+		Node* np = getNode(n);
+		State state;
+		int steps = replayState(np, &state);
+		if (state.playersLeft()==0)
+		{
+			printf("\nExit found, writing path...\n");
+			FILE* f = fopen(BOOST_PP_STRINGIZE(LEVEL) ".txt", "wt");
+			dumpChain(f, np);
+			fclose(f);
+			//File.set(LEVEL ~ ".txt", chainToString(state));
+			printf("Done.\n");
+			exit(0);
+		}
+		else
+			if (steps < MAX_STEPS)
+			{
+				State newState = state;
+				for (Action action = ACTION_FIRST; action <= ACTION_LAST; action++)
+				{
+					int result = newState.perform(action);
+					if (result > 0)
+						addNode(&newState, n, action, frame+result);
+					if (result >= 0) // the state was altered
+						newState = state;
+				}	
+			}
+	}
+}
 
 int run(int argc, const char* argv[])
 {
@@ -192,11 +263,11 @@ int run(int argc, const char* argv[])
 	newNode(); // node 0 is reserved
 	addNode(&initialState, 0, NONE, 0);
 
-	for (int frame=0;frame<maxFrames;frame++)
+	for (frame=0;frame<maxFrames;frame++)
 	{
-		QueueNode* q = queue[frame];
-		if (!q)
+		if (!queue[frame])
 			continue;
+		
 		time_t t;
 		time(&t);
 		char* tstr = ctime(&t);
@@ -205,41 +276,15 @@ int run(int argc, const char* argv[])
 		unsigned int queueCount = 0;
 		NODEI oldNodes = nodeCount;
 		
-		while (q)
+		boost::thread* threads[THREADS];
+		for (int i=0; i<THREADS; i++)
+			threads[i] = new boost::thread(&worker);
+		for (int i=0; i<THREADS; i++)
 		{
-			queueCount++;
-			NODEI n = q->node;
-			Node* np = getNode(n);
-			State state;
-			int steps = replayState(np, &state);
-			if (state.playersLeft()==0)
-			{
-				printf("\nExit found, writing path...\n");
-				FILE* f = fopen(BOOST_PP_STRINGIZE(LEVEL) ".txt", "wt");
-				dumpChain(f, np);
-				fclose(f);
-				//File.set(LEVEL ~ ".txt", chainToString(state));
-				printf("Done.\n");
-				return 0;
-			}
-			else
-				if (steps < MAX_STEPS)
-				{
-					State newState = state;
-					for (Action action = ACTION_FIRST; action <= ACTION_LAST; action++)
-					{
-						int result = newState.perform(action);
-						if (result > 0)
-							addNode(&newState, n, action, frame+result);
-						if (result >= 0) // the state was altered
-							newState = state;
-					}	
-				}
-
-			QueueNode* oldq = q;
-			q = q->next;
-			delete oldq;
+			threads[i]->join();
+			delete threads[i];
 		}
+		
 		printf(", %d nodes processed, %d new nodes\n", queueCount, nodeCount-oldNodes);
 	}
 	printf("Exit not found.\n");
