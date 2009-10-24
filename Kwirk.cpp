@@ -9,8 +9,7 @@
 #include <algorithm>
 using namespace std;
 
-//#ifdef _MSC_VER
-#ifndef __INTEL_COMPILER
+#ifndef NDEBUG
 #define DEBUG
 #endif
 
