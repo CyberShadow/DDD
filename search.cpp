@@ -142,7 +142,7 @@ NODEI lookup[1<<HASHSIZE];
 
 void addNode(State* state, NODEI parent, Action action, unsigned int frame)
 {
-	HASH hash = SuperFastHash((const char*)state, sizeof State) & ((1<<HASHSIZE)-1);
+	HASH hash = SuperFastHash((const char*)state, sizeof(State)) & ((1<<HASHSIZE)-1);
 	NODEI old = lookup[hash];
 	NODEI n = old;
 	while (n)
@@ -168,8 +168,14 @@ void addNode(State* state, NODEI parent, Action action, unsigned int frame)
 int run(int argc, const char* argv[])
 {
 	printf("Level %d: %dx%d, %d players\n", LEVEL, X, Y, PLAYERS);
+#ifdef DEBUG
+	printf("Debug version\n");
+#else
+	printf("Optimized version\n");
+#endif
 
-	assert(sizeof Node == 10, format("sizeof Node is %d", sizeof Node));
+	assert(sizeof(Node) == 10, format("sizeof Node is %d", sizeof(Node)));
+	assert(sizeof(Action) == 1, format("sizeof Action is %d", sizeof(Action)));
 	
 	initialState.load();
 

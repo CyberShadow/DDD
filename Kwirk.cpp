@@ -15,7 +15,7 @@ using namespace std;
 
 #include "Levels/18.h"
 
-void error(char* message = NULL)
+void error(const char* message = NULL)
 {
 	puts(""); // newline
 	if (message)
@@ -25,7 +25,7 @@ void error(char* message = NULL)
 	exit(1);
 }
 
-char* format(char *fmt, ...) 
+char* format(const char *fmt, ...) 
 {    
 	va_list argptr;
 	va_start(argptr,fmt);
@@ -39,8 +39,15 @@ char* format(char *fmt, ...)
 #define assert(expr,...) while(!(expr)){error(__VA_ARGS__);throw "Assertion failure at " __FILE__ ":" BOOST_PP_STRINGIZE(__LINE__);}
 #define INLINE
 #else
+#if defined(_MSC_VER)
 #define assert(expr,...) __assume((expr)!=0)
 #define INLINE __forceinline
+#elif defined(__GNUC__)
+#define assert(expr,...) __builtin_expect((expr)!=0,1)
+#define INLINE inline
+#else
+#error Unknown compiler
+#endif
 #endif
 
 #define MAX_FRAMES (MAX_STEPS*18)
@@ -70,7 +77,10 @@ char* format(char *fmt, ...)
 
 typedef unsigned char BYTE;
 
-enum Action	: BYTE
+enum Action
+#ifndef __GNUC__
+ : BYTE
+#endif
 {
 	UP,
 	RIGHT,
@@ -493,5 +503,5 @@ struct State
 
 INLINE bool operator==(State& a, State& b)
 {
-	return memcmp(&a, &b, sizeof State)==0;
+	return memcmp(&a, &b, sizeof (State))==0;
 }
