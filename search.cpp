@@ -1,7 +1,9 @@
 #include <time.h>
+#include "config.h"
+#ifdef MULTITHREADING
 #include <boost/thread/thread.hpp>
 #include <boost/thread/mutex.hpp>
-#include "config.h"
+#endif
 #include "Kwirk.cpp"
 #include "hsiehhash.cpp"
 
@@ -35,14 +37,18 @@ struct Node
 
 Node* nodes[0x10000];
 NODEI nodeCount = 0;
+#ifdef MULTITHREADING
 boost::mutex nodeMutex;
+#endif
 
 Node* newNode()
 {
 	Node* result;
 	/* LOCK */
 	{
+#ifdef MULTITHREADING
 		boost::mutex::scoped_lock lock(nodeMutex);
+#endif
 		if ((nodeCount&0xFFFF) == 0)
 			nodes[nodeCount/0x10000] = new Node[0x10000];
 		result = nodes[nodeCount/0x10000] + (nodeCount&0xFFFF);
@@ -132,11 +138,15 @@ struct QueueNode
 };
 
 QueueNode* queue[MAX_FRAMES];
+#ifdef MULTITHREADING
 boost::mutex queueMutex[MAX_FRAMES];
+#endif
 
 void queueNode(NODEI node, int frame)
 {
+#ifdef MULTITHREADING
 	boost::mutex::scoped_lock lock(queueMutex[frame]);
+#endif
 	if (frame >= MAX_FRAMES)
 		return;
 	QueueNode* q = new QueueNode;
@@ -150,7 +160,9 @@ NODEI dequeueNode(int frame)
 	QueueNode* q;
 	/* LOCK */
 	{
+#ifdef MULTITHREADING
 		boost::mutex::scoped_lock lock(queueMutex[frame]);
+#endif
 		q = queue[frame];
 		if (q == NULL)
 			return 0;
@@ -167,14 +179,18 @@ NODEI dequeueNode(int frame)
 #define PARTITIONS 1024*1024
 typedef uint32_t HASH;
 NODEI lookup[1<<HASHSIZE];
+#ifdef MULTITHREADING
 boost::mutex lookupMutex[PARTITIONS];
+#endif
 
 void addNode(State* state, NODEI parent, Action action, unsigned int frame)
 {
 	HASH hash = SuperFastHash((const char*)state, sizeof(State)) & ((1<<HASHSIZE)-1);
 	NODEI nn;
 	{
+#ifdef MULTITHREADING
 		boost::mutex::scoped_lock lock(lookupMutex[hash % PARTITIONS]);
+#endif
 
 		NODEI old = lookup[hash];
 		NODEI n = old;
@@ -276,6 +292,7 @@ int run(int argc, const char* argv[])
 		unsigned int queueCount = 0;
 		NODEI oldNodes = nodeCount;
 		
+#ifdef MULTITHREADING
 		boost::thread* threads[THREADS];
 		for (int i=0; i<THREADS; i++)
 			threads[i] = new boost::thread(&worker);
@@ -284,6 +301,9 @@ int run(int argc, const char* argv[])
 			threads[i]->join();
 			delete threads[i];
 		}
+#else
+		worker();
+#endif
 		
 		printf(", %d nodes processed, %d new nodes\n", queueCount, nodeCount-oldNodes);
 	}

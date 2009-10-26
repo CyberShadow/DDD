@@ -13,7 +13,7 @@ using namespace std;
 #define DEBUG
 #endif
 
-#include "Levels/15.h"
+#include "Levels/13.h"
 
 void error(const char* message = NULL)
 {
@@ -99,7 +99,7 @@ enum
 {
 	DELAY_MOVE   =  9, // 1+8
 	DELAY_PUSH   = 10, // 2+8
-	DELAY_FILL   = 18,
+	DELAY_FILL   = 26,
 	DELAY_ROTATE = 12,
 	DELAY_SWITCH = 30,
 };
