@@ -30,7 +30,7 @@ struct Node
 		struct
 		{
 			unsigned action:3;
-			unsigned frame:13;
+			unsigned dummy:15;
 		};
 	};
 };
@@ -41,7 +41,7 @@ NODEI nodeCount = 0;
 boost::mutex nodeMutex;
 #endif
 
-Node* newNode()
+Node* newNode(NODEI* index)
 {
 	Node* result;
 	/* LOCK */
@@ -49,6 +49,7 @@ Node* newNode()
 #ifdef MULTITHREADING
 		boost::mutex::scoped_lock lock(nodeMutex);
 #endif
+		*index = nodeCount;
 		if ((nodeCount&0xFFFF) == 0)
 			nodes[nodeCount/0x10000] = new Node[0x10000];
 		result = nodes[nodeCount/0x10000] + (nodeCount&0xFFFF);
@@ -59,7 +60,6 @@ Node* newNode()
 #ifdef DEBUG
 	result->action = NONE;
 	result->parent = 0;
-	result->frame = 0;
 #endif
 	result->next = 0;
 	extern uint32_t treeNodeCount;
@@ -76,7 +76,7 @@ INLINE Node* getNode(NODEI index)
 
 const char* actionNames[] = {"Up", "Right", "Down", "Left", "Switch", "None"};
 
-int replayState(Node* n, State* state)
+int replayState(Node* n, State* state, int* frame)
 {
 	Action actions[MAX_STEPS+1];
 	unsigned int stepNr = 0;
@@ -91,13 +91,13 @@ int replayState(Node* n, State* state)
 	}
 	unsigned int stepCount = stepNr;
 	*state = initialState;
+	*frame = 0;
 	while (stepNr)
 	{
 		int res = state->perform(actions[--stepNr]);
 		assert(res>0, "Replay failed");
-		// if (nodeCount > 40000) printf("%c", actionNames[actions[stepNr]][0]);
+		*frame += res;
 	}
-	// if (nodeCount > 40000) printf("\n");
 	return stepCount;
 }
 
@@ -138,6 +138,7 @@ struct QueueNode
 };
 
 QueueNode* queue[MAX_FRAMES];
+int queueCount[MAX_FRAMES];
 #ifdef MULTITHREADING
 boost::mutex queueMutex[MAX_FRAMES];
 #endif
@@ -153,6 +154,7 @@ void queueNode(NODEI node, int frame)
 	q->node = node;
 	q->next = queue[frame];
 	queue[frame] = q;
+	queueCount[frame]++;
 }
 
 NODEI dequeueNode(int frame)
@@ -167,6 +169,7 @@ NODEI dequeueNode(int frame)
 		if (q == NULL)
 			return 0;
 		queue[frame] = q->next;
+		queueCount[frame]--;
 	}
 	NODEI result = q->node;
 	delete q;
@@ -176,10 +179,10 @@ NODEI dequeueNode(int frame)
 // ******************************************************************************************************
 
 #define HASHSIZE 28
-#define PARTITIONS 1024*1024
 typedef uint32_t HASH;
 NODEI lookup[1<<HASHSIZE];
 #ifdef MULTITHREADING
+#define PARTITIONS 1024*1024
 boost::mutex lookupMutex[PARTITIONS];
 #endif
 
@@ -191,23 +194,30 @@ void addNode(State* state, NODEI parent, Action action, unsigned int frame)
 #ifdef MULTITHREADING
 		boost::mutex::scoped_lock lock(lookupMutex[hash % PARTITIONS]);
 #endif
-
 		NODEI old = lookup[hash];
 		NODEI n = old;
 		while (n)
 		{
 			State other;
 			Node* np = getNode(n);
-			replayState(np, &other);
+			int otherFrame;
+			replayState(np, &other, &otherFrame);
 			if (*state == other)
+			{
+				if (otherFrame > frame) // better path found? reparent and requeue
+				{
+					// this node will always be still queued, so we don't need to worry about its children
+					np->parent = parent;
+					np->action = action;
+					queueNode(n, frame);
+				}
 				return;
+			}
 			n = np->next;
 		}
-		nn = nodeCount;
+		Node* np = newNode(&nn);
 		lookup[hash] = nn;
-		Node* np = newNode();
 		np->parent = parent;
-		np->frame = frame;
 		np->action = (unsigned)action;
 		np->next = old;
 	}
@@ -225,7 +235,10 @@ void worker()
 	{
 		Node* np = getNode(n);
 		State state;
-		int steps = replayState(np, &state);
+		int stateFrame;
+		int steps = replayState(np, &state, &stateFrame);
+		if (stateFrame != frame)
+			continue; // node was reparented and requeued
 		if (state.playersLeft()==0)
 		{
 			printf("\nExit found, writing path...\n");
@@ -244,7 +257,7 @@ void worker()
 				{
 					int result = newState.perform(action);
 					if (result > 0)
-						addNode(&newState, n, action, frame+result);
+						addNode(&newState, n, action, stateFrame+result);
 					if (result >= 0) // the state was altered
 						newState = state;
 				}	
@@ -259,6 +272,9 @@ int run(int argc, const char* argv[])
 	printf("Debug version\n");
 #else
 	printf("Optimized version\n");
+#endif
+#ifdef MULTITHREADING
+	printf("Using %d threads\n", THREADS);
 #endif
 
 	assert(sizeof(Node) == 10, format("sizeof Node is %d", sizeof(Node)));
@@ -276,7 +292,8 @@ int run(int argc, const char* argv[])
 	memset(lookup, 0, sizeof lookup);
 	memset(queue, 0, sizeof queue);
 
-	newNode(); // node 0 is reserved
+	NODEI dummy;
+	newNode(&dummy); // node 0 is reserved
 	addNode(&initialState, 0, NONE, 0);
 
 	for (frame=0;frame<maxFrames;frame++)
@@ -288,8 +305,7 @@ int run(int argc, const char* argv[])
 		time(&t);
 		char* tstr = ctime(&t);
 		tstr[strlen(tstr)-1] = 0;
-		printf("[%s] Frame %d/%d: %d nodes", tstr, frame, maxFrames, nodeCount); fflush(stdout);
-		unsigned int queueCount = 0;
+		printf("[%s] Frame %d/%d: %d nodes, %d total", tstr, frame, maxFrames, queueCount[frame], nodeCount); fflush(stdout);
 		NODEI oldNodes = nodeCount;
 		
 #ifdef MULTITHREADING
@@ -304,8 +320,9 @@ int run(int argc, const char* argv[])
 #else
 		worker();
 #endif
-		
-		printf(", %d nodes processed, %d new nodes\n", queueCount, nodeCount-oldNodes);
+		assert(queueCount[frame]==0);
+
+		printf(", %d new nodes\n", nodeCount-oldNodes);
 	}
 	printf("Exit not found.\n");
 	return 2;
