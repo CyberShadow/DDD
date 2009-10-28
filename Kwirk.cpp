@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
-#include <boost/preprocessor/iteration/local.hpp>
 #include <boost/preprocessor/cat.hpp>
 #include <boost/preprocessor/stringize.hpp>
 #include <algorithm>
@@ -31,6 +30,7 @@ char* format(const char *fmt, ...)
 	return buf;
 }
 
+#undef assert
 #ifdef DEBUG
 #define assert(expr,...) while(!(expr)){error(__VA_ARGS__);throw "Assertion failure at " __FILE__ ":" BOOST_PP_STRINGIZE(__LINE__);}
 #define INLINE

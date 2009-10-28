@@ -474,7 +474,9 @@
    typedef __int64 int64_t;
    typedef unsigned __int64 uint64_t;
 #  define UINT64_C(v) v ## UI64
-#  define  INT64_C(v) v ## I64
+#  if (!defined(INT64_C))
+#   define  INT64_C(v) v ## I64
+#  endif
 #  ifndef PRINTF_INT64_MODIFIER
 #   define PRINTF_INT64_MODIFIER "I64"
 #  endif
