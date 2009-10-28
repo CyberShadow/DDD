@@ -197,6 +197,11 @@ boost::mutex lookupMutex[PARTITIONS];
 
 void addNode(State* state, NODEI parent, Step step, unsigned int frame)
 {
+	#ifdef HAVE_VALIDATOR
+	if (!state->validate())
+		return;
+	#endif
+
 	HASH hash = SuperFastHash((const char*)state, sizeof(State)) & ((1<<HASHSIZE)-1);
 	NODEI nn;
 	{

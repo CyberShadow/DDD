@@ -8,6 +8,7 @@
 #define BLOCKY 1
 #define HOLES 7
 #define MAX_STEPS 360
+#define HAVE_VALIDATOR
 const char level[Y][X+1] = {
 "####################",
 "#++++++++++++++++++#",
