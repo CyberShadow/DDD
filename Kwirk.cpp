@@ -9,11 +9,7 @@
 #include <algorithm>
 using namespace std;
 
-#ifndef NDEBUG
-#define DEBUG
-#endif
-
-#include "Levels/13.h"
+#include BOOST_PP_STRINGIZE(BOOST_PP_CAT(BOOST_PP_CAT(Levels/, LEVEL), .h))
 
 void error(const char* message = NULL)
 {
