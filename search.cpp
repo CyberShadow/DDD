@@ -16,6 +16,14 @@ State initialState;
 typedef uint32_t NODEI;
 
 #pragma pack(1)
+struct Step
+{
+	unsigned action:3;
+	unsigned x:5;
+	unsigned y:4;
+	unsigned extraSteps:4; // steps above dx+dy
+};
+
 struct Node
 {
 	// compiler hack - minimum bitfield size is 32 bits
@@ -27,11 +35,7 @@ struct Node
 			NODEI parent;
 			NODEI next;
 		};
-		struct
-		{
-			unsigned action:3;
-			unsigned dummy:15;
-		};
+		Step step; // CAREFUL! Setting "step" directly will partially overwrite "parent" because "step" is 4 bytes in size.
 	};
 };
 
@@ -57,13 +61,8 @@ Node* newNode(NODEI* index)
 		if (nodeCount==0)
 			error("Node count overflow");
 	}
-#ifdef DEBUG
-	result->action = NONE;
-	result->parent = 0;
-#endif
 	result->next = 0;
 	extern uint32_t treeNodeCount;
-	// if (nodeCount > 40000) printf("\nNodes: %d/%d\n", nodeCount, treeNodeCount);
 	return result;
 }
 
@@ -76,56 +75,66 @@ INLINE Node* getNode(NODEI index)
 
 const char* actionNames[] = {"Up", "Right", "Down", "Left", "Switch", "None"};
 
+int replayStep(State* state, int* frame, Step step)
+{
+	Player* p = &state->players[state->activePlayer];
+	int nx = step.x+1;
+	int ny = step.y+1;
+	int steps = abs((int)p->x - nx) + abs((int)p->y - ny) + step.extraSteps;
+	p->x = nx;
+	p->y = ny;
+	int res = state->perform((Action)step.action);
+	assert(res>0, "Replay failed");
+    *frame += steps * DELAY_MOVE + res;
+	return steps; // not counting actual action
+}
+
 int replayState(Node* n, State* state, int* frame)
 {
-	Action actions[MAX_STEPS+1];
+	Step steps[MAX_STEPS+1];
 	unsigned int stepNr = 0;
 	Node* cur = n;
 
-	while (cur->action != NONE)
+	while ((Action)cur->step.action != NONE)
 	{
-		actions[stepNr++] = (Action)cur->action;
+		steps[stepNr++] = cur->step;
 		cur = getNode(cur->parent);
 		if (stepNr > MAX_STEPS)
 			return stepNr;
 	}
-	unsigned int stepCount = stepNr;
+	unsigned int totalSteps = 0;
 	*state = initialState;
 	*frame = 0;
 	while (stepNr)
-	{
-		int res = state->perform(actions[--stepNr]);
-		assert(res>0, "Replay failed");
-		*frame += res;
-	}
-	return stepCount;
+		totalSteps += (steps[stepNr].action<SWITCH ? 1 : 0) + replayStep(state, frame, steps[--stepNr]);
+	return totalSteps;
 }
 
 void dumpChain(FILE* f, Node* n)
 {
-	Action actions[MAX_STEPS+1];
+	Step steps[MAX_STEPS+1];
 	unsigned int stepNr = 0;
 	Node* cur = n;
 
-	while ((Action)cur->action != NONE)
+	while ((Action)cur->step.action != NONE)
 	{
-		actions[stepNr++] = (Action)cur->action;
+		steps[stepNr++] = cur->step;
 		cur = getNode(cur->parent);
 		//assert(stepNr <= MAX_STEPS, "Too many nodes in dumpChain");
 	}
-	actions[stepNr] = NONE;
+	steps[stepNr].action = NONE;
+	steps[stepNr].x = initialState.players[0].x;
+	steps[stepNr].y = initialState.players[0].y;
 	unsigned int totalSteps = 0;
 	State state = initialState;
+	int frame = 0;
 	while (stepNr)
 	{
-		fprintf(f, "%s\n%s", actionNames[actions[stepNr]], state.toString());
-		int res = state.perform(actions[--stepNr]);
-		assert(res>0, "Replay failed");
-		if (actions[stepNr] < SWITCH)
-			totalSteps++;
+		fprintf(f, "@%d,%d: %s\n%s", steps[stepNr].x, steps[stepNr].y, actionNames[steps[stepNr].action], state.toString());
+		totalSteps += (steps[stepNr].action<SWITCH ? 1 : 0) + replayStep(&state, &frame, steps[--stepNr]);
 	}
 	// last one
-	fprintf(f, "%s\n%s", actionNames[actions[0]], state.toString());
+	fprintf(f, "@%d,%d: %s\n%s", steps[0].x, steps[0].y, actionNames[steps[0].action], state.toString());
 	fprintf(f, "Total steps: %d", totalSteps);
 }
 
@@ -186,7 +195,7 @@ NODEI lookup[1<<HASHSIZE];
 boost::mutex lookupMutex[PARTITIONS];
 #endif
 
-void addNode(State* state, NODEI parent, Action action, unsigned int frame)
+void addNode(State* state, NODEI parent, Step step, unsigned int frame)
 {
 	HASH hash = SuperFastHash((const char*)state, sizeof(State)) & ((1<<HASHSIZE)-1);
 	NODEI nn;
@@ -207,8 +216,8 @@ void addNode(State* state, NODEI parent, Action action, unsigned int frame)
 				if (otherFrame > frame) // better path found? reparent and requeue
 				{
 					// this node will always be still queued, so we don't need to worry about its children
+					np->step = step;
 					np->parent = parent;
-					np->action = action;
 					queueNode(n, frame);
 				}
 				return;
@@ -217,8 +226,8 @@ void addNode(State* state, NODEI parent, Action action, unsigned int frame)
 		}
 		Node* np = newNode(&nn);
 		lookup[hash] = nn;
+		np->step = step;
 		np->parent = parent;
-		np->action = (unsigned)action;
 		np->next = old;
 	}
 	queueNode(nn, frame);
@@ -228,41 +237,99 @@ void addNode(State* state, NODEI parent, Action action, unsigned int frame)
 
 int frame;
 
+void processNode(NODEI n)
+{
+	Node* np = getNode(n);
+	State state;
+	int stateFrame;
+	int steps = replayState(np, &state, &stateFrame);
+	if (stateFrame != frame)
+		return; // node was reparented and requeued
+	if (state.playersLeft()==0)
+	{
+		printf("\nExit found, writing path...\n");
+		FILE* f = fopen(BOOST_PP_STRINGIZE(LEVEL) ".txt", "wt");
+		dumpChain(f, np);
+		fclose(f);
+		//File.set(LEVEL ~ ".txt", chainToString(state));
+		printf("Done.\n");
+		exit(0);
+	}
+	else
+	{
+		struct Coord { BYTE x, y; };
+		const int QUEUELENGTH = X+Y;
+		Coord queue[QUEUELENGTH];
+		BYTE distance[Y-2][X-2];
+		uint32_t queueStart=0, queueEnd=1;
+		memset(distance, 0xFF, sizeof(distance));
+		
+		BYTE x0 = state.players[state.activePlayer].x;
+		BYTE y0 = state.players[state.activePlayer].y;
+		queue[0].x = x0;
+		queue[0].y = y0;
+		distance[y0-1][x0-1] = 0;
+
+		State newState = state;
+		Player* np = &newState.players[newState.activePlayer];
+		while(queueStart != queueEnd)
+		{
+			Coord c = queue[queueStart];
+			queueStart = (queueStart+1) % QUEUELENGTH;
+			BYTE dist = distance[c.y-1][c.x-1];
+			Step step;
+			step.x = c.x-1;
+			step.y = c.y-1;
+			step.extraSteps = dist - (abs((int)c.x - (int)x0) + abs((int)c.y - (int)y0));
+	
+			#if (PLAYERS>1)
+				np->x = c.x;
+				np->y = c.y;
+				int res = newState.perform(SWITCH);
+				assert(res == DELAY_SWITCH);
+				step.action = (unsigned)SWITCH;
+				addNode(&newState, n, step, frame + dist * DELAY_MOVE + DELAY_SWITCH);
+				newState = state;
+			#endif
+
+			for (Action action = ACTION_FIRST; action < SWITCH; action++)
+			{
+				BYTE nx = c.x + DX[action];
+				BYTE ny = c.y + DY[action];
+				BYTE m = state.map[ny][nx];
+				if (m & OBJ_MASK)
+				{
+					np->x = c.x;
+					np->y = c.y;
+					int res = newState.perform(action);
+					if (res > 0)
+					{
+						step.action = (unsigned)action;
+						addNode(&newState, n, step, frame + dist * DELAY_MOVE + res);
+					}
+					if (res >= 0)
+						newState = state;
+				}
+				else
+				if ((m & CELL_MASK) == 0)
+					if (distance[ny-1][nx-1] == 0xFF)
+					{
+						distance[ny-1][nx-1] = dist+1;
+						queue[queueEnd].x = nx;
+						queue[queueEnd].y = ny;
+						queueEnd = (queueEnd+1) % QUEUELENGTH;
+						assert(queueEnd != queueStart, "Queue overflow");
+					}
+			}
+		}
+	}
+}
+
 void worker()
 {
 	NODEI n;
 	while((n=dequeueNode(frame))!=0)
-	{
-		Node* np = getNode(n);
-		State state;
-		int stateFrame;
-		int steps = replayState(np, &state, &stateFrame);
-		if (stateFrame != frame)
-			continue; // node was reparented and requeued
-		if (state.playersLeft()==0)
-		{
-			printf("\nExit found, writing path...\n");
-			FILE* f = fopen(BOOST_PP_STRINGIZE(LEVEL) ".txt", "wt");
-			dumpChain(f, np);
-			fclose(f);
-			//File.set(LEVEL ~ ".txt", chainToString(state));
-			printf("Done.\n");
-			exit(0);
-		}
-		else
-			if (steps < MAX_STEPS)
-			{
-				State newState = state;
-				for (Action action = ACTION_FIRST; action <= ACTION_LAST; action++)
-				{
-					int result = newState.perform(action);
-					if (result > 0)
-						addNode(&newState, n, action, stateFrame+result);
-					if (result >= 0) // the state was altered
-						newState = state;
-				}	
-			}
-	}
+		processNode(n);
 }
 
 int run(int argc, const char* argv[])
@@ -294,7 +361,8 @@ int run(int argc, const char* argv[])
 
 	NODEI dummy;
 	newNode(&dummy); // node 0 is reserved
-	addNode(&initialState, 0, NONE, 0);
+	Step nullStep = { (unsigned)NONE };
+	addNode(&initialState, 0, nullStep, 0);
 
 	for (frame=0;frame<maxFrames;frame++)
 	{
@@ -305,7 +373,7 @@ int run(int argc, const char* argv[])
 		time(&t);
 		char* tstr = ctime(&t);
 		tstr[strlen(tstr)-1] = 0;
-		printf("[%s] Frame %d/%d: %d nodes, %d total", tstr, frame, maxFrames, queueCount[frame], nodeCount); fflush(stdout);
+		printf("[%s] Frame %d/%d: %d nodes, %d total", tstr, frame, maxFrames, queueCount[frame], nodeCount-1); fflush(stdout);
 		NODEI oldNodes = nodeCount;
 		
 #ifdef MULTITHREADING
