@@ -8,7 +8,7 @@
 #include <algorithm>
 using namespace std;
 
-#include BOOST_PP_STRINGIZE(BOOST_PP_CAT(BOOST_PP_CAT(Levels/, LEVEL), .h))
+#include BOOST_PP_STRINGIZE(Levels/LEVEL.h)
 
 void error(const char* message = NULL)
 {
@@ -329,7 +329,7 @@ struct State
 	}
 
 	#ifdef HAVE_VALIDATOR
-	#include BOOST_PP_STRINGIZE(BOOST_PP_CAT(BOOST_PP_CAT(Levels/, LEVEL), -validator.h))
+	#include BOOST_PP_STRINGIZE(Levels/LEVEL-validator.h)
 	#endif
 
 	void load()
