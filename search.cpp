@@ -123,18 +123,18 @@ void dumpChain(FILE* f, Node* n)
 		//assert(stepNr <= MAX_STEPS, "Too many nodes in dumpChain");
 	}
 	steps[stepNr].action = NONE;
-	steps[stepNr].x = initialState.players[0].x;
-	steps[stepNr].y = initialState.players[0].y;
+	steps[stepNr].x = initialState.players[0].x-1;
+	steps[stepNr].y = initialState.players[0].y-1;
 	unsigned int totalSteps = 0;
 	State state = initialState;
 	int frame = 0;
 	while (stepNr)
 	{
-		fprintf(f, "@%d,%d: %s\n%s", steps[stepNr].x, steps[stepNr].y, actionNames[steps[stepNr].action], state.toString());
+		fprintf(f, "@%d,%d: %s\n%s", steps[stepNr].x+1, steps[stepNr].y+1, actionNames[steps[stepNr].action], state.toString());
 		totalSteps += (steps[stepNr].action<SWITCH ? 1 : 0) + replayStep(&state, &frame, steps[--stepNr]);
 	}
 	// last one
-	fprintf(f, "@%d,%d: %s\n%s", steps[0].x, steps[0].y, actionNames[steps[0].action], state.toString());
+	fprintf(f, "@%d,%d: %s\n%s", steps[0].x+1, steps[0].y+1, actionNames[steps[0].action], state.toString());
 	fprintf(f, "Total steps: %d", totalSteps);
 }
 
