@@ -378,7 +378,7 @@ int run(int argc, const char* argv[])
 		time(&t);
 		char* tstr = ctime(&t);
 		tstr[strlen(tstr)-1] = 0;
-		printf("[%s] Frame %d/%d: %d nodes, %d total", tstr, frame, maxFrames, queueCount[frame], nodeCount-1); fflush(stdout);
+		printf("[%s] Frame %d/%d: %d/%d nodes", tstr, frame, maxFrames, queueCount[frame], nodeCount-1); fflush(stdout);
 		NODEI oldNodes = nodeCount;
 		
 #ifdef MULTITHREADING
@@ -395,7 +395,7 @@ int run(int argc, const char* argv[])
 #endif
 		assert(queueCount[frame]==0);
 
-		printf(", %d new nodes\n", nodeCount-oldNodes);
+		printf(", %d new\n", nodeCount-oldNodes);
 	}
 	printf("Exit not found.\n");
 	return 2;
