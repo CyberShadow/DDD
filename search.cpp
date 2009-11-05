@@ -39,8 +39,13 @@ struct Node
 	};
 };
 
-Node* nodes[0x10000];
+// ******************************************************************************************************
+
 NODEI nodeCount = 0;
+
+#ifndef SWAP
+
+Node* nodes[0x10000];
 #ifdef MULTITHREADING
 boost::mutex nodeMutex;
 #endif
@@ -58,11 +63,10 @@ Node* newNode(NODEI* index)
 			nodes[nodeCount/0x10000] = new Node[0x10000];
 		result = nodes[nodeCount/0x10000] + (nodeCount&0xFFFF);
 		nodeCount++;
-		if (nodeCount==0)
-			error("Node count overflow");
+		if (nodeCount == MAX_NODES)
+			error("Too many nodes");
 	}
 	result->next = 0;
-	extern uint32_t treeNodeCount;
 	return result;
 }
 
@@ -70,6 +74,306 @@ INLINE Node* getNode(NODEI index)
 {
 	return nodes[index/0x10000] + (index&0xFFFF);
 }
+
+// ******************************************************************************************************
+
+#else // SWAP
+
+typedef uint32_t CACHEI;
+
+struct CacheNode
+{
+	Node data;
+	bool dirty;
+	char _padding;
+	NODEI index; // tree key, 0 - cache node free
+	CACHEI left, right;
+}
+
+CacheNode cache[CACHE_SIZE];
+
+CACHEI cacheAlloc();
+
+CACHEI cacheSplay(NODEI i, CACHEI t)
+{
+	CACHEI l, r, y;
+	if (t == 0) return t;
+	// cache[0] works as a temporary node
+	cache[0].left = cache[0].right = 0;
+	l = r = 0;
+
+	for (;;)
+	{
+		CacheNode* tp = &cache[t];
+		if (i < tp->index)
+		{
+			if (tp->left == 0) break;
+			if (i < cache[tp->left].index)
+			{
+				y = tp->left;                           /* rotate right */
+				CacheNode* yp = &cache[y];
+				tp->left = yp->right;
+				yp->right = t;
+				t = y;
+				if (yp->left == 0) break;
+			}
+			cache[r].left = t;                               /* link right */
+			r = t;
+			t = t->left;
+		}
+		else
+		if (i > tp->index)
+		{
+			if (tp->right == 0) break;
+			if (i > cache[tp->right].index)
+			{
+				y = tp->right;                          /* rotate left */
+				CacheNode* yp = &cache[y];
+				tp->right = yp->left;
+				yp->left = t;
+				t = y;
+				if (yp->right == 0) break;
+			}
+			cache[l].right = t;                              /* link left */
+			l = t;
+			t = t->right;
+		}
+		else
+			break;
+	}
+	CacheNode* tp = &cache[t];
+	cache[l].right = tp->left ;                                /* assemble */
+	cache[r].left  = tp->right;
+	tp->left  = cache[0].right;
+	tp->right = cache[0].left;
+	return t;
+}
+
+CACHEI cacheInsert(NODEI i, CACHEI t)
+{
+	CACHEI n = cacheAlloc();
+	CacheNode* np = &cache[n];
+	np->index = i;
+	//if (t == 0)
+	//	np->left = np->right = 0;
+	t = cacheSplay(i, t);
+	CacheNode* tp = &cache[t];
+	if (i < tp->index)
+	{
+		np->left = tp->left;
+		np->right = t;
+		tp->left = 0;
+		return n;
+	}
+	else 
+	if (i > tp->index)
+	{
+		np->right = tp->right;
+		np->left = t;
+		tp->right = 0;
+		return n;
+	}
+	else
+	{ /* We get here if it's already in the tree */
+		assert(0, "Inserted node already in tree");
+		return 0;
+	}
+}
+
+// ******************************************************************************************************
+
+CACHEI cacheFreePtr=1, cacheCount=1, cacheRoot=0;
+uint32_t cacheArchived[(MAX_NODES+31)/32];
+#ifdef MULTITHREADING
+boost::shared_mutex archiveMutex;
+#endif
+
+#define MAX_CACHE_TREE_DEPTH 64
+#define CACHE_TRIM 4
+
+CACHEI cacheDepthCounts[MAX_CACHE_TREE_DEPTH];
+int cacheTrimLevel;
+
+void cacheCount(CACHEI n, int level)
+{
+	cacheDepthCounts[level >= MAX_CACHE_TREE_DEPTH ? MAX_CACHE_TREE_DEPTH-1 : level]++;
+	CacheNode* np = &cache[n];
+	CACHEI l = np->left;
+	if (l) cacheCount(l, level+1);
+	CACHEI r = np->right;
+	if (r) cacheCount(r, level+1);
+}
+
+void cacheDoTrim(CACHEI n, int level)
+{
+	CacheNode* np = &cache[n];
+	CACHEI l = np->left;
+	if (l) cacheDoTrim(l, level+1);
+	CACHEI r = np->right;
+	if (r) cacheDoTrim(r, level+1);
+	if (level > cacheTrimLevel)
+	{
+		// TODO: save node
+		// TODO: mark node as archived
+		np->index = 0;
+		cacheCount--;
+	}
+	else
+	if (level == cacheTrimLevel)
+		np->left = np->right = 0;
+}
+
+CACHEI cacheTrim()
+{
+	for (int i=0; i<MAX_CACHE_TREE_DEPTH; i++)
+		cacheDepthCounts[i] = 0;
+	cacheCount(cacheRoot, 0);
+#ifdef DEBUG
+	CACHEI total = 1;
+	for (int i=0; i<MAX_CACHE_TREE_DEPTH; i++)
+		total += cacheDepthCounts[i];
+	assert(total == cacheCount);
+#endif
+	CACHEI nodes = 0;
+	const threshold = CACHE_SIZE / CACHE_TRIM;
+	for (int i=MAX_CACHE_TREE_DEPTH-1; i>=0; i--)
+	{
+		nodes += cacheDepthCounts[i];
+		if (nodes > threshold)
+			break;
+	}
+	assert(i>0);
+	cacheTrimLevel = i-1;
+	cacheDoTrim(cacheRoot, 0);
+}
+
+CACHEI cacheAlloc()
+{
+	if (cacheCount == CACHE_SIZE)
+		error("Cache overflow"); // How could we have let this HAPPEN?!?
+	while (cache[cacheFreePtr].index)
+		cacheFreePtr = cacheFreePtr==(CACHE_SIZE-1) ? 1 : cacheFreePtr+1;
+	cacheCount++;
+}
+
+// ******************************************************************************************************
+
+// this is technically not required, but provides an optimization:
+#ifdef MULTITHREADING
+boost::mutex cacheMutex;
+#endif
+
+Node* newNode(NODEI* index)
+{
+	CACHEI c;
+	/* LOCK */
+	{
+#ifdef MULTITHREADING
+		boost::mutex::scoped_lock lock(cacheMutex);
+#endif
+		*index = nodeCount;
+		c = cacheRoot = cacheInsert(nodeCount, cacheRoot);
+		nodeCount++;
+		if (nodeCount == MAX_NODES)
+			error("Too many nodes");
+	}
+	Node* result = &cache[c].data;
+	result->next = 0;
+	return result;
+}
+
+Node* getNode(NODEI index)
+{
+	CACHEI archiveIndex = index/32;
+	uint32_t archiveMask = 1<<(index%32);
+
+	bool archived;
+    /* LOCK */
+    {
+#ifdef MULTITHREADING
+		boost::shared_lock lock(archiveMutex);
+#endif
+		archived = cacheArchived[archiveIndex] & archiveMask;
+    }
+
+    // possible sync gap for cacheArchived here
+
+    CACHEI c;
+    if (archived)
+    {
+
+#ifdef MULTITHREADING
+		boost::upgrade_lock alock(archiveMutex);
+		boost::upgrade_to_unique_lock ulock(alock);
+#endif
+		uint32_t a = cacheArchived[archiveIndex];
+		if ((a & archiveMask)==0) // it was unarchived by another thread
+		{
+			archived = false;
+		}
+		else
+		{
+			a &= ~archiveMask;
+			cacheArchived[archiveIndex] = a;
+		
+			/* LOCK */
+			{
+#ifdef MULTITHREADING
+			boost::mutex::scoped_lock lock(cacheMutex);
+#endif
+			c = cacheRoot = cacheInsert(index, cacheRoot);
+			// TODO: unarchive node
+		}
+    }
+    
+    if (!archived)
+    {
+#ifdef MULTITHREADING
+		boost::mutex::scoped_lock lock(cacheMutex);
+#endif
+		c = cacheRoot = cacheSplay(index, cacheRoot);
+    }
+
+
+	CACHEI c;
+	/* LOCK */
+	{
+#ifdef MULTITHREADING
+		boost::mutex::scoped_lock lock(cacheMutex);
+#endif
+		if (
+		*index = nodeCount;
+		c = cacheRoot = cacheInsert(nodeCount, cacheRoot);
+		nodeCount++;
+		if (nodeCount == MAX_NODES)
+			error("Too many nodes");
+	}
+	Node* result = &cache[c].data;
+	result->next = 0;
+	return result;
+}
+
+void postNode()
+{
+	if (cacheCount > CACHE_TRIM_THRESHOLD)
+	{
+		barrier;
+		mutex
+		{
+			if (cacheCount > CACHE_TRIM_THRESHOLD)
+			{
+				cacheTrim();
+				assert(cacheCount < CACHE_TRIM_THRESHOLD);
+			}
+			else
+			{
+				// another thread took care of it
+			}
+		}
+	}
+}
+
+#endif // SWAP
 
 // ******************************************************************************************************
 
@@ -351,6 +655,9 @@ int run(int argc, const char* argv[])
 
 	assert(sizeof(Node) == 10, format("sizeof Node is %d", sizeof(Node)));
 	assert(sizeof(Action) == 1, format("sizeof Action is %d", sizeof(Action)));
+#ifdef SWAP
+	assert(sizeof(CacheNode) == 24, format("sizeof CacheNode is %d", sizeof(Action)));
+#endif
 	
 	initialState.load();
 
