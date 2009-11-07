@@ -14,6 +14,7 @@
 #include <sstream>
 #include <boost/iostreams/device/mapped_file.hpp>
 #endif
+#include <fstream>
 #include "Kwirk.cpp"
 #include "hsiehhash.cpp"
 
@@ -101,15 +102,17 @@ int replayState(Node* n, State* state, FRAME* frame)
 	return totalSteps;
 }
 
-void dumpChain(FILE* f, const Node* n)
+void dumpChain(FILE* f, NODEI n)
 {
 	Step steps[MAX_STEPS+1];
+	NODEI nodes[MAX_STEPS+1];
 	unsigned int stepNr = 0;
-	const Node* cur = n;
+	const Node* cur = getNode(n);
 
 	while ((Action)cur->step.action != NONE)
 	{
 		steps[stepNr++] = cur->step;
+		nodes[stepNr  ] = cur->parent;
 		cur = getNodeFast(cur->parent);
 		//assert(stepNr <= MAX_STEPS, "Too many nodes in dumpChain");
 	}
@@ -121,12 +124,21 @@ void dumpChain(FILE* f, const Node* n)
 	FRAME frame = 0;
 	while (stepNr)
 	{
-		fprintf(f, "@%d,%d: %s\n%s", steps[stepNr].x+1, steps[stepNr].y+1, actionNames[steps[stepNr].action], state.toString());
+		fprintf(f, "[%d] @%d,%d: %s\n%s", nodes[stepNr], steps[stepNr].x+1, steps[stepNr].y+1, actionNames[steps[stepNr].action], state.toString());
 		totalSteps += (steps[stepNr].action<SWITCH ? 1 : 0) + replayStep(&state, &frame, steps[--stepNr]);
 	}
 	// last one
-	fprintf(f, "@%d,%d: %s\n%s", steps[0].x+1, steps[0].y+1, actionNames[steps[0].action], state.toString());
+	fprintf(f, "[%d], @%d,%d: %s\n%s", n, steps[0].x+1, steps[0].y+1, actionNames[steps[0].action], state.toString());
 	fprintf(f, "Total steps: %d", totalSteps);
+}
+
+FRAME getFrames(NODEI n)
+{
+	Node* np = getNode(n);
+	State state;
+	FRAME stateFrame;
+	replayState(np, &state, &stateFrame);
+	return stateFrame;
 }
 
 void dumpNodes()
@@ -134,7 +146,7 @@ void dumpNodes()
 	for (NODEI n=1; n<nodeCount; n++)
 	{
 		const Node* np = getNodeFast(n);
-		printf("node[%d]: %d -> %s\n", n, np->parent, actionNames[np->step.action]);
+		printf("node[%d] <- %d: @%d,%d: %s (%d)\n", n, np->parent, np->step.x+1, np->step.y+1, actionNames[np->step.action], getFrames(n));
 	}
 }
 
@@ -199,11 +211,16 @@ void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 			if (*state == other)
 			{
 				if (otherFrame > frame) // better path found? reparent and requeue
+				{
+					printf("node[%2d] << %2d: @%2d,%2d: %6s (%3d)\n", n, parent, step.x+1, step.y+1, actionNames[step.action], frame);
 					reparentNode(n, parent, np, frame, state, step);
+				}
+				else
+					printf("node[%2d] .. %2d: @%2d,%2d: %6s (%3d)\n", n, parent, step.x+1, step.y+1, actionNames[step.action], frame);
 				// pop node to front of hash list
 				if (prev)
 				{
-					error("Hash collision");
+					assert(0, "Hash collision");
 					prev->next = np->next;
 					markDirty(prev);
 					np->next = old;
@@ -220,6 +237,7 @@ void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 		np->step = step;
 		np->parent = parent;
 		np->next = old;
+		printf("node[%2d] <- %2d: @%2d,%2d: %6s (%3d)\n", nn, parent, step.x+1, step.y+1, actionNames[step.action], frame);
 	}
 	queueNode(nn, frame, state);
 }
@@ -329,7 +347,9 @@ int run(int argc, const char* argv[])
 	Step nullStep = { (unsigned)NONE };
 	addNode(&initialState, 0, nullStep, 0);
 
-	return search();
+	int result = search();
+	//dumpNodes();
+	return result;
 }
 
 int main(int argc, const char* argv[]) { return run(argc, argv); }

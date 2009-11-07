@@ -62,15 +62,6 @@ NODEI dequeueNode()
 	return result;
 }
 
-void processNode(NODEI n)
-{
-	Node* np = getNode(n);
-	State state;
-	FRAME stateFrame;
-	replayState(np, &state, &stateFrame);
-	processNodeData(n, stateFrame, &state);
-}
-
 void worker()
 {
 	threadsRunning++;
@@ -83,7 +74,7 @@ void worker()
 	threadsRunning--;
 }
 
-int search()
+void runSearch()
 {
 #ifdef MULTITHREADING
 	boost::thread* threads[THREADS];
@@ -97,5 +88,4 @@ int search()
 #else
 	worker();
 #endif
-	return printResult();
 }

@@ -58,7 +58,7 @@ void processNode(NODEI n)
 	{
 		printf("\nExit found, writing path...\n");
 		FILE* f = fopen(BOOST_PP_STRINGIZE(LEVEL) ".txt", "wt");
-		dumpChain(f, np);
+		dumpChain(f, n);
 		fclose(f);
 		//File.set(LEVEL ~ ".txt", chainToString(state));
 		printf("Done.\n");

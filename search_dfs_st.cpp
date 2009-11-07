@@ -8,8 +8,4 @@ INLINE void queueNode(NODEI node, FRAME frame, const State* state)
 	postNode();
 }
 
-int search()
-{
-	// all work was done in the first addNode()
-	return printResult();
-}
+void runSearch() { }
