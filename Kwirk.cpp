@@ -32,14 +32,14 @@ char* format(const char *fmt, ...)
 
 #undef assert
 #ifdef DEBUG
-#define assert(expr,...) while(!(expr)){error(__VA_ARGS__);throw "Assertion failure at " __FILE__ ":" BOOST_PP_STRINGIZE(__LINE__);}
+#define assert(expr,...) while(!(expr)){error(__VA_ARGS__);throw "Unreachable";}
 #define INLINE
 #else
 #if defined(_MSC_VER)
 #define assert(expr,...) __assume((expr)!=0)
 #define INLINE __forceinline
 #elif defined(__GNUC__)
-#define assert(expr,...) __builtin_expect((expr)!=0,1)
+#define assert(expr,...) __builtin_expect(!(expr),0)
 #define INLINE inline
 #else
 #error Unknown compiler
@@ -313,7 +313,7 @@ struct State
 #endif
 	}
 
-	INLINE BYTE playersLeft()
+	INLINE BYTE playersLeft() const
 	{
 		return (BYTE)!players[0].exited()
 #if (PLAYERS>1)
@@ -450,7 +450,7 @@ struct State
 #endif
 	}
 
-	char* toString()
+	char* toString() const
 	{
 		char level[Y][X];
 		for (int y=0; y<Y; y++)
@@ -501,7 +501,7 @@ struct State
 	}
 };
 
-INLINE bool operator==(State& a, State& b)
+INLINE bool operator==(const State& a, const State& b)
 {
 	return memcmp(&a, &b, sizeof (State))==0;
 }
