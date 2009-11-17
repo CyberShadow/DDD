@@ -90,6 +90,7 @@ enum Action
 };
 
 inline Action operator++(Action &rs, int) {return rs = (Action)(rs + 1);}
+const char* actionNames[] = {"Up", "Right", "Down", "Left", "Switch", "None"};
 
 enum
 {

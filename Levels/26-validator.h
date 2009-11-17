@@ -1,4 +1,4 @@
-bool validate()
+bool validate() const
 {
 	for (int y=1; y<Y-1; y++)
 		for (int x=1; x<X-1; x++)
