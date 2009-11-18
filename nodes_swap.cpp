@@ -1,12 +1,20 @@
 typedef uint32_t CACHEI;
 
+#define SPLAY_XOR_MASK 0xAAAAAAAA
+#define KEY_TO_INDEX(key) ((key) ^ SPLAY_XOR_MASK)
+#define INDEX_TO_KEY(index) ((index) ^ SPLAY_XOR_MASK)
+#define CACHE_NULL INDEX_TO_KEY(0)
+
 struct CacheNode
 {
 	Node data;
 	bool dirty;
-	char _padding;
-	NODEI index; // tree key, 0 - cache node free
+	bool allocated;
+	//NODEI index; // tree key, 0 - cache node free
+	uint32_t key;
 	CACHEI left, right;
+
+	//CacheNode() : key(INDEX_TO_KEY(0)) {}
 };
 
 //CacheNode cache[CACHE_SIZE];
@@ -16,8 +24,9 @@ CacheNode* cache = (CacheNode*)calloc(CACHE_SIZE, sizeof(CacheNode));
 CACHEI cacheAlloc();
 void dumpCache();
 
-CACHEI cacheSplay(NODEI i, CACHEI t)
+CACHEI cacheSplay(NODEI index, CACHEI t)
 {
+	uint32_t key = INDEX_TO_KEY(index);
 	CACHEI l, r, y;
 	if (t == 0) return t;
 	// cache[0] works as a temporary node
@@ -72,9 +81,9 @@ CACHEI cacheSplay(NODEI i, CACHEI t)
 	// TODO: optimize
 
 	for (;;) {
-		if (i < cache[t].index) {
+		if (key < cache[t].key) {
 			if (cache[t].left == 0) break;
-			if (i < cache[cache[t].left].index) {
+			if (key < cache[cache[t].left].key) {
 				y = cache[t].left;                           /* rotate right */
 				cache[t].left = cache[y].right;
 				cache[y].right = t;
@@ -84,9 +93,9 @@ CACHEI cacheSplay(NODEI i, CACHEI t)
 			cache[r].left = t;                               /* link right */
 			r = t;
 			t = cache[t].left;
-		} else if (i > cache[t].index) {
+		} else if (key > cache[t].key) {
 			if (cache[t].right == 0) break;
-			if (i > cache[cache[t].right].index) {
+			if (key > cache[cache[t].right].key) {
 				y = cache[t].right;                          /* rotate left */
 				cache[t].right = cache[y].left;
 				cache[y].left = t;
@@ -111,7 +120,8 @@ CACHEI cacheInsert(NODEI i, CACHEI t, bool dirty)
 {
 	CACHEI n = cacheAlloc();
 	CacheNode* np = &cache[n];
-	np->index = i;
+	uint32_t key = INDEX_TO_KEY(i);
+	np->key = key;
 	np->dirty = dirty;
 	if (t == 0)
 	{
@@ -120,7 +130,7 @@ CACHEI cacheInsert(NODEI i, CACHEI t, bool dirty)
 	}
 	t = cacheSplay(i, t);
 	CacheNode* tp = &cache[t];
-	if (i < tp->index)
+	if (key < tp->key)
 	{
 		np->left = tp->left;
 		np->right = t;
@@ -128,7 +138,7 @@ CACHEI cacheInsert(NODEI i, CACHEI t, bool dirty)
 		return n;
 	}
 	else 
-	if (i > tp->index)
+	if (key > tp->key)
 	{
 		np->right = tp->right;
 		np->left = t;
@@ -142,13 +152,13 @@ CACHEI cacheInsert(NODEI i, CACHEI t, bool dirty)
 
 // ******************************************************************************************************
 
-#define ARCHIVE_CLUSTER_SIZE 0x4000000
+#define ARCHIVE_CLUSTER_SIZE 0x10000000
 #define ARCHIVE_CLUSTERS ((MAX_NODES + (ARCHIVE_CLUSTER_SIZE-1)) / ARCHIVE_CLUSTER_SIZE)
 Node* archive[ARCHIVE_CLUSTERS];
 
 INLINE void cacheArchive(CACHEI c)
 {
-	NODEI index = cache[c].index;
+	NODEI index = KEY_TO_INDEX(cache[c].key);
 	NODEI cindex = index / ARCHIVE_CLUSTER_SIZE;
 	assert(cindex < ARCHIVE_CLUSTERS);
 	if (archive[cindex]==NULL)
@@ -165,7 +175,7 @@ INLINE void cacheArchive(CACHEI c)
 
 INLINE void cacheUnarchive(CACHEI c)
 {
-	NODEI index = cache[c].index;
+	NODEI index = KEY_TO_INDEX(cache[c].key);
 	cache[c].data = archive[index / ARCHIVE_CLUSTER_SIZE][index % ARCHIVE_CLUSTER_SIZE];
 }
 
@@ -202,10 +212,11 @@ void cacheDoTrim(CACHEI n, int level)
 	{
 		if (np->dirty)
 			cacheArchive(n);
-		NODEI index = np->index;
+		NODEI index = KEY_TO_INDEX(np->key);
 		assert((cacheArchived[index/32] & (1<<(index%32))) == 0, "Attempting to re-archive node");
 		cacheArchived[index/32] |= 1<<(index%32);
-		np->index = 0;
+		//np->key = INDEX_TO_KEY(0);
+		np->allocated = false;
 		cacheSize--;
 	}
 	else
@@ -244,7 +255,9 @@ CACHEI cacheAlloc()
 		error("Cache overflow"); // How could we have let this HAPPEN?!?
 	do
 		cacheFreePtr = cacheFreePtr==(CACHE_SIZE-1) ? 1 : cacheFreePtr+1;
-	while (cache[cacheFreePtr].index);
+	//while (KEY_TO_INDEX(cache[cacheFreePtr].key));
+	while (cache[cacheFreePtr].allocated);
+	cache[cacheFreePtr].allocated = true;
 	cacheSize++;
 	return cacheFreePtr;
 }
@@ -302,7 +315,7 @@ Node* getNode(NODEI index)
 		else
 		{
 			c = cacheRoot = cacheSplay(index, cacheRoot);
-			assert(cache[c].index == index, "Splayed wrong node"); 
+			assert(KEY_TO_INDEX(cache[c].key) == index, "Splayed wrong node"); 
 		}
 	}
 	if (archived)
@@ -373,7 +386,7 @@ int dumpCacheSubtree(CACHEI t, int depth, int x)
 {
 	if (t==0 || depth>=CACHE_DUMP_DEPTH) return 0;
 	std::ostringstream ss; 
-	ss << cache[t].index;
+	ss << KEY_TO_INDEX(cache[t].key);
 	std::string s = ss.str();
 	int myLength = s.length();
 	int left = dumpCacheSubtree(cache[t].left, depth+1, x);
@@ -397,7 +410,7 @@ void dumpCache()
 	dumpCacheTree();
 	printf("root=%d\n", cacheRoot);
 	for (CACHEI i=1; i<CACHE_SIZE; i++)
-		if (cache[i].index)
-			printf("%ccache[%d]=%d -> (%d,%d)\n", cache[i].dirty ? '*' : ' ', i, cache[i].index, cache[i].left, cache[i].right);
+		if (KEY_TO_INDEX(cache[i].key))
+			printf("%ccache[%d]=%d -> (%d,%d)\n", cache[i].dirty ? '*' : ' ', i, KEY_TO_INDEX(cache[i].key), cache[i].left, cache[i].right);
 	printf("---\n");
 }
