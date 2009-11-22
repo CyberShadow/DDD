@@ -20,19 +20,24 @@ void error(const char* message = NULL)
 	exit(1);
 }
 
-char* format(const char *fmt, ...) 
+const char* format(const char *fmt, ...) 
 {    
 	va_list argptr;
 	va_start(argptr,fmt);
-	static char buf[1024];
+	//static char buf[1024];
+	char* buf = (char*)malloc(1024);
 	vsprintf(buf, fmt, argptr);
 	va_end(argptr);
 	return buf;
 }
 
+const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; }
+
+#define enforce(expr,...) while(!(expr)){error(defaultstr(format("Check failed at %s:%d", __FILE__,  __LINE__), __VA_ARGS__));throw "Unreachable";}
+
 #undef assert
 #ifdef DEBUG
-#define assert(expr,...) while(!(expr)){error(__VA_ARGS__);throw "Unreachable";}
+#define assert enforce
 #define INLINE
 #else
 #if defined(_MSC_VER)

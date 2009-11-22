@@ -119,30 +119,6 @@ void dumpNodes()
 
 // ******************************************************************************************************
 
-unsigned int currentFrame;
-
-void processNode(NODEI n)
-{
-	Node* np = getNode(n);
-	State state;
-	FRAME stateFrame;
-	int steps = replayState(np, &state, &stateFrame);
-	if (stateFrame != currentFrame)
-		return; // node was reparented and requeued
-	if (state.playersLeft()==0)
-	{
-		printf("\nExit found, writing path...\n");
-		FILE* f = fopen(BOOST_PP_STRINGIZE(LEVEL) ".txt", "wt");
-		dumpChain(f, n);
-		fclose(f);
-		//File.set(LEVEL ~ ".txt", chainToString(state));
-		printf("Done.\n");
-		exit(0);
-	}
-	else
-		processNodeChildren(n, stateFrame, &state);
-}
-
 INLINE void reparentNode(NODEI n, NODEI parent, Node* np, FRAME frame, const State* state, Step step)
 {
 	// this node will always be still queued, so we don't need to worry about its children
@@ -151,61 +127,6 @@ INLINE void reparentNode(NODEI n, NODEI parent, Node* np, FRAME frame, const Sta
 	markDirty(np);
 	queueNode(n, frame, state);
 }
-
-void searchInit() {}
-
-void worker()
-{
-#ifdef MULTITHREADING
-	threadsRunning++;
-#endif
-	NODEI n;
-	while((n=dequeueNode(currentFrame))!=0)
-	{
-		processNode(n);
-		postNode();
-	}
-#ifdef MULTITHREADING
-	threadsRunning--;
-#endif
-}
-
-int search()
-{
-	for (currentFrame=0;currentFrame<maxFrames;currentFrame++)
-	{
-		if (!queue[currentFrame])
-			continue;
-		
-		time_t t;
-		time(&t);
-		char* tstr = ctime(&t);
-		tstr[strlen(tstr)-1] = 0;
-		printf("[%s] Frame %d/%d: %d/%d nodes", tstr, currentFrame, maxFrames, queueCount[currentFrame], nodeCount-1); fflush(stdout);
-		NODEI oldNodes = nodeCount;
-		
-#ifdef MULTITHREADING
-		boost::thread* threads[THREADS];
-		for (int i=0; i<THREADS; i++)
-			threads[i] = new boost::thread(&worker);
-		for (int i=0; i<THREADS; i++)
-		{
-			threads[i]->join();
-			delete threads[i];
-		}
-#else
-		worker();
-#endif
-		assert(queueCount[currentFrame]==0);
-
-		printf(", %d new\n", nodeCount-oldNodes);
-	}
-	printf("Exit not found.\n");
-	//dumpCache(); dumpNodes();
-	return 2;
-}
-
-// ******************************************************************************************************
 
 void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 {
@@ -237,11 +158,13 @@ void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 					reparentNode(n, parent, np, frame, state, step);
 				}
 				else
+				{
 					//printf("node[%2d] .. %2d: @%2d,%2d: %6s (%3d)\n", n, parent, step.x+1, step.y+1, actionNames[step.action], frame);
+				}
 				// pop node to front of hash list
 				if (prev)
 				{
-					assert(0, "Hash collision");
+					//assert(0, "Hash collision");
 					prev->next = np->next;
 					markDirty(prev);
 					np->next = old;
@@ -332,44 +255,93 @@ void processNodeChildren(NODEI n, FRAME frame, const State* state)
 	}
 }
 
-// ***********************************************************************************
+// ******************************************************************************************************
 
-int run(int argc, const char* argv[])
+unsigned int currentFrame;
+
+void processNode(NODEI n)
 {
-	printf("Level %d: %dx%d, %d players\n", LEVEL, X, Y, PLAYERS);
-#ifdef DEBUG
-	printf("Debug version\n");
-#else
-	printf("Optimized version\n");
-#endif
+	Node* np = getNode(n);
+	State state;
+	FRAME stateFrame;
+	int steps = replayState(np, &state, &stateFrame);
+	if (stateFrame != currentFrame)
+		return; // node was reparented and requeued
+	if (state.playersLeft()==0)
+	{
+		printf("\nExit found, writing path...\n");
+		FILE* f = fopen(BOOST_PP_STRINGIZE(LEVEL) ".txt", "wt");
+		dumpChain(f, n);
+		fclose(f);
+		//File.set(LEVEL ~ ".txt", chainToString(state));
+		printf("Done.\n");
+		exit(0);
+	}
+	else
+		processNodeChildren(n, stateFrame, &state);
+}
+
+void worker()
+{
 #ifdef MULTITHREADING
-	printf("Using %d threads\n", THREADS);
+	threadsRunning++;
 #endif
-
-	assert(sizeof(Node) == 10, format("sizeof Node is %d", sizeof(Node)));
-	assert(sizeof(Action) == 1, format("sizeof Action is %d", sizeof(Action)));
-#ifdef SWAP
-	assert(sizeof(CacheNode) == 24, format("sizeof CacheNode is %d", sizeof(Action)));
+	NODEI n;
+	while((n=dequeueNode(currentFrame))!=0)
+	{
+		processNode(n);
+		postNode();
+	}
+#ifdef MULTITHREADING
+	threadsRunning--;
 #endif
-	
-	initialState.load();
+}
 
-	maxFrames = MAX_FRAMES;
-	if (argc>2)
-		error("Too many arguments");
-	if (argc==2)
-		maxFrames = strtol(argv[1], NULL, 10);
-
+void searchInit()
+{
 	// initialize state
 	memset(lookup, 0, sizeof lookup);
-
+	
 	reserveNode(); // node 0 is reserved
-	searchInit();
+
 	Step nullStep = { (unsigned)NONE };
 	addNode(&initialState, 0, nullStep, 0);
+}
 
-	int result = search();
-	//dumpNodes();
-	return result;
+int search()
+{
+	searchInit();
+	
+	for (currentFrame=0;currentFrame<maxFrames;currentFrame++)
+	{
+		if (!queue[currentFrame])
+			continue;
+		
+		time_t t;
+		time(&t);
+		char* tstr = ctime(&t);
+		tstr[strlen(tstr)-1] = 0;
+		printf("[%s] Frame %d/%d: %d/%d nodes", tstr, currentFrame, maxFrames, queueCount[currentFrame], nodeCount-1); fflush(stdout);
+		NODEI oldNodes = nodeCount;
+		
+#ifdef MULTITHREADING
+		boost::thread* threads[THREADS];
+		for (int i=0; i<THREADS; i++)
+			threads[i] = new boost::thread(&worker);
+		for (int i=0; i<THREADS; i++)
+		{
+			threads[i]->join();
+			delete threads[i];
+		}
+#else
+		worker();
+#endif
+		assert(queueCount[currentFrame]==0);
+
+		printf(", %d new\n", nodeCount-oldNodes);
+	}
+	printf("Exit not found.\n");
+	//dumpCache(); dumpNodes();
+	return 2;
 }
 

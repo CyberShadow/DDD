@@ -3,12 +3,19 @@ struct Node
 	// compiler hack - minimum bitfield size is 32 bits
 	union
 	{
+		Step step;
 		struct
 		{
-			uint16_t bitfield;
+			short bitfield1;
+			Step stepToFinish;
+		};
+		struct
+		{
+			int bitfield2;
+			NODEI next;
+			NODEI parent;
 			uint16_t toFinish;
 			uint16_t lastVisit;
 		};
-		Step step; // CAREFUL! Setting "step" directly will overwrite "toFinish" because "step" is 4 bytes in size.
 	};
 };

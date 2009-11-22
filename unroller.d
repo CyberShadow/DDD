@@ -26,6 +26,8 @@ void main(string[] args)
 	auto output = new BufferedFile(args[1] ~ "u.txt", FileMode.OutNew);
 	foreach (string line; new BufferedFile(args[1] ~ ".txt"))
 	{
+		if (line[0]=='[')
+			line = line[line.find(']')+2..$];
 		if (line[0]=='@')
 		{
 			if (level.length)

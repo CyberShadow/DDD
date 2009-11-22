@@ -103,5 +103,66 @@ FRAME maxFrames;
 
 // ***********************************************************************************
 
+int run(int argc, const char* argv[])
+{
+	printf("Level %d: %dx%d, %d players\n", LEVEL, X, Y, PLAYERS);
+#ifdef HAVE_VALIDATOR
+	printf("Level validator present\n");
+#endif
+#ifdef DEBUG
+	printf("Debug version\n");
+#else
+	printf("Optimized version\n");
+#endif
+#ifdef MULTITHREADING
+	printf("Using %d threads\n", THREADS);
+#endif
+	printf("Using node lookup hashtable of %d elements (%lld bytes)\n", 1<<HASHSIZE, (long long)(1<<HASHSIZE) * sizeof(NODEI));
+
+#ifndef DFS
+	printf("Using breadth-first search\n");
+	enforce(sizeof(Node) == 10, format("sizeof Node is %d", sizeof(Node)));
+#else
+	printf("Using depth-first search\n");
+	enforce(sizeof(Node) == 16, format("sizeof Node is %d", sizeof(Node)));
+#endif
+	enforce(sizeof(Action) == 1, format("sizeof Action is %d", sizeof(Action)));
+
+#ifdef SWAP
+	printf("Using node cache of %d records (%lld bytes)\n", CACHE_SIZE, (long long)CACHE_SIZE * sizeof(CacheNode));
+	printf("Using swap files of %d records (%lld bytes) each\n", ARCHIVE_CLUSTER_SIZE, (long long)ARCHIVE_CLUSTER_SIZE * sizeof(Node));
+#ifdef SPLAY
+	printf("Using splay tree caching\n");
+	enforce(sizeof(CacheNode) == 24, format("sizeof CacheNode is %d", sizeof(CacheNode)));
+#else
+	printf("Using hashtable caching\n");
+	printf("Using cache lookup hashtable of %d elements (%lld bytes)\n", 1<<CACHE_HASHSIZE, (long long)(1<<CACHE_HASHSIZE) * sizeof(CACHEI));
+	printf("Cache lookup hashtable is trimmed to %d elements\n", cacheTrimThreshold+1);
+	enforce(cacheTrimThreshold>0, "Cache lookup hashtable trim threshold too low");
+	enforce(cacheTrimThreshold<=16, "Cache lookup hashtable trim threshold too high");
+	enforce(sizeof(CacheNode) == 20, format("sizeof CacheNode is %d", sizeof(CacheNode)));
+#endif
+#endif
+	
+	initialState.load();
+
+	maxFrames = MAX_FRAMES;
+	if (argc>2)
+		error("Too many arguments");
+	if (argc==2)
+		maxFrames = strtol(argv[1], NULL, 10);
+
+	int result = search();
+	//dumpNodes();
+#ifdef SWAP
+#ifdef ARCHIVE_STATS
+	printf("%lu archive operations, %lu unarchive operations\n", archived, unarchived);
+#endif
+#endif
+	return result;
+}
+
+// ***********************************************************************************
+
 int main(int argc, const char* argv[]) { return run(argc, argv); }
 //#include "test_body.cpp"
