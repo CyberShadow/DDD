@@ -1,27 +1,77 @@
+// "Look-forward" DFS with special loop handling.
+
 #ifdef MULTITHREADING
 #error Not currently supported
 #endif
 
-int replayState(Node* n, State* state)
+#define MAX_DEPTH    0x4000
+
+#define DISTANCE_INF 0xFFFF
+#define IN_STACK     0xFFFF
+#define NO_LOOP      0xFFFE
+
+int iteration=1, depth=0;
+
+NODEI stackNodes[MAX_DEPTH];
+State stackStates[MAX_DEPTH];
+
+// ******************************************************************************************************
+
+INLINE void replayStep(State* state, Step step) // faster version
+{
+	Player* p = &state->players[state->activePlayer];
+	int nx = step.x+1;
+	int ny = step.y+1;
+	p->x = nx;
+	p->y = ny;
+	assert(state->map[ny][nx]==0, "Bad coordinates");
+	int res = state->perform((Action)step.action);
+	assert(res>0, "Replay failed");
+}
+
+#if 1
+INLINE void replayState(Node* np, NODEI n, State* state)
+{
+	Step steps[MAX_DEPTH+1];
+	unsigned int stepNr = 0;
+
+	while (np->lastVisit != IN_STACK)
+	{
+		steps[stepNr++] = np->step;
+		assert(stepNr <= MAX_DEPTH);
+		
+		n = np->parent;
+		enforce(n, "State chain does not start from stack");
+		np = getNode(n);
+	}
+	
+	for (int i=0; i<=depth; i++)
+		if (stackNodes[i] == n)
+		{
+			*state = stackStates[i];
+			while (stepNr)
+				replayStep(state, steps[--stepNr]);
+			return;
+		}
+	assert(0, format("Can't find node %d in stack", n));
+}
+#else
+void replayState(Node* np, NODEI n, State* state)
 {
 	Step steps[MAX_STEPS+1];
 	unsigned int stepNr = 0;
-	Node* cur = n;
 
-	while ((Action)cur->step.action != NONE)
+	while ((Action)np->step.action != NONE)
 	{
-		steps[stepNr++] = cur->step;
-		cur = getNode(cur->parent);
-		if (stepNr > MAX_STEPS)
-			return stepNr;
+		steps[stepNr++] = np->step;
+		np = getNode(np->parent);
+		assert(stepNr <= MAX_STEPS);
 	}
-	unsigned int totalSteps = 0;
 	*state = initialState;
-	FRAME frame = 0;
 	while (stepNr)
-		totalSteps += (steps[stepNr].action<SWITCH ? 1 : 0) + replayStep(state, &frame, steps[--stepNr]);
-	return totalSteps;
+		replayStep(state, steps[--stepNr]);
 }
+#endif
 
 void dumpNodes()
 {
@@ -34,6 +84,13 @@ void dumpNodes()
 
 // ******************************************************************************************************
 
+INLINE HASH getHash(const State* state)
+{
+	return SuperFastHash((const char*)state, sizeof(State)) & ((1<<HASHSIZE)-1);
+}
+
+void printProgress();
+
 NODEI addNode(const State* state, NODEI parent, Step step)
 {
 	#ifdef HAVE_VALIDATOR
@@ -41,7 +98,7 @@ NODEI addNode(const State* state, NODEI parent, Step step)
 		return 0;
 	#endif
 
-	HASH hash = SuperFastHash((const char*)state, sizeof(State)) & ((1<<HASHSIZE)-1);
+	HASH hash = getHash(state);
 	NODEI nn;
 	{
 //#ifdef MULTITHREADING
@@ -54,7 +111,17 @@ NODEI addNode(const State* state, NODEI parent, Step step)
 		{
 			State other;
 			Node* np = getNode(n);
-			replayState(np, &other);
+			replayState(np, n, &other);
+#ifdef DEBUG
+			if (getHash(&other) != hash)
+			{
+				printf("%s", state->toString());
+				printf("==== %d ====\n", n);
+				printf("%s", other.toString());
+				error(format("Hash mismatch (%08X)", hash));
+			}
+#endif
+			// reacquire?
 			if (*state == other)
 			{
 				// pop node to front of hash list
@@ -80,6 +147,8 @@ NODEI addNode(const State* state, NODEI parent, Step step)
 		np->lastVisit = 0;
 		//printf("node[%2d] <- %2d: @%2d,%2d: %6s (%3d)\n", nn, parent, step.x+1, step.y+1, actionNames[step.action], frame);
 	}
+	if ((nn & 0xFFFF) == 0)
+		printProgress();
 	return nn;
 }
 
@@ -91,7 +160,7 @@ NODEI findNode(const State* state)
 	{
 		State other;
 		Node* np = getNode(n);
-		replayState(np, &other);
+		replayState(np, n, &other);
 		if (*state == other)
 			return n;
 		n = np->next;
@@ -115,7 +184,7 @@ struct Child
 
 int getChildren(NODEI n, const State* state, Child* children)
 {
-	int childCount = 0;
+	Child* nextChild = children;
 
 	struct Coord { BYTE x, y; };
 	const int QUEUELENGTH = X+Y;
@@ -148,11 +217,11 @@ int getChildren(NODEI n, const State* state, Child* children)
 			int res = newState.perform(SWITCH);
 			assert(res == DELAY_SWITCH);
 			step.action = (unsigned)SWITCH;
-			children->index = addNode(&newState, n, step);
-			children->distance = dist * DELAY_MOVE + DELAY_SWITCH;
-			children->state = newState;
-			children->step = step;
-			children++, childCount++; assert(childCount < MAX_CHILDREN);
+			nextChild->index = addNode(&newState, n, step);
+			nextChild->distance = dist * DELAY_MOVE + DELAY_SWITCH;
+			nextChild->state = newState;
+			nextChild->step = step;
+			nextChild++; assert(nextChild-children < MAX_CHILDREN);
 			newState = *state;
 		#endif
 
@@ -169,11 +238,11 @@ int getChildren(NODEI n, const State* state, Child* children)
 				if (res > 0)
 				{
 					step.action = (unsigned)action;
-					children->index = addNode(&newState, n, step);
-					children->distance = dist * DELAY_MOVE + res;
-					children->state = newState;
-					children->step = step;
-					children++, childCount++; assert(childCount < MAX_CHILDREN);
+					nextChild->index = addNode(&newState, n, step);
+					nextChild->distance = dist * DELAY_MOVE + res;
+					nextChild->state = newState;
+					nextChild->step = step;
+					nextChild++; assert(nextChild-children < MAX_CHILDREN);
 				}
 				if (res >= 0)
 					newState = *state;
@@ -190,20 +259,11 @@ int getChildren(NODEI n, const State* state, Child* children)
 				}
 		}
 	}
-	return childCount;
+	return nextChild-children;
 }
 
 // ******************************************************************************************************
 
-#define DISTANCE_INF 0xFFFF
-#define IN_STACK     0xFFFF
-#define NO_LOOP      0xFFFE
-#define MAX_DEPTH    0x4000
-	
-int iteration=1, depth=0;
-
-NODEI stackNodes[MAX_DEPTH];
-State stackStates[MAX_DEPTH];
 Child stackChildren[MAX_DEPTH][MAX_CHILDREN];
 
 bool fixup(NODEI x)
@@ -224,6 +284,7 @@ bool fixup(NODEI x)
 
 	bool changed = false;
 
+	stackNodes[depth] = x;
 	Child* children = stackChildren[depth];
 	int childCount = getChildren(x, &stackStates[depth], children);
 
@@ -246,8 +307,8 @@ bool fixup(NODEI x)
 
 	if (xp->toFinish > bestToFinish)
 	{
-		xp->toFinish = bestToFinish;
 		xp->stepToFinish = bestStepToFinish;
+		xp->toFinish = bestToFinish;
 		changed = true;
 	}
 
@@ -282,8 +343,8 @@ bool fixup(NODEI x)
 	xp = getNode(x); // reacquire
 	if (xp->toFinish > bestToFinish)
 	{
-		xp->toFinish = bestToFinish;
 		xp->stepToFinish = bestStepToFinish;
+		xp->toFinish = bestToFinish;
 		changed = true;
 	}
 
@@ -294,20 +355,30 @@ bool fixup(NODEI x)
 	return changed;
 }
 
+
 bool search(NODEI x)
 {
-	assert(depth < MAX_DEPTH);
+	enforce(depth < MAX_DEPTH, "Too deep!");
 	Node* xp = getNode(x);
 	if (xp->lastVisit == IN_STACK)
 		return true;
 	if (xp->lastVisit != 0)
 		return xp->lastVisit != NO_LOOP;
+	/*static int verbose = 0;
+	if (depth > 1024 && verbose==0)
+		verbose = 1;
+	if (verbose)
+	{
+		printf("=== %d [%d] ===\n%s", x, depth, stackStates[depth].toString());
+		if (++verbose == 100) exit(7);
+	}*/
 	if (stackStates[depth].playersLeft()==0)
 	{
 		xp->lastVisit = NO_LOOP;
 		xp->toFinish = 0;
 		return false;
 	}
+	stackNodes[depth] = x;
 	int bestToFinish=DISTANCE_INF;
 #ifdef DEBUG
 	Step bestStepToFinish = {};
@@ -344,8 +415,8 @@ bool search(NODEI x)
 	}
 	depth--;
 
-	xp->toFinish = bestToFinish;
 	xp->stepToFinish = bestStepToFinish;
+	xp->toFinish = bestToFinish;
 	xp->lastVisit = thisLeadsToLoop ? 1 : NO_LOOP;
 
 	//if (verbose) { writef("Done %d [%d]: b=%s ", x, depth, thisLeadsToLoop); if (bestToFinish!=DISTANCE_INF) writef("=>%d (%d steps)", bestStepToFinish, bestToFinish); else writef("No exit"); writefln; fflush(stdout); }
@@ -354,6 +425,12 @@ bool search(NODEI x)
 }
 	
 // ******************************************************************************************************
+
+void printProgress()
+{
+	printTime();
+	printf("%d nodes, depth=%d\n", nodeCount, depth);// fflush(stdout);
+}
 
 void dumpChain(FILE* f, NODEI n)
 {
@@ -387,6 +464,8 @@ int search()
 	Step nullStep = { (unsigned)NONE };
 	NODEI first = addNode(&initialState, 0, nullStep);
 
+	printProgress();
+
 	iteration = 1;
 	stackStates[0] = initialState;
 	search(first);
@@ -394,6 +473,7 @@ int search()
 		do
 		{
 			iteration++;
+			printTime();
 			printf("Beginning fixup iteration %d\n", iteration);
 		} while (fixup(first));
 

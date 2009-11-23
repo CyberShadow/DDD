@@ -1,3 +1,5 @@
+// Simple Dijkstra BFS.
+
 void processNodeChildren(NODEI n, FRAME frame, const State* state);
 
 struct QueueNode
@@ -317,11 +319,8 @@ int search()
 		if (!queue[currentFrame])
 			continue;
 		
-		time_t t;
-		time(&t);
-		char* tstr = ctime(&t);
-		tstr[strlen(tstr)-1] = 0;
-		printf("[%s] Frame %d/%d: %d/%d nodes", tstr, currentFrame, maxFrames, queueCount[currentFrame], nodeCount-1); fflush(stdout);
+		printTime();
+		printf("Frame %d/%d: %d/%d nodes", currentFrame, maxFrames, queueCount[currentFrame], nodeCount-1); fflush(stdout);
 		NODEI oldNodes = nodeCount;
 		
 #ifdef MULTITHREADING

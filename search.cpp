@@ -57,7 +57,7 @@ int threadsRunning = 0;
 
 // ******************************************************************************************************
 
-int replayStep(State* state, FRAME* frame, Step step)
+INLINE int replayStep(State* state, FRAME* frame, Step step)
 {
 	Player* p = &state->players[state->activePlayer];
 	int nx = step.x+1;
@@ -81,6 +81,15 @@ void dumpNodesToDisk()
 		fwrite(np, sizeof(Node), 1, f);
 	}
 	fclose(f);
+}
+
+void printTime()
+{
+	time_t t;
+	time(&t);
+	char* tstr = ctime(&t);
+	tstr[strlen(tstr)-1] = 0;
+	printf("[%s] ", tstr);
 }
 
 // ******************************************************************************************************
