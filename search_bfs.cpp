@@ -152,6 +152,7 @@ void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 			Node* np = getNode(n);
 			FRAME otherFrame;
 			replayState(np, &other, &otherFrame);
+			np = refreshNode(n, np);
 			if (*state == other)
 			{
 				if (otherFrame > frame) // better path found? reparent and requeue
@@ -222,7 +223,7 @@ void processNodeChildren(NODEI n, FRAME frame, const State* state)
 			assert(res == DELAY_SWITCH);
 			step.action = (unsigned)SWITCH;
 			addNode(&newState, n, step, frame + dist * DELAY_MOVE + DELAY_SWITCH);
-			newState = state;
+			newState = *state;
 		#endif
 
 		for (Action action = ACTION_FIRST; action < SWITCH; action++)

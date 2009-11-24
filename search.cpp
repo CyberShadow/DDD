@@ -3,17 +3,26 @@
 
 #include <time.h>
 #include "config.h"
+
 #ifdef MULTITHREADING
 #include <boost/thread/thread.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/barrier.hpp>
 #include <boost/thread/condition.hpp>
 #endif
+
 #ifdef SWAP
 #include <string>
 #include <sstream>
+#ifdef MMAP
 #include <boost/iostreams/device/mapped_file.hpp>
+#else
+#include <io.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #endif
+#endif
+
 #include <fstream>
 #include "Kwirk.cpp"
 #include "hsiehhash.cpp"
@@ -139,13 +148,19 @@ int run(int argc, const char* argv[])
 
 #ifdef SWAP
 	printf("Using node cache of %d records (%lld bytes)\n", CACHE_SIZE, (long long)CACHE_SIZE * sizeof(CacheNode));
-	printf("Using swap files of %d records (%lld bytes) each\n", ARCHIVE_CLUSTER_SIZE, (long long)ARCHIVE_CLUSTER_SIZE * sizeof(Node));
+
+#ifdef MMAP
+	printf("Using memory-mapped swap files of %d records (%lld bytes) each\n", ARCHIVE_CLUSTER_SIZE, (long long)ARCHIVE_CLUSTER_SIZE * sizeof(Node));
+#else
+	printf("Using POSIX swap file\n");
+#endif
+
 #ifdef SPLAY
 	printf("Using splay tree caching\n");
 	enforce(sizeof(CacheNode) == 24, format("sizeof CacheNode is %d", sizeof(CacheNode)));
 #else
 	printf("Using hashtable caching\n");
-	printf("Using cache lookup hashtable of %d elements (%lld bytes)\n", 1<<CACHE_HASHSIZE, (long long)(1<<CACHE_HASHSIZE) * sizeof(CACHEI));
+	printf("Using cache lookup hashtable of %d elements (%lld bytes)\n", CACHE_LOOKUPSIZE, (long long)CACHE_LOOKUPSIZE * sizeof(CACHEI));
 	printf("Cache lookup hashtable is trimmed to %d elements\n", cacheTrimThreshold+1);
 	enforce(cacheTrimThreshold>0, "Cache lookup hashtable trim threshold too low");
 	enforce(cacheTrimThreshold<=16, "Cache lookup hashtable trim threshold too high");

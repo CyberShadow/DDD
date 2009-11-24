@@ -30,6 +30,8 @@ INLINE Node* getNode(NODEI index)
 	return nodes[index/0x10000] + (index&0xFFFF);
 }
 
+INLINE Node* refreshNode(NODEI index, Node* old) { return old; }
+
 INLINE void postNode() {}
 INLINE void markDirty(Node* np) {}
 INLINE const Node* getNodeFast(NODEI index) { return getNode(index); }

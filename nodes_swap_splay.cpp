@@ -301,6 +301,13 @@ INLINE const Node* getNodeFast(NODEI index)
 	return getNode(index);
 }
 
+INLINE Node* refreshNode(NODEI index, Node* old)
+{
+	if (((CacheNode*)old)->index == index && ((CacheNode*)old)->allocated)
+		return old;
+	else
+		return getNode(index);
+}
 
 #ifndef MULTITHREADING
 #define THREADS 1

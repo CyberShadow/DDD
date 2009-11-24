@@ -7,8 +7,8 @@
 #define MAX_DEPTH    0x4000
 
 #define DISTANCE_INF 0xFFFF
-#define IN_STACK     0xFFFF
-#define NO_LOOP      0xFFFE
+#define IN_STACK     0x8000
+#define NO_LOOP      0x7FFF
 
 int iteration=1, depth=0;
 
@@ -35,25 +35,31 @@ INLINE void replayState(Node* np, NODEI n, State* state)
 	Step steps[MAX_DEPTH+1];
 	unsigned int stepNr = 0;
 
-	while (np->lastVisit != IN_STACK)
+	while (np->lastVisit < IN_STACK)
 	{
 		steps[stepNr++] = np->step;
 		assert(stepNr <= MAX_DEPTH);
 		
 		n = np->parent;
-		enforce(n, "State chain does not start from stack");
+		if (n==0)
+		{
+			if (getNode(1)->lastVisit >= IN_STACK) // if first node is in stack, then we missed it
+				error("State chain does not start from stack");
+            *state = initialState;
+            goto play;
+		}
 		np = getNode(n);
 	}
 	
-	for (int i=0; i<=depth; i++)
-		if (stackNodes[i] == n)
-		{
-			*state = stackStates[i];
-			while (stepNr)
-				replayStep(state, steps[--stepNr]);
-			return;
-		}
-	assert(0, format("Can't find node %d in stack", n));
+	/* scope for stackPos */
+	{
+		int stackPos = np->lastVisit - IN_STACK;
+		assert(stackNodes[stackPos] == n, "Incorrect stackpos");
+		*state = stackStates[stackPos];
+	}
+play:
+	while (stepNr)
+		replayStep(state, steps[--stepNr]);
 }
 #else
 void replayState(Node* np, NODEI n, State* state)
@@ -90,6 +96,7 @@ INLINE HASH getHash(const State* state)
 }
 
 void printProgress();
+void printFixupProgress();
 
 NODEI addNode(const State* state, NODEI parent, Step step)
 {
@@ -121,7 +128,7 @@ NODEI addNode(const State* state, NODEI parent, Step step)
 				error(format("Hash mismatch (%08X)", hash));
 			}
 #endif
-			// reacquire?
+			np = refreshNode(n, np);
 			if (*state == other)
 			{
 				// pop node to front of hash list
@@ -265,19 +272,20 @@ int getChildren(NODEI n, const State* state, Child* children)
 // ******************************************************************************************************
 
 Child stackChildren[MAX_DEPTH][MAX_CHILDREN];
+NODEI loopNodes = 0, fixupVisited = 0;
 
 bool fixup(NODEI x)
 {
 	assert(depth < MAX_DEPTH);
 	Node* xp = getNode(x);
-	assert(xp->lastVisit != IN_STACK);
+	assert(xp->lastVisit < IN_STACK);
 	assert(xp->lastVisit != NO_LOOP);
 	assert(xp->lastVisit != 0);
 	assert(xp->lastVisit < iteration);
 
 	//if (verbose) writefln("Fixup: %d [%d]", x, depth);
 		
-	xp->lastVisit = IN_STACK;
+	xp->lastVisit = IN_STACK + depth;
 
 	int bestToFinish=xp->toFinish;
 	Step bestStepToFinish;
@@ -305,6 +313,7 @@ bool fixup(NODEI x)
 		}
 	}
 
+	xp = refreshNode(x, xp);
 	if (xp->toFinish > bestToFinish)
 	{
 		xp->stepToFinish = bestStepToFinish;
@@ -318,7 +327,7 @@ bool fixup(NODEI x)
 	{
 		NODEI y = children[i].index;
 		Node* yp = getNode(y);
-		if (yp->lastVisit != IN_STACK)
+		if (yp->lastVisit < IN_STACK)
 		{
 			if (yp->lastVisit != NO_LOOP && yp->lastVisit < iteration)
 			{
@@ -326,7 +335,7 @@ bool fixup(NODEI x)
 				stackStates[depth] = children[i].state;
 				bool c = fixup(y);
 				changed = changed || c;
-				yp = getNode(y); // reacquire
+				yp = refreshNode(y, yp);
 				//if (verbose) { writef("Fixup: %d->%d: f=%d", x, y, yp->toFinish); if (yp->toFinish!=DISTANCE_INF) writef(" => %d", yp->stepToFinish); writefln; }
 			}
 			int distance = yp->toFinish==DISTANCE_INF ? DISTANCE_INF : yp->toFinish + children[i].distance;
@@ -340,7 +349,7 @@ bool fixup(NODEI x)
 	}
 	depth--;
 
-	xp = getNode(x); // reacquire
+	xp = refreshNode(x, xp);
 	if (xp->toFinish > bestToFinish)
 	{
 		xp->stepToFinish = bestStepToFinish;
@@ -349,6 +358,9 @@ bool fixup(NODEI x)
 	}
 
 	xp->lastVisit = iteration;
+	fixupVisited++;
+	if ((fixupVisited & 0xFFFF)==0)
+		printFixupProgress();
 
 	//if (verbose) { writef("Fixup: Done %d [%d]: ", x, depth); if (bestToFinish!=DISTANCE_INF) writef("=>%d (%d steps)", xp->stepToFinish, bestToFinish); else writef("No exit"); writefln; fflush(stdout); }
 
@@ -360,7 +372,7 @@ bool search(NODEI x)
 {
 	enforce(depth < MAX_DEPTH, "Too deep!");
 	Node* xp = getNode(x);
-	if (xp->lastVisit == IN_STACK)
+	if (xp->lastVisit >= IN_STACK)
 		return true;
 	if (xp->lastVisit != 0)
 		return xp->lastVisit != NO_LOOP;
@@ -387,7 +399,7 @@ bool search(NODEI x)
 #endif
 	bool thisLeadsToLoop = false;
 	xp->toFinish = DISTANCE_INF;
-	xp->lastVisit = IN_STACK;
+	xp->lastVisit = IN_STACK + depth;
 
 	//if (verbose) writefln("At %d [%d]", x, depth);
 
@@ -405,7 +417,7 @@ bool search(NODEI x)
 		bool f = search(y);
 		//if (verbose) { writef("%d->%d: b=%s (%d), f=%d", x, y, leadsToLoop[y], backref, yp->toFinish); if (yp->toFinish!=DISTANCE_INF) writef(" => %d", yp->stepToFinish); writefln; }
 		thisLeadsToLoop = thisLeadsToLoop || f;
-		yp = getNode(y); // reacquire
+		yp = refreshNode(y, yp);
 		int distance = yp->toFinish==DISTANCE_INF ? DISTANCE_INF : yp->toFinish + children[i].distance;
 		if (bestToFinish > distance)
 		{
@@ -415,9 +427,11 @@ bool search(NODEI x)
 	}
 	depth--;
 
+	xp = refreshNode(x, xp);
 	xp->stepToFinish = bestStepToFinish;
 	xp->toFinish = bestToFinish;
 	xp->lastVisit = thisLeadsToLoop ? 1 : NO_LOOP;
+	loopNodes += (NODEI)thisLeadsToLoop;
 
 	//if (verbose) { writef("Done %d [%d]: b=%s ", x, depth, thisLeadsToLoop); if (bestToFinish!=DISTANCE_INF) writef("=>%d (%d steps)", bestStepToFinish, bestToFinish); else writef("No exit"); writefln; fflush(stdout); }
 
@@ -430,6 +444,11 @@ void printProgress()
 {
 	printTime();
 	printf("%d nodes, depth=%d\n", nodeCount, depth);// fflush(stdout);
+}
+
+void printFixupProgress()
+{
+	printf("%3d%%\x08\x08\x08\x08", fixupVisited*100LL / loopNodes);
 }
 
 void dumpChain(FILE* f, NODEI n)
@@ -469,14 +488,20 @@ int search()
 	iteration = 1;
 	stackStates[0] = initialState;
 	search(first);
+	printf("Loop-node consistency: %d%%\n", loopNodes*100LL / nodeCount);
+	bool changed;
 	if (getNode(first)->lastVisit != NO_LOOP)
 		do
 		{
 			iteration++;
 			printTime();
-			printf("Beginning fixup iteration %d\n", iteration);
-		} while (fixup(first));
+			printf("Fixup iteration %d: ", iteration);
+			fixupVisited = 0;
+			changed = fixup(first);
+			printf("Done\n");
+		} while (changed);
 
+	printf("Scan complete.\n");
 	if (getNode(first)->toFinish == DISTANCE_INF)
 	{
 		printf("Exit not found\n");

@@ -54,14 +54,17 @@ INLINE void cacheUnarchive(CACHEI c);
 
 // ******************************************************************************************************
 
-#define CACHE_HASHSIZE 24
+//#define CACHE_HASHSIZE 24
 //#define CACHE_HASHSIZE 12
+//#define CACHE_LOOKUPSIZE (1<<CACHE_HASHSIZE)
+//#define CACHE_LOOKUPSIZE (CACHE_SIZE>>4)
+#define CACHE_LOOKUPSIZE 0x1000000
 typedef uint32_t CACHEHASH;
-CACHEI cacheLookup[1<<CACHE_HASHSIZE];
+CACHEI cacheLookup[CACHE_LOOKUPSIZE];
 
 INLINE CACHEHASH cacheHash(NODEI n)
 {
-	return n & ((1<<CACHE_HASHSIZE)-1);
+	return n % CACHE_LOOKUPSIZE;
 }
 
 CACHEI cacheNew(NODEI index)
@@ -76,11 +79,11 @@ CACHEI cacheNew(NODEI index)
 	return c;
 }
 
-const int cacheTrimThreshold = (CACHE_SIZE / (1<<CACHE_HASHSIZE) / 2) - 1;
+const int cacheTrimThreshold = (CACHE_SIZE / CACHE_LOOKUPSIZE / 2) - 1;
 
 void cacheTrim()
 {
-	for (CACHEHASH h=0; h<(1<<CACHE_HASHSIZE); h++)
+	for (CACHEHASH h=0; h<CACHE_LOOKUPSIZE; h++)
 	{
 		CACHEI c = cacheLookup[h];
 		unsigned n = 0;
@@ -188,4 +191,21 @@ Node* getNodeFast(NODEI index)
 	return &cache[c].data;
 }
 
-void postNode() {}
+INLINE Node* refreshNode(NODEI index, Node* old)
+{
+	if (((CacheNode*)old)->index == index && ((CacheNode*)old)->allocState == 1)
+		return old;
+	else
+		return getNode(index);
+}
+
+#define CACHE_TRIM_THRESHOLD (CACHE_SIZE-(X*Y*2))
+
+void postNode()
+{
+	if (cacheSize >= CACHE_TRIM_THRESHOLD)
+	{
+		cacheTrim();
+		assert(cacheSize < CACHE_TRIM_THRESHOLD, "Trim failed");
+	}
+}
