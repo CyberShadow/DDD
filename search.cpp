@@ -61,8 +61,28 @@ int threadsRunning = 0;
 #ifndef SWAP
 #include "nodes_flat.cpp"
 #else
-#include "nodes_swap.cpp"
+
+#ifdef SPLAY
+#include "cache_splay.cpp"
+#else
+#include "cache_hash.cpp"
 #endif
+
+// ******************************************************************************************************
+
+//#define ARCHIVE_STATS
+
+#ifdef ARCHIVE_STATS
+unsigned long archived, unarchived;
+#endif
+
+#ifdef MMAP
+#include "swap_mmap.cpp"
+#else
+#include "swap_file_posix.cpp"
+#endif
+
+#endif // SWAP
 
 // ******************************************************************************************************
 
