@@ -1,7 +1,5 @@
 // Splay trees backed by a flat array (cache). Memory mapped files (archive) are used for swap.
 
-typedef uint32_t CACHEI;
-
 struct CacheNode
 {
 	Node data;
@@ -144,11 +142,6 @@ CACHEI cacheInsert(NODEI index, CACHEI t, bool dirty)
 
 // ******************************************************************************************************
 
-INLINE void cacheArchive(CACHEI c);
-INLINE void cacheUnarchive(CACHEI c);
-
-// ******************************************************************************************************
-
 CACHEI cacheFreePtr=1, cacheSize=1, cacheRoot=0;
 // this is technically not required, but provides an optimization (we don't need to check if a possibly-archived node is in the cache)
 uint32_t cacheArchived[(MAX_NODES+31)/32];
@@ -179,7 +172,10 @@ void cacheDoTrim(CACHEI n, int level)
 	if (level > cacheTrimLevel)
 	{
 		if (np->dirty)
+		{
 			cacheArchive(n);
+			onCacheWrite();
+		}
 		NODEI index = np->index;
 		assert((cacheArchived[index/32] & (1<<(index%32))) == 0, "Attempting to re-archive node");
 		cacheArchived[index/32] |= 1<<(index%32);
@@ -284,11 +280,13 @@ Node* getNode(NODEI index)
 		{
 			c = cacheRoot = cacheSplay(index, cacheRoot);
 			assert(cache[c].index == index, "Splayed wrong node"); 
+			onCacheHit();
 		}
 	}
 	if (archived)
 	{
 		cacheUnarchive(c);
+		onCacheMiss();
 	}
 
 	Node* result = &cache[c].data;

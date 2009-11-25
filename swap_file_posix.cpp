@@ -1,15 +1,16 @@
 // POSIX files
 
 #ifdef MULTITHREADING
-#error Not currently supported
+boost::mutex swapMutex;
 #endif
 
 int archive = 0;
 
 INLINE void cacheArchive(CACHEI c)
 {
-#ifdef ARCHIVE_STATS
-	archived++;
+	NODEI index = cache[c].index;
+#ifdef MULTITHREADING
+	boost::mutex::scoped_lock lock(swapMutex);
 #endif
 	if (archive == 0)
 	{
@@ -17,18 +18,17 @@ INLINE void cacheArchive(CACHEI c)
 		if (archive == -1)
 			error(_strerror(NULL));
 	}
-	NODEI index = cache[c].index;
 	_lseeki64(archive, (uint64_t)index * sizeof(Node), SEEK_SET);
 	_write(archive, &cache[c].data, sizeof(Node));
 }
 
 INLINE void cacheUnarchive(CACHEI c)
 {
-#ifdef ARCHIVE_STATS
-	unarchived++;
-#endif
 	assert(archive);
 	NODEI index = cache[c].index;
+#ifdef MULTITHREADING
+	boost::mutex::scoped_lock lock(swapMutex);
+#endif
 	_lseeki64(archive, (uint64_t)index * sizeof(Node), SEEK_SET);
 	_read(archive, &cache[c].data, sizeof(Node));
 }

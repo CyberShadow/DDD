@@ -6,9 +6,6 @@ Node* archive[ARCHIVE_CLUSTERS];
 
 INLINE void cacheArchive(CACHEI c)
 {
-#ifdef ARCHIVE_STATS
-	archived++;
-#endif
 	NODEI index = cache[c].index;
 	NODEI cindex = index / ARCHIVE_CLUSTER_SIZE;
 	assert(cindex < ARCHIVE_CLUSTERS);
@@ -26,9 +23,6 @@ INLINE void cacheArchive(CACHEI c)
 
 INLINE void cacheUnarchive(CACHEI c)
 {
-#ifdef ARCHIVE_STATS
-	unarchived++;
-#endif
 	NODEI index = cache[c].index;
 	cache[c].data = archive[index / ARCHIVE_CLUSTER_SIZE][index % ARCHIVE_CLUSTER_SIZE];
 }

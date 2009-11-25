@@ -1,11 +1,5 @@
 // Linked lists with heads in a hashtable, backed by a flat array. Memory mapped files (archive) are used for swap.
 
-#ifdef MULTITHREADING
-#error Not currently supported
-#endif
-
-typedef uint32_t CACHEI;
-
 struct CacheNode
 {
 	Node data;
@@ -25,7 +19,13 @@ void cacheTrim();
 INLINE CACHEI cacheAlloc()
 {
 	if (cacheSize == CACHE_SIZE)
+	{
+#ifdef MULTITHREADING
+		error("Cache overflow");
+#else
 		cacheTrim();
+#endif
+	}
 	assert(cacheSize < CACHE_SIZE, "Trim failed");
 	cacheSize++;
 	if (cacheFreeFirstPtr)
@@ -49,18 +49,16 @@ INLINE CACHEI cacheAlloc()
 
 // ******************************************************************************************************
 
-INLINE void cacheArchive(CACHEI c);
-INLINE void cacheUnarchive(CACHEI c);
-
-// ******************************************************************************************************
-
 //#define CACHE_HASHSIZE 24
 //#define CACHE_HASHSIZE 12
 //#define CACHE_LOOKUPSIZE (1<<CACHE_HASHSIZE)
-//#define CACHE_LOOKUPSIZE (CACHE_SIZE>>4)
-#define CACHE_LOOKUPSIZE 0x1000000
+#define CACHE_LOOKUPSIZE (CACHE_SIZE>>2)
+//#define CACHE_LOOKUPSIZE 0x1000000
 typedef uint32_t CACHEHASH;
 CACHEI cacheLookup[CACHE_LOOKUPSIZE];
+#ifdef MULTITHREADING
+boost::mutex cacheMutex;
+#endif
 
 INLINE CACHEHASH cacheHash(NODEI n)
 {
@@ -83,6 +81,7 @@ const int cacheTrimThreshold = (CACHE_SIZE / CACHE_LOOKUPSIZE / 2) - 1;
 
 void cacheTrim()
 {
+	printf("*");
 	for (CACHEHASH h=0; h<CACHE_LOOKUPSIZE; h++)
 	{
 		CACHEI c = cacheLookup[h];
@@ -95,7 +94,10 @@ void cacheTrim()
 			if (n > cacheTrimThreshold)
 			{
 				if (cache[c].dirty)
+				{
 					cacheArchive(c);
+					onCacheWrite();
+				}
 				cache[c].allocState = 2;
 				cache[c].next = cacheFreeFirstPtr;
 				cacheFreeFirstPtr = c;
@@ -119,13 +121,20 @@ INLINE void markDirty(Node* np)
 
 Node* newNode(NODEI* index)
 {
-	*index = nodeCount;
-	CACHEI c = cacheNew(nodeCount);
-    cache[c].dirty = true;
+	/* LOCK */
+	CACHEI c;
+	{
+#ifdef MULTITHREADING
+		boost::mutex::scoped_lock lock(cacheMutex);
+#endif
+		*index = nodeCount;
+		c = cacheNew(nodeCount);
+		cache[c].dirty = true;
+		nodeCount++;
+		if (nodeCount == MAX_NODES)
+			error("Too many nodes");
+	}
 
-	nodeCount++;
-	if (nodeCount == MAX_NODES)
-		error("Too many nodes");
 	Node* result = &cache[c].data;
 	result->next = 0;
 	return result;
@@ -137,32 +146,42 @@ Node* getNode(NODEI index)
 {
     CACHEHASH hash = cacheHash(index);
 
-	CACHEI first = cacheLookup[hash];
-	CACHEI c = first;
-	CACHEI prev = 0;
-	while (c)
-	{
-		if (cache[c].index == index)
+    /* LOCK */
+    CACHEI c;
+    {
+#ifdef MULTITHREADING
+		boost::mutex::scoped_lock lock(cacheMutex);
+#endif
+		CACHEI first = cacheLookup[hash];
+		c = first;
+		CACHEI prev = 0;
+		while (c)
 		{
-			// pop node to front of hash list
-			if (prev)
+			if (cache[c].index == index)
 			{
-				//assert(0, "Hash collision");
-				cache[prev].next = cache[c].next;
-				cache[c].next = first;
-				cacheLookup[hash] = c;
+				// pop node to front of hash list
+				if (prev)
+				{
+					//assert(0, "Hash collision");
+					cache[prev].next = cache[c].next;
+					cache[c].next = first;
+					cacheLookup[hash] = c;
+				}
+				onCacheHit();
+				return &cache[c].data;
 			}
-			return &cache[c].data;
+			prev = c;
+			c = cache[c].next;
 		}
-		prev = c;
-		c = cache[c].next;
+		
+		// unarchive
+		c = cacheNew(index);
+		cache[c].dirty = false;
+		cache[c].next = first;
+		cacheLookup[hash] = c;
+		onCacheMiss();
 	}
 	
-	// unarchive
-	c = cacheNew(index);
-	cache[c].dirty = false;
-	cache[c].next = first;
-	cacheLookup[hash] = c;
 	cacheUnarchive(c);
 	return &cache[c].data;
 }
@@ -199,13 +218,43 @@ INLINE Node* refreshNode(NODEI index, Node* old)
 		return getNode(index);
 }
 
-#define CACHE_TRIM_THRESHOLD (CACHE_SIZE-(X*Y*2))
+#ifndef MULTITHREADING
+#define THREADS 1
+#endif
+#define CACHE_TRIM_THRESHOLD (CACHE_SIZE-(X*Y*2*THREADS))
 
 void postNode()
 {
 	if (cacheSize >= CACHE_TRIM_THRESHOLD)
 	{
+#ifdef MULTITHREADING
+		assert(threadsRunning > 0);
+		static boost::barrier* barrier;
+		/* LOCK */
+		{
+			boost::mutex::scoped_lock lock(cacheMutex);
+			if (barrier == NULL)
+				barrier = new boost::barrier(threadsRunning);
+		}
+		barrier->wait();
+		/* LOCK */
+		{
+			boost::mutex::scoped_lock lock(cacheMutex);
+			if (cacheSize >= CACHE_TRIM_THRESHOLD)
+			{
+				cacheTrim();
+				assert(cacheSize < CACHE_TRIM_THRESHOLD, "Trim failed");
+			}
+			else
+			{
+				// another thread took care of it
+			}
+		}
+		delete barrier;
+		barrier = NULL;
+#else
 		cacheTrim();
 		assert(cacheSize < CACHE_TRIM_THRESHOLD, "Trim failed");
+#endif
 	}
 }

@@ -23,6 +23,10 @@
 #endif
 #endif
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include <fstream>
 #include "Kwirk.cpp"
 #include "hsiehhash.cpp"
@@ -58,9 +62,16 @@ NODEI nodeCount = 0;
 int threadsRunning = 0;
 #endif
 
+typedef uint32_t CACHEI;
+
+INLINE void cacheArchive(CACHEI c);
+INLINE void cacheUnarchive(CACHEI c);
+
 #ifndef SWAP
-#include "nodes_flat.cpp"
+#include "cache_none.cpp"
 #else
+
+#include "stats_cache.cpp"
 
 #ifdef SPLAY
 #include "cache_splay.cpp"
@@ -70,14 +81,10 @@ int threadsRunning = 0;
 
 // ******************************************************************************************************
 
-//#define ARCHIVE_STATS
-
-#ifdef ARCHIVE_STATS
-unsigned long archived, unarchived;
-#endif
-
-#ifdef MMAP
+#if defined (MMAP)
 #include "swap_mmap.cpp"
+#elif defined(WINFILES)
+#include "swap_file_windows.cpp"
 #else
 #include "swap_file_posix.cpp"
 #endif
@@ -124,6 +131,7 @@ void printTime()
 // ******************************************************************************************************
 
 #define HASHSIZE 28
+//#define HASHSIZE 26
 typedef uint32_t HASH;
 NODEI lookup[1<<HASHSIZE];
 #ifdef MULTITHREADING
@@ -145,7 +153,7 @@ int run(int argc, const char* argv[])
 {
 	printf("Level %d: %dx%d, %d players\n", LEVEL, X, Y, PLAYERS);
 #ifdef HAVE_VALIDATOR
-	printf("Level validator present\n");
+	printf("Level state validator present\n");
 #endif
 #ifdef DEBUG
 	printf("Debug version\n");
@@ -169,22 +177,24 @@ int run(int argc, const char* argv[])
 #ifdef SWAP
 	printf("Using node cache of %d records (%lld bytes)\n", CACHE_SIZE, (long long)CACHE_SIZE * sizeof(CacheNode));
 
-#ifdef MMAP
+#if defined(MMAP)
 	printf("Using memory-mapped swap files of %d records (%lld bytes) each\n", ARCHIVE_CLUSTER_SIZE, (long long)ARCHIVE_CLUSTER_SIZE * sizeof(Node));
+#elif defined(WINFILES)
+	printf("Using Windows API swap file\n");
 #else
 	printf("Using POSIX swap file\n");
 #endif
 
 #ifdef SPLAY
 	printf("Using splay tree caching\n");
-	enforce(sizeof(CacheNode) == 24, format("sizeof CacheNode is %d", sizeof(CacheNode)));
+	enforce(sizeof(CacheNode) == sizeof(Node)+14, format("sizeof CacheNode is %d", sizeof(CacheNode)));
 #else
 	printf("Using hashtable caching\n");
 	printf("Using cache lookup hashtable of %d elements (%lld bytes)\n", CACHE_LOOKUPSIZE, (long long)CACHE_LOOKUPSIZE * sizeof(CACHEI));
 	printf("Cache lookup hashtable is trimmed to %d elements\n", cacheTrimThreshold+1);
 	enforce(cacheTrimThreshold>0, "Cache lookup hashtable trim threshold too low");
 	enforce(cacheTrimThreshold<=16, "Cache lookup hashtable trim threshold too high");
-	enforce(sizeof(CacheNode) == 20, format("sizeof CacheNode is %d", sizeof(CacheNode)));
+	enforce(sizeof(CacheNode) == sizeof(Node)+10, format("sizeof CacheNode is %d", sizeof(CacheNode)));
 #endif
 #endif
 	
@@ -196,13 +206,14 @@ int run(int argc, const char* argv[])
 	if (argc==2)
 		maxFrames = strtol(argv[1], NULL, 10);
 
-	int result = search();
-	//dumpNodes();
 #ifdef SWAP
 #ifdef ARCHIVE_STATS
-	printf("%lu archive operations, %lu unarchive operations\n", archived, unarchived);
+	atexit(&printCacheStats);
 #endif
 #endif
+
+	int result = search();
+	//dumpNodes();
 	return result;
 }
 

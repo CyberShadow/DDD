@@ -286,6 +286,7 @@ bool fixup(NODEI x)
 	//if (verbose) writefln("Fixup: %d [%d]", x, depth);
 		
 	xp->lastVisit = IN_STACK + depth;
+	markDirty(xp);
 
 	int bestToFinish=xp->toFinish;
 	Step bestStepToFinish;
@@ -319,6 +320,7 @@ bool fixup(NODEI x)
 		xp->stepToFinish = bestStepToFinish;
 		xp->toFinish = bestToFinish;
 		changed = true;
+		markDirty(xp);
 	}
 
 	// full scan
@@ -358,6 +360,7 @@ bool fixup(NODEI x)
 	}
 
 	xp->lastVisit = iteration;
+	markDirty(xp);
 	fixupVisited++;
 	if ((fixupVisited & 0xFFFF)==0)
 		printFixupProgress();
@@ -388,6 +391,7 @@ bool search(NODEI x)
 	{
 		xp->lastVisit = NO_LOOP;
 		xp->toFinish = 0;
+		markDirty(xp);
 		return false;
 	}
 	stackNodes[depth] = x;
@@ -400,6 +404,7 @@ bool search(NODEI x)
 	bool thisLeadsToLoop = false;
 	xp->toFinish = DISTANCE_INF;
 	xp->lastVisit = IN_STACK + depth;
+	markDirty(xp);
 
 	//if (verbose) writefln("At %d [%d]", x, depth);
 
@@ -431,6 +436,7 @@ bool search(NODEI x)
 	xp->stepToFinish = bestStepToFinish;
 	xp->toFinish = bestToFinish;
 	xp->lastVisit = thisLeadsToLoop ? 1 : NO_LOOP;
+	markDirty(xp);
 	loopNodes += (NODEI)thisLeadsToLoop;
 
 	//if (verbose) { writef("Done %d [%d]: b=%s ", x, depth, thisLeadsToLoop); if (bestToFinish!=DISTANCE_INF) writef("=>%d (%d steps)", bestStepToFinish, bestToFinish); else writef("No exit"); writefln; fflush(stdout); }

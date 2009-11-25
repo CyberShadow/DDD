@@ -165,7 +165,7 @@ void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 					//printf("node[%2d] .. %2d: @%2d,%2d: %6s (%3d)\n", n, parent, step.x+1, step.y+1, actionNames[step.action], frame);
 				}
 				// pop node to front of hash list
-				if (prev)
+				/*if (prev)
 				{
 					//assert(0, "Hash collision");
 					prev->next = np->next;
@@ -173,7 +173,7 @@ void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 					np->next = old;
 					lookup[hash] = n;
 					markDirty(np);
-				}
+				}*/
 				return;
 			}
 			n = np->next;
