@@ -7,7 +7,6 @@
 #ifdef MULTITHREADING
 #include <boost/thread/thread.hpp>
 #include <boost/thread/mutex.hpp>
-#include <boost/thread/barrier.hpp>
 #include <boost/thread/condition.hpp>
 #endif
 
@@ -59,20 +58,28 @@ struct Step
 // ******************************************************************************************************
 
 NODEI nodeCount = 0;
-#ifdef MULTITHREADING
-int threadsRunning = 0;
-#endif
 
 #ifndef SWAP
 #include "cache_none.cpp"
 #else
 
+INLINE const Node* cachePeek(NODEI index);
+#ifdef DEBUG_VERBOSE
+void testNode(const Node* data, NODEI index, const char* comment);
+#else
+#define testNode(x,y,z)
+#endif
+
 #if defined (MMAP)
 #include "swap_mmap.cpp"
+#elif defined(RAM)
+#include "swap_ram.cpp"
 #elif defined(WINFILES)
 #include "swap_file_windows.cpp"
-#else
+#elif defined(POSIX)
 #include "swap_file_posix.cpp"
+#else
+#error No swap engine
 #endif
 
 // ******************************************************************************************************
@@ -81,11 +88,7 @@ typedef uint32_t CACHEI;
 
 #include "stats_cache.cpp"
 
-#ifdef SPLAY
-#include "cache_splay.cpp"
-#else
-#include "cache_hash.cpp"
-#endif
+#include "cache.cpp"
 
 #endif // SWAP
 
@@ -177,10 +180,14 @@ int run(int argc, const char* argv[])
 
 #if defined(MMAP)
 	printf("Using memory-mapped swap files of %d records (%lld bytes) each\n", ARCHIVE_CLUSTER_SIZE, (long long)ARCHIVE_CLUSTER_SIZE * sizeof(Node));
+#elif defined(RAM)
+	printf("Using RAM blocks for swap testing of %d records (%lld bytes) each\n", ARCHIVE_CLUSTER_SIZE, (long long)ARCHIVE_CLUSTER_SIZE * sizeof(Node));
 #elif defined(WINFILES)
 	printf("Using Windows API swap file\n");
-#else
+#elif defined(POSIX)
 	printf("Using POSIX swap file\n");
+#else
+#error No swap engine
 #endif
 
 #ifdef SPLAY

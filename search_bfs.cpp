@@ -39,18 +39,35 @@ NODEI dequeueNode(FRAME frame)
 
 // ******************************************************************************************************
 
-int replayState(Node* n, State* state, FRAME* frame)
+#ifdef MULTITHREADING
+boost::mutex nodeMutex;
+#endif
+
+int replayState(const Node* n, State* state, FRAME* frame)
 {
 	Step steps[MAX_STEPS+1];
 	unsigned int stepNr = 0;
-	Node* cur = n;
+	const Node* cur = n;
 
-	while ((Action)cur->step.action != NONE)
+	/* LOCK */
 	{
-		steps[stepNr++] = cur->step;
-		cur = getNode(cur->parent);
-		if (stepNr > MAX_STEPS)
-			return stepNr;
+#ifdef MULTITHREADING
+		boost::mutex::scoped_lock lock(nodeMutex);
+#endif
+		while ((Action)cur->step.action != NONE)
+		{
+			steps[stepNr++] = cur->step;
+			NODEI p = cur->parent;
+#ifdef MULTITHREADING
+			lock.unlock();
+#endif
+			cur = getNode(p);
+#ifdef MULTITHREADING
+			lock.lock();
+#endif
+			if (stepNr > MAX_STEPS)
+				return stepNr;
+		}
 	}
 	unsigned int totalSteps = 0;
 	*state = initialState;
@@ -99,6 +116,61 @@ FRAME getFrames(NODEI n)
 	return stateFrame;
 }
 
+#ifdef DEBUG_VERBOSE
+
+void log(const char* s)
+{
+#ifdef MULTITHREADING
+	static boost::mutex m;
+	boost::mutex::scoped_lock lock(m);
+#endif
+	static FILE* f = NULL;
+	if (f==NULL)
+	{
+		f = fopen("log.txt", "wt");
+		assert(f != NULL);
+	}
+	static int counter = 0;
+	fprintf(f, "%10d. %s", counter++, s);
+	fflush(f);
+}
+
+int replayStateFast(const Node* n, NODEI index, State* state, FRAME* frame, const char* comment)
+{
+	Step steps[MAX_STEPS+1];
+	unsigned int stepNr = 0;
+	const Node* cur = n;
+
+	char buf[10240];
+	sprintf(buf, "%12s node %d ", comment, index);
+
+	while ((Action)cur->step.action != NONE)
+	{
+		steps[stepNr++] = cur->step;
+		sprintf(buf+strlen(buf), " <- %d [%s@(%d,%d)+%d]", cur->parent, actionNames[cur->step.action], cur->step.x, cur->step.y, cur->step.extraSteps);
+		cur = getNodeFast(cur->parent);
+		if (stepNr > MAX_STEPS)
+			return stepNr;
+	}
+	sprintf(buf+strlen(buf), "\n");
+	log(buf);
+	unsigned int totalSteps = 0;
+	*state = initialState;
+	*frame = 0;
+	while (stepNr)
+		totalSteps += (steps[stepNr].action<SWITCH ? 1 : 0) + replayStep(state, frame, steps[--stepNr]);
+	return totalSteps;
+}
+
+void testNode(const Node* np, NODEI index, const char* comment)
+{
+	State state;
+	FRAME stateFrame;
+	replayStateFast(np, index, &state, &stateFrame, comment);
+}
+
+#endif
+
 void dumpNodes()
 {
 	for (NODEI n=1; n<nodeCount; n++)
@@ -113,10 +185,18 @@ void dumpNodes()
 INLINE void reparentNode(NODEI n, NODEI parent, Node* np, FRAME frame, const State* state, Step step)
 {
 	// this node will always be still queued, so we don't need to worry about its children
-	np->step = step;
-	np->parent = parent;
-	markDirty(np);
+	testNode(np, n, "Reparenting");
+	/* LOCK */
+	{
+#ifdef MULTITHREADING
+		boost::mutex::scoped_lock lock(nodeMutex);
+#endif
+		np->step = step;
+		np->parent = parent;
+		markDirty(np);
+	}
 	queueNode(n, frame, state);
+	testNode(np, n, "Reparented");
 }
 
 void addNode(const State* state, NODEI parent, Step step, FRAME frame)
@@ -141,7 +221,7 @@ void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 			Node* np = getNode(n);
 			FRAME otherFrame;
 			replayState(np, &other, &otherFrame);
-			np = refreshNode(n, np);
+			//np = refreshNode(n, np);
 			if (*state == other)
 			{
 				if (otherFrame > frame) // better path found? reparent and requeue
@@ -168,11 +248,17 @@ void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 			n = np->next;
 			prev = np;
 		}
-		Node* np = newNode(&nn);
-		lookup[hash] = nn;
-		np->step = step;
-		np->parent = parent;
-		np->next = old;
+		/* LOCK */
+		{
+#ifdef MULTITHREADING
+			boost::mutex::scoped_lock lock(nodeMutex);
+#endif
+			Node* np = newNode(&nn);
+			lookup[hash] = nn;
+			np->step = step;
+			np->parent = parent;
+			np->next = old;
+		}
 		//printf("node[%2d] <- %2d: @%2d,%2d: %6s (%3d)\n", nn, parent, step.x+1, step.y+1, actionNames[step.action], frame);
 	}
 	queueNode(nn, frame, state);
@@ -256,6 +342,7 @@ void processNode(NODEI n)
 	Node* np = getNode(n);
 	State state;
 	FRAME stateFrame;
+	testNode(np, n, "Processing");
 	int steps = replayState(np, &state, &stateFrame);
 	if (stateFrame != currentFrame)
 		return; // node was reparented and requeued
@@ -281,10 +368,7 @@ void worker()
 		processNode(n);
 		postNode();
 	}
-#ifdef MULTITHREADING
-	postNode();
-	threadsRunning--;
-#endif
+	onThreadExit();
 }
 
 void searchInit()
@@ -328,6 +412,9 @@ int search()
 		//assert(queueCount[currentFrame]-queuePos[currentFrame]==0);
 
 		printf(", %d new\n", nodeCount-oldNodes);
+#ifdef DEBUG
+		cacheTest();
+#endif
 	}
 	printf("Exit not found.\n");
 	//dumpCache(); dumpNodes();

@@ -3,7 +3,7 @@
 
 Node* nodes[NODE_CLUSTERS];
 #ifdef MULTITHREADING
-boost::mutex nodeMutex;
+boost::mutex cacheMutex;
 #endif
 
 Node* newNode(NODEI* index)
@@ -12,7 +12,7 @@ Node* newNode(NODEI* index)
 	/* LOCK */
 	{
 #ifdef MULTITHREADING
-		boost::mutex::scoped_lock lock(nodeMutex);
+		boost::mutex::scoped_lock lock(cacheMutex);
 #endif
 		*index = nodeCount;
 		if ((nodeCount%NODE_CLUSTER_SIZE) == 0)
@@ -41,3 +41,9 @@ INLINE Node* refreshNode(NODEI index, Node* old) { return old; }
 INLINE void postNode() {}
 INLINE void markDirty(Node* np) {}
 INLINE const Node* getNodeFast(NODEI index) { return getNode(index); }
+
+void cacheTest() 
+{
+	for (NODEI n = 1; n < nodeCount; n++)
+		testNode(getNodeFast(n), n, "Testing");
+}

@@ -107,6 +107,21 @@ CACHEI cacheSplay(NODEI index, CACHEI t)
 	return t;
 }
 
+CACHEI cacheFind(NODEI index, CACHEI t)
+{
+	while (t)
+	{
+		if (index < cache[t].index)
+			t = cache[t].left;
+		else
+		if (index > cache[t].index)
+			t = cache[t].right;
+		else
+			break;
+	}
+	return t;
+}
+
 CACHEI cacheInsert(NODEI index, CACHEI t, bool dirty)
 {
 	CACHEI n = cacheAlloc();
@@ -228,10 +243,6 @@ CACHEI cacheAlloc()
 
 // ******************************************************************************************************
 
-#ifdef MULTITHREADING
-boost::mutex cacheMutex;
-#endif
-
 Node* newNode(NODEI* index)
 {
 	CACHEI c;
@@ -296,8 +307,25 @@ Node* getNode(NODEI index)
 
 INLINE const Node* getNodeFast(NODEI index)
 {
-	// TODO
-	return getNode(index);
+	assert(index, "Trying to get node 0");
+	assert(index < nodeCount, "Trying to get inexistent node");
+
+	NODEI archiveIndex = index/32;
+	uint32_t archiveMask = 1<<(index%32);
+
+#ifdef MULTITHREADING
+	boost::mutex::scoped_lock lock(cacheMutex);
+#endif
+	if ((cacheArchived[archiveIndex] & archiveMask) != 0)
+	{
+		return cachePeek(index);
+	}
+	else
+	{
+		CACHEI c = cacheFind(index, cacheRoot);
+		assert(cache[c].index == index, "Found wrong node"); 
+		return &cache[c].data;
+	}
 }
 
 INLINE Node* refreshNode(NODEI index, Node* old)
@@ -346,4 +374,34 @@ void dumpCache()
 }
 */
 
-#include "cache_common.cpp"
+// ******************************************************************************************************
+
+bool* nodePresent;
+
+void cacheTestNode(CACHEI c)
+{
+	assert(cache[c].allocated);
+	NODEI n = cache[c].index;
+	assert(n);
+	assert(n < nodeCount);
+	assert(!nodePresent[n]);
+	testNode(getNodeFast(n), n, "Testing");
+	nodePresent[n] = true;
+	if (cache[c].left)
+		cacheTestNode(cache[c].left);
+	if (cache[c].right)
+		cacheTestNode(cache[c].right);
+}
+
+void cacheTest()
+{
+	nodePresent = new bool[nodeCount];
+	memset(nodePresent, 0, nodeCount);
+	cacheTestNode(cacheRoot);
+	for (NODEI n = 1; n < nodeCount; n++)
+		if ((cacheArchived[n/32] & (1<<(n%32))) == 0)
+			assert(nodePresent[n])
+		else
+			assert(!nodePresent[n]);
+	delete[] nodePresent;
+}

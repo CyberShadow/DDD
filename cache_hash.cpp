@@ -56,9 +56,6 @@ INLINE CACHEI cacheAlloc()
 //#define CACHE_LOOKUPSIZE 0x1000000
 typedef uint32_t CACHEHASH;
 CACHEI cacheLookup[CACHE_LOOKUPSIZE];
-#ifdef MULTITHREADING
-boost::mutex cacheMutex;
-#endif
 
 INLINE CACHEHASH cacheHash(NODEI n)
 {
@@ -184,9 +181,9 @@ Node* getNode(NODEI index)
 	return &cache[c].data;
 }
 
-Node* getNodeFast(NODEI index)
+const Node* getNodeFast(NODEI index)
 {
-    CACHEHASH hash = cacheHash(index);
+	CACHEHASH hash = cacheHash(index);
 
 	CACHEI first = cacheLookup[hash];
 	CACHEI c = first;
@@ -199,13 +196,7 @@ Node* getNodeFast(NODEI index)
 		c = cache[c].next;
 	}
 	
-	// unarchive
-	c = cacheNew(index);
-	cache[c].dirty = false;
-	cache[c].next = first;
-	cacheLookup[hash] = c;
-	cacheUnarchive(c);
-	return &cache[c].data;
+	return cachePeek(index);
 }
 
 INLINE Node* refreshNode(NODEI index, Node* old)
@@ -216,4 +207,8 @@ INLINE Node* refreshNode(NODEI index, Node* old)
 		return getNode(index);
 }
 
-#include "cache_common.cpp"
+void cacheTest()
+{
+	// TODO
+}
+
