@@ -6,7 +6,6 @@
 #include <boost/preprocessor/cat.hpp>
 #include <boost/preprocessor/stringize.hpp>
 #include <algorithm>
-using namespace std;
 
 #include BOOST_PP_STRINGIZE(Levels/LEVEL.h)
 

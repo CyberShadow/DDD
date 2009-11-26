@@ -2,7 +2,7 @@
 
 HANDLE archive = NULL;
 
-INLINE void cacheArchive(CACHEI c)
+INLINE void cacheArchive(NODEI index, const Node* data)
 {
 	if (archive == NULL)
 	{
@@ -10,7 +10,6 @@ INLINE void cacheArchive(CACHEI c)
 		if (archive == INVALID_HANDLE_VALUE)
 			error("Swap file creation failure");
 	}
-	NODEI index = cache[c].index;
 	LARGE_INTEGER p;
 	p.QuadPart = (uint64_t)index * sizeof(Node);
 #ifdef MULTITHREADING
@@ -18,18 +17,17 @@ INLINE void cacheArchive(CACHEI c)
 	o.Offset = p.LowPart;
 	o.OffsetHigh = p.HighPart;
 	o.hEvent = 0;
-	WriteFile(archive, &cache[c].data, sizeof(Node), NULL, &o);
+	WriteFile(archive, data, sizeof(Node), NULL, &o);
 #else
 	SetFilePointerEx(archive, p, NULL, FILE_BEGIN);
 	DWORD bytes;
-	WriteFile(archive, &cache[c].data, sizeof(Node), &bytes, NULL);
+	WriteFile(archive, data, sizeof(Node), &bytes, NULL);
 #endif
 }
 
-INLINE void cacheUnarchive(CACHEI c)
+INLINE void cacheUnarchive(NODEI index, Node* data)
 {
 	assert(archive);
-	NODEI index = cache[c].index;
 	LARGE_INTEGER p;
 	p.QuadPart = (uint64_t)index * sizeof(Node);
 #ifdef MULTITHREADING
@@ -37,10 +35,10 @@ INLINE void cacheUnarchive(CACHEI c)
 	o.Offset = p.LowPart;
 	o.OffsetHigh = p.HighPart;
 	o.hEvent = 0;
-	ReadFile(archive, &cache[c].data, sizeof(Node), NULL, &o);
+	ReadFile(archive, data, sizeof(Node), NULL, &o);
 #else
 	SetFilePointerEx(archive, p, NULL, FILE_BEGIN);
 	DWORD bytes;
-	ReadFile(archive, &cache[c].data, sizeof(Node), &bytes, NULL);
+	ReadFile(archive, data, sizeof(Node), &bytes, NULL);
 #endif
 }

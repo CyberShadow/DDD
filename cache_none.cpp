@@ -1,4 +1,7 @@
-Node* nodes[0x10000];
+#define NODE_CLUSTER_SIZE 0x100000
+#define NODE_CLUSTERS ((MAX_NODES+1) / NODE_CLUSTER_SIZE)
+
+Node* nodes[NODE_CLUSTERS];
 #ifdef MULTITHREADING
 boost::mutex nodeMutex;
 #endif
@@ -12,10 +15,11 @@ Node* newNode(NODEI* index)
 		boost::mutex::scoped_lock lock(nodeMutex);
 #endif
 		*index = nodeCount;
-		if ((nodeCount&0xFFFF) == 0)
-			nodes[nodeCount/0x10000] = new Node[0x10000];
-		result = nodes[nodeCount/0x10000] + (nodeCount&0xFFFF);
+		if ((nodeCount%NODE_CLUSTER_SIZE) == 0)
+			nodes[nodeCount/NODE_CLUSTER_SIZE] = new Node[NODE_CLUSTER_SIZE];
+		result = nodes[nodeCount/NODE_CLUSTER_SIZE] + (nodeCount%NODE_CLUSTER_SIZE);
 		nodeCount++;
+		//if ((nodeCount & 0x3) == 0) Sleep(1);
 		if (nodeCount == MAX_NODES)
 			error("Too many nodes");
 	}
@@ -27,7 +31,9 @@ void reserveNode() { NODEI dummy; newNode(&dummy); }
 
 INLINE Node* getNode(NODEI index)
 {
-	return nodes[index/0x10000] + (index&0xFFFF);
+	assert(index, "Trying to get null node");
+	assert(index < nodeCount, "Trying to get invalid node")
+	return nodes[index/NODE_CLUSTER_SIZE] + (index%NODE_CLUSTER_SIZE);
 }
 
 INLINE Node* refreshNode(NODEI index, Node* old) { return old; }

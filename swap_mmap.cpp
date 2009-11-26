@@ -4,9 +4,8 @@
 #define ARCHIVE_CLUSTERS ((MAX_NODES + (ARCHIVE_CLUSTER_SIZE-1)) / ARCHIVE_CLUSTER_SIZE)
 Node* archive[ARCHIVE_CLUSTERS];
 
-INLINE void cacheArchive(CACHEI c)
+INLINE void cacheArchive(NODEI index, const Node* data)
 {
-	NODEI index = cache[c].index;
 	NODEI cindex = index / ARCHIVE_CLUSTER_SIZE;
 	assert(cindex < ARCHIVE_CLUSTERS);
 	if (archive[cindex]==NULL)
@@ -18,11 +17,10 @@ INLINE void cacheArchive(CACHEI c)
 		boost::iostreams::mapped_file* m = new boost::iostreams::mapped_file(params);
 		archive[cindex] = (Node*)m->data();
 	}
-	archive[cindex][index % ARCHIVE_CLUSTER_SIZE] = cache[c].data;
+	archive[cindex][index % ARCHIVE_CLUSTER_SIZE] = *data;
 }
 
-INLINE void cacheUnarchive(CACHEI c)
+INLINE void cacheUnarchive(NODEI index, Node* data)
 {
-	NODEI index = cache[c].index;
-	cache[c].data = archive[index / ARCHIVE_CLUSTER_SIZE][index % ARCHIVE_CLUSTER_SIZE];
+	*data = archive[index / ARCHIVE_CLUSTER_SIZE][index % ARCHIVE_CLUSTER_SIZE];
 }

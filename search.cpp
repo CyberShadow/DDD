@@ -28,6 +28,7 @@
 #endif
 
 #include <fstream>
+#include <queue>
 #include "Kwirk.cpp"
 #include "hsiehhash.cpp"
 
@@ -62,24 +63,9 @@ NODEI nodeCount = 0;
 int threadsRunning = 0;
 #endif
 
-typedef uint32_t CACHEI;
-
-INLINE void cacheArchive(CACHEI c);
-INLINE void cacheUnarchive(CACHEI c);
-
 #ifndef SWAP
 #include "cache_none.cpp"
 #else
-
-#include "stats_cache.cpp"
-
-#ifdef SPLAY
-#include "cache_splay.cpp"
-#else
-#include "cache_hash.cpp"
-#endif
-
-// ******************************************************************************************************
 
 #if defined (MMAP)
 #include "swap_mmap.cpp"
@@ -87,6 +73,18 @@ INLINE void cacheUnarchive(CACHEI c);
 #include "swap_file_windows.cpp"
 #else
 #include "swap_file_posix.cpp"
+#endif
+
+// ******************************************************************************************************
+
+typedef uint32_t CACHEI;
+
+#include "stats_cache.cpp"
+
+#ifdef SPLAY
+#include "cache_splay.cpp"
+#else
+#include "cache_hash.cpp"
 #endif
 
 #endif // SWAP
@@ -167,7 +165,7 @@ int run(int argc, const char* argv[])
 
 #ifndef DFS
 	printf("Using breadth-first search\n");
-	enforce(sizeof(Node) == 10, format("sizeof Node is %d", sizeof(Node)));
+	//enforce(sizeof(Node) == 10, format("sizeof Node is %d", sizeof(Node)));
 #else
 	printf("Using depth-first search\n");
 	enforce(sizeof(Node) == 16, format("sizeof Node is %d", sizeof(Node)));

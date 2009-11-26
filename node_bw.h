@@ -6,6 +6,7 @@ struct Node
 		struct
 		{
 			uint16_t bitfield;
+			uint16_t debugDummy;
 			NODEI next;
 			NODEI parent;
 		};

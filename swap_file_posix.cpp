@@ -6,9 +6,8 @@ boost::mutex swapMutex;
 
 int archive = 0;
 
-INLINE void cacheArchive(CACHEI c)
+INLINE void cacheArchive(NODEI index, const Node* data)
 {
-	NODEI index = cache[c].index;
 #ifdef MULTITHREADING
 	boost::mutex::scoped_lock lock(swapMutex);
 #endif
@@ -19,16 +18,15 @@ INLINE void cacheArchive(CACHEI c)
 			error(_strerror(NULL));
 	}
 	_lseeki64(archive, (uint64_t)index * sizeof(Node), SEEK_SET);
-	_write(archive, &cache[c].data, sizeof(Node));
+	_write(archive, data, sizeof(Node));
 }
 
-INLINE void cacheUnarchive(CACHEI c)
+INLINE void cacheUnarchive(NODEI index, Node* data)
 {
 	assert(archive);
-	NODEI index = cache[c].index;
 #ifdef MULTITHREADING
 	boost::mutex::scoped_lock lock(swapMutex);
 #endif
 	_lseeki64(archive, (uint64_t)index * sizeof(Node), SEEK_SET);
-	_read(archive, &cache[c].data, sizeof(Node));
+	_read(archive, data, sizeof(Node));
 }

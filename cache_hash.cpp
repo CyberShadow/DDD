@@ -95,7 +95,7 @@ void cacheTrim()
 			{
 				if (cache[c].dirty)
 				{
-					cacheArchive(c);
+					cacheArchive(cache[c].index, &cache[c].data);
 					onCacheWrite();
 				}
 				cache[c].allocState = 2;
@@ -110,11 +110,6 @@ void cacheTrim()
 			n++;
 		}
 	}
-}
-
-INLINE void markDirty(Node* np)
-{
-	((CacheNode*)np)->dirty = true;
 }
 
 // ******************************************************************************************************
@@ -144,6 +139,9 @@ void reserveNode() { nodeCount++; }
 
 Node* getNode(NODEI index)
 {
+	assert(index, "Trying to get node 0");
+	assert(index < nodeCount, "Trying to get inexistent node");
+
     CACHEHASH hash = cacheHash(index);
 
     /* LOCK */
@@ -182,7 +180,7 @@ Node* getNode(NODEI index)
 		onCacheMiss();
 	}
 	
-	cacheUnarchive(c);
+	cacheUnarchive(cache[c].index, &cache[c].data);
 	return &cache[c].data;
 }
 
@@ -218,43 +216,4 @@ INLINE Node* refreshNode(NODEI index, Node* old)
 		return getNode(index);
 }
 
-#ifndef MULTITHREADING
-#define THREADS 1
-#endif
-#define CACHE_TRIM_THRESHOLD (CACHE_SIZE-(X*Y*2*THREADS))
-
-void postNode()
-{
-	if (cacheSize >= CACHE_TRIM_THRESHOLD)
-	{
-#ifdef MULTITHREADING
-		assert(threadsRunning > 0);
-		static boost::barrier* barrier;
-		/* LOCK */
-		{
-			boost::mutex::scoped_lock lock(cacheMutex);
-			if (barrier == NULL)
-				barrier = new boost::barrier(threadsRunning);
-		}
-		barrier->wait();
-		/* LOCK */
-		{
-			boost::mutex::scoped_lock lock(cacheMutex);
-			if (cacheSize >= CACHE_TRIM_THRESHOLD)
-			{
-				cacheTrim();
-				assert(cacheSize < CACHE_TRIM_THRESHOLD, "Trim failed");
-			}
-			else
-			{
-				// another thread took care of it
-			}
-		}
-		delete barrier;
-		barrier = NULL;
-#else
-		cacheTrim();
-		assert(cacheSize < CACHE_TRIM_THRESHOLD, "Trim failed");
-#endif
-	}
-}
+#include "cache_common.cpp"

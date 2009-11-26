@@ -2,14 +2,7 @@
 
 void processNodeChildren(NODEI n, FRAME frame, const State* state);
 
-struct QueueNode
-{
-	NODEI node;
-	QueueNode* next;
-};
-
-QueueNode* queue[MAX_FRAMES];
-NODEI queueCount[MAX_FRAMES];
+std::vector<NODEI>* queue[MAX_FRAMES];
 #ifdef MULTITHREADING
 boost::mutex queueMutex[MAX_FRAMES];
 #endif
@@ -21,30 +14,26 @@ void queueNode(NODEI node, FRAME frame, const State* state)
 #endif
 	if (frame >= MAX_FRAMES)
 		return;
-	QueueNode* q = new QueueNode;
-	q->node = node;
-	q->next = queue[frame];
-	// discard state, recalculate on dequeue
-	queue[frame] = q;
-	queueCount[frame]++;
+	if (queue[frame]==NULL)
+		queue[frame] = new std::vector<NODEI>();
+	queue[frame]->push_back(node);
 }
 
 NODEI dequeueNode(FRAME frame)
 {
-	QueueNode* q;
-	/* LOCK */
-	{
 #ifdef MULTITHREADING
-		boost::mutex::scoped_lock lock(queueMutex[frame]);
+	boost::mutex::scoped_lock lock(queueMutex[frame]);
 #endif
-		q = queue[frame];
-		if (q == NULL)
-			return 0;
-		queue[frame] = q->next;
-		queueCount[frame]--;
+	if (queue[frame]==NULL)
+		return 0;
+	std::vector<NODEI>* q = queue[frame];
+	NODEI result = q->back();
+	q->pop_back();
+	if (q->empty())
+	{
+		delete q;
+		queue[frame] = NULL;
 	}
-	NODEI result = q->node;
-	delete q;
 	return result;
 }
 
@@ -286,9 +275,6 @@ void processNode(NODEI n)
 
 void worker()
 {
-#ifdef MULTITHREADING
-	threadsRunning++;
-#endif
 	NODEI n;
 	while((n=dequeueNode(currentFrame))!=0)
 	{
@@ -296,6 +282,7 @@ void worker()
 		postNode();
 	}
 #ifdef MULTITHREADING
+	postNode();
 	threadsRunning--;
 #endif
 }
@@ -321,11 +308,12 @@ int search()
 			continue;
 		
 		printTime();
-		printf("Frame %d/%d: %d/%d nodes", currentFrame, maxFrames, queueCount[currentFrame], nodeCount-1); fflush(stdout);
+		printf("Frame %d/%d: %d/%d nodes", currentFrame, maxFrames, queue[currentFrame]->size(), nodeCount-1); fflush(stdout);
 		NODEI oldNodes = nodeCount;
 		
 #ifdef MULTITHREADING
 		boost::thread* threads[THREADS];
+		threadsRunning = THREADS;
 		for (int i=0; i<THREADS; i++)
 			threads[i] = new boost::thread(&worker);
 		for (int i=0; i<THREADS; i++)
@@ -336,7 +324,8 @@ int search()
 #else
 		worker();
 #endif
-		assert(queueCount[currentFrame]==0);
+		assert(queue[currentFrame]==NULL);
+		//assert(queueCount[currentFrame]-queuePos[currentFrame]==0);
 
 		printf(", %d new\n", nodeCount-oldNodes);
 	}
