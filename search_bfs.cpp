@@ -4,13 +4,13 @@ void processNodeChildren(NODEI n, FRAME frame, const State* state);
 
 std::vector<NODEI>* queue[MAX_FRAMES];
 #ifdef MULTITHREADING
-boost::mutex queueMutex[MAX_FRAMES];
+MUTEX queueMutex[MAX_FRAMES];
 #endif
 
 void queueNode(NODEI node, FRAME frame, const State* state)
 {
 #ifdef MULTITHREADING
-	boost::mutex::scoped_lock lock(queueMutex[frame]);
+	SCOPED_LOCK lock(queueMutex[frame]);
 #endif
 	if (frame >= MAX_FRAMES)
 		return;
@@ -22,7 +22,7 @@ void queueNode(NODEI node, FRAME frame, const State* state)
 NODEI dequeueNode(FRAME frame)
 {
 #ifdef MULTITHREADING
-	boost::mutex::scoped_lock lock(queueMutex[frame]);
+	SCOPED_LOCK lock(queueMutex[frame]);
 #endif
 	if (queue[frame]==NULL)
 		return 0;
@@ -40,7 +40,7 @@ NODEI dequeueNode(FRAME frame)
 // ******************************************************************************************************
 
 #ifdef MULTITHREADING
-boost::mutex nodeMutex;
+MUTEX nodeMutex;
 #endif
 
 int replayState(const Node* n, State* state, FRAME* frame)
@@ -52,7 +52,7 @@ int replayState(const Node* n, State* state, FRAME* frame)
 	/* LOCK */
 	{
 #ifdef MULTITHREADING
-		boost::mutex::scoped_lock lock(nodeMutex);
+		SCOPED_LOCK lock(nodeMutex);
 #endif
 		while ((Action)cur->step.action != NONE)
 		{
@@ -122,7 +122,7 @@ void log(const char* s)
 {
 #ifdef MULTITHREADING
 	static boost::mutex m;
-	boost::mutex::scoped_lock lock(m);
+	SCOPED_LOCK lock(m);
 #endif
 	static FILE* f = NULL;
 	if (f==NULL)
@@ -189,7 +189,7 @@ INLINE void reparentNode(NODEI n, NODEI parent, Node* np, FRAME frame, const Sta
 	/* LOCK */
 	{
 #ifdef MULTITHREADING
-		boost::mutex::scoped_lock lock(nodeMutex);
+		SCOPED_LOCK lock(nodeMutex);
 #endif
 		np->step = step;
 		np->parent = parent;
@@ -210,7 +210,7 @@ void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 	NODEI nn;
 	{
 #ifdef MULTITHREADING
-		boost::mutex::scoped_lock lock(lookupMutex[hash % PARTITIONS]);
+		SCOPED_LOCK lock(lookupMutex[hash % PARTITIONS]);
 #endif
 		NODEI old = lookup[hash];
 		NODEI n = old;
@@ -251,7 +251,7 @@ void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 		/* LOCK */
 		{
 #ifdef MULTITHREADING
-			boost::mutex::scoped_lock lock(nodeMutex);
+			SCOPED_LOCK lock(nodeMutex);
 #endif
 			Node* np = newNode(&nn);
 			lookup[hash] = nn;
@@ -380,6 +380,10 @@ void searchInit()
 
 	Step nullStep = { (unsigned)NONE };
 	addNode(&initialState, 0, nullStep, 0);
+
+#ifdef MULTITHREADING
+	MUTEX_SET_SPIN_COUNT(nodeMutex, 8192*64);
+#endif
 }
 
 int search()
@@ -396,14 +400,14 @@ int search()
 		NODEI oldNodes = nodeCount;
 		
 #ifdef MULTITHREADING
-		boost::thread* threads[THREADS];
+		THREAD threads[THREADS];
 		threadsRunning = THREADS;
 		for (int i=0; i<THREADS; i++)
-			threads[i] = new boost::thread(&worker);
+			threads[i] = THREAD_CREATE(&worker);
 		for (int i=0; i<THREADS; i++)
 		{
-			threads[i]->join();
-			delete threads[i];
+			THREAD_JOIN(threads[i]);
+			THREAD_DESTROY(threads[i]);
 		}
 #else
 		worker();

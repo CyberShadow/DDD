@@ -1,5 +1,5 @@
 #ifdef MULTITHREADING
-boost::mutex cacheMutex;
+MUTEX cacheMutex;
 #endif
 
 #ifdef SPLAY
@@ -16,7 +16,7 @@ boost::mutex cacheMutex;
 
 #ifdef MULTITHREADING
 int threadsRunning = 0, threadsReady = 0;
-boost::condition trimReady, trimDone;
+CONDITION trimReady, trimDone;
 #endif
 
 void postNode()
@@ -25,7 +25,7 @@ void postNode()
 	{
 #ifdef MULTITHREADING
 		// (re)create barrier, set trimPending
-		boost::mutex::scoped_lock lock(cacheMutex);
+		SCOPED_LOCK lock(cacheMutex);
 
 		if (cacheSize >= CACHE_TRIM_THRESHOLD) // synchronized check
 		{
@@ -60,9 +60,9 @@ void onThreadExit()
 #ifdef MULTITHREADING
 	/* LOCK */
 	{
-		boost::mutex::scoped_lock lock(cacheMutex);
+		SCOPED_LOCK lock(cacheMutex);
 		threadsRunning--;
-		trimReady.notify_one();
+		trimReady.notify_all();
 	}
 #endif
 }
@@ -78,7 +78,7 @@ INLINE void markDirty(Node* np)
 Node peekBuf[PEEK_BUF_SIZE];
 NODEI peekPos = 0;
 #ifdef MULTITHREADING
-boost::mutex peekMutex;
+MUTEX peekMutex;
 #endif
 
 INLINE const Node* cachePeek(NODEI index)
@@ -87,7 +87,7 @@ INLINE const Node* cachePeek(NODEI index)
 	/* LOCK */
 	{
 #ifdef MULTITHREADING
-		boost::mutex::scoped_lock lock(peekMutex);
+		SCOPED_LOCK lock(peekMutex);
 #endif
 		p = peekPos++;
 	}

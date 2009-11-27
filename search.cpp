@@ -4,10 +4,8 @@
 #include <time.h>
 #include "config.h"
 
-#ifdef MULTITHREADING
-#include <boost/thread/thread.hpp>
-#include <boost/thread/mutex.hpp>
-#include <boost/thread/condition.hpp>
+#ifdef _WIN32
+#include <windows.h>
 #endif
 
 #ifdef SWAP
@@ -22,9 +20,22 @@
 #endif
 #endif
 
-#ifdef _WIN32
-#include <windows.h>
+// ******************************************************************************************************
+
+#ifdef MULTITHREADING
+#if defined(THREAD_BOOST)
+#include "thread_boost.cpp"
+#elif defined(THREAD_WIN32)
+#include "thread_win32.cpp"
+#elif defined(THREAD_WIN32_SPIN)
+#include "thread_win32_spin.cpp"
+#else
+#error Thread engine not set
 #endif
+// TODO: look into user-mode scheduling
+#endif
+
+// ******************************************************************************************************
 
 #include <fstream>
 #include <queue>
@@ -137,7 +148,7 @@ typedef uint32_t HASH;
 NODEI lookup[1<<HASHSIZE];
 #ifdef MULTITHREADING
 #define PARTITIONS 1024*1024
-boost::mutex lookupMutex[PARTITIONS];
+MUTEX lookupMutex[PARTITIONS];
 #endif
 
 FRAME maxFrames;
@@ -162,7 +173,15 @@ int run(int argc, const char* argv[])
 	printf("Optimized version\n");
 #endif
 #ifdef MULTITHREADING
-	printf("Using %d threads\n", THREADS);
+#if defined(THREAD_BOOST)
+	printf("Using %d Boost threads\n", THREADS);
+#elif defined(THREAD_WIN32)
+	printf("Using %d Win32 threads\n", THREADS);
+#elif defined(THREAD_WIN32_SPIN)
+	printf("Using %d Win32 threads with spinlocks\n", THREADS);
+#else
+#error Thread engine not set
+#endif
 #endif
 	printf("Using node lookup hashtable of %d elements (%lld bytes)\n", 1<<HASHSIZE, (long long)(1<<HASHSIZE) * sizeof(NODEI));
 

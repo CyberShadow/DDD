@@ -117,7 +117,7 @@ Node* newNode(NODEI* index)
 	CACHEI c;
 	{
 #ifdef MULTITHREADING
-		boost::mutex::scoped_lock lock(cacheMutex);
+		SCOPED_LOCK lock(cacheMutex);
 #endif
 		*index = nodeCount;
 		c = cacheNew(nodeCount);
@@ -145,7 +145,7 @@ Node* getNode(NODEI index)
     CACHEI c;
     {
 #ifdef MULTITHREADING
-		boost::mutex::scoped_lock lock(cacheMutex);
+		SCOPED_LOCK lock(cacheMutex);
 #endif
 		CACHEI first = cacheLookup[hash];
 		c = first;
