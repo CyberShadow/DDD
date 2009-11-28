@@ -56,6 +56,10 @@ INLINE CACHEI cacheAlloc()
 //#define CACHE_LOOKUPSIZE 0x1000000
 typedef uint32_t CACHEHASH;
 CACHEI cacheLookup[CACHE_LOOKUPSIZE];
+#ifdef MULTITHREADING
+#define CACHE_PARTITIONS (CACHE_LOOKUPSIZE>>8)
+MUTEX cacheLookupMutex[CACHE_PARTITIONS];
+#endif
 
 INLINE CACHEHASH cacheHash(NODEI n)
 {
@@ -67,10 +71,16 @@ CACHEI cacheNew(NODEI index)
     CACHEI c = cacheAlloc();
     cache[c].index = index;
 
-    CACHEHASH h = cacheHash(index);
-	cache[c].next = cacheLookup[h];
+    CACHEHASH hash = cacheHash(index);
 	//printf("Allocated %d for %d -> h=%d -> %d\n", c, index, h, cache[c].next);
-	cacheLookup[h] = c;
+    /* LOCK */
+	{
+#ifdef MULTITHREADING
+		SCOPED_LOCK lock(cacheLookupMutex[hash % CACHE_PARTITIONS]);
+#endif
+		cache[c].next = cacheLookup[hash];
+		cacheLookup[hash] = c;
+	}
 	return c;
 }
 
@@ -79,6 +89,7 @@ const int cacheTrimThreshold = (CACHE_SIZE / CACHE_LOOKUPSIZE / 2) - 1;
 void cacheTrim()
 {
 	printf("*");
+	// TODO: paralellize?
 	for (CACHEHASH h=0; h<CACHE_LOOKUPSIZE; h++)
 	{
 		CACHEI c = cacheLookup[h];
@@ -145,7 +156,7 @@ Node* getNode(NODEI index)
     CACHEI c;
     {
 #ifdef MULTITHREADING
-		SCOPED_LOCK lock(cacheMutex);
+		SCOPED_LOCK lock(cacheLookupMutex[hash % CACHE_PARTITIONS]);
 #endif
 		CACHEI first = cacheLookup[hash];
 		c = first;
@@ -185,6 +196,9 @@ const Node* getNodeFast(NODEI index)
 {
 	CACHEHASH hash = cacheHash(index);
 
+#ifdef MULTITHREADING
+	SCOPED_LOCK lock(cacheLookupMutex[hash % CACHE_PARTITIONS]);
+#endif
 	CACHEI first = cacheLookup[hash];
 	CACHEI c = first;
 	CACHEI prev = 0;

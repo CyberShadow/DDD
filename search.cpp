@@ -2,6 +2,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 
 #include <time.h>
+#include <sys/timeb.h>
 #include "config.h"
 
 #ifdef _WIN32
@@ -147,7 +148,7 @@ void printTime()
 typedef uint32_t HASH;
 NODEI lookup[1<<HASHSIZE];
 #ifdef MULTITHREADING
-#define PARTITIONS 1024*1024
+#define PARTITIONS ((MAX_NODES+1)>>8)
 MUTEX lookupMutex[PARTITIONS];
 #endif
 
@@ -158,6 +159,17 @@ FRAME maxFrames;
 #else
 #include "search_dfs.cpp"
 #endif
+
+timeb startTime;
+
+void printExecutionTime()
+{
+	timeb endTime;
+	ftime(&endTime);
+	int ms = (endTime.time    - startTime.time)*1000
+	       + (endTime.millitm - startTime.millitm);
+	printf("Time: %d.%03d seconds.\n", ms/1000, ms%1000);
+}
 
 // ***********************************************************************************
 
@@ -235,6 +247,8 @@ int run(int argc, const char* argv[])
 	atexit(&printCacheStats);
 #endif
 #endif
+	ftime(&startTime);
+	atexit(&printExecutionTime);
 
 	int result = search();
 	//dumpNodes();
