@@ -1,9 +1,12 @@
 #undef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
 
+#include "config.h"
+
 #include <time.h>
 #include <sys/timeb.h>
-#include "config.h"
+#include <fstream>
+#include <queue>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -21,6 +24,12 @@
 #endif
 #endif
 
+#ifdef __GNUC__
+#include <stdint.h>
+#else
+#include "pstdint.h"
+#endif
+
 // ******************************************************************************************************
 
 #ifdef MULTITHREADING
@@ -28,18 +37,26 @@
 #include "thread_boost.cpp"
 #elif defined(THREAD_WIN32)
 #include "thread_win32.cpp"
-#elif defined(THREAD_WIN32_SPIN)
-#include "thread_win32_spin.cpp"
 #else
 #error Thread engine not set
+#endif
+
+#if defined(SYNC_BOOST)
+#include "sync_boost.cpp"
+#elif defined(SYNC_WIN32)
+#include "sync_win32.cpp"
+#elif defined(SYNC_WIN32_SPIN)
+#include "sync_win32_spin.cpp"
+#elif defined(SYNC_INTEL_SPIN)
+#include "sync_intel_spin.cpp"
+#else
+#error Sync engine not set
 #endif
 // TODO: look into user-mode scheduling
 #endif
 
 // ******************************************************************************************************
 
-#include <fstream>
-#include <queue>
 #include "Kwirk.cpp"
 #include "hsiehhash.cpp"
 
@@ -166,7 +183,7 @@ void printExecutionTime()
 {
 	timeb endTime;
 	ftime(&endTime);
-	int ms = (endTime.time    - startTime.time)*1000
+	time_t ms = (endTime.time    - startTime.time)*1000
 	       + (endTime.millitm - startTime.millitm);
 	printf("Time: %d.%03d seconds.\n", ms/1000, ms%1000);
 }
@@ -176,25 +193,39 @@ void printExecutionTime()
 int run(int argc, const char* argv[])
 {
 	printf("Level %d: %dx%d, %d players\n", LEVEL, X, Y, PLAYERS);
+
 #ifdef HAVE_VALIDATOR
 	printf("Level state validator present\n");
 #endif
+
 #ifdef DEBUG
 	printf("Debug version\n");
 #else
 	printf("Optimized version\n");
 #endif
+
 #ifdef MULTITHREADING
 #if defined(THREAD_BOOST)
-	printf("Using %d Boost threads\n", THREADS);
+	printf("Using %d Boost threads ", THREADS);
 #elif defined(THREAD_WIN32)
-	printf("Using %d Win32 threads\n", THREADS);
-#elif defined(THREAD_WIN32_SPIN)
-	printf("Using %d Win32 threads with spinlocks\n", THREADS);
+	printf("Using %d Win32 threads ", THREADS);
 #else
 #error Thread engine not set
 #endif
 #endif
+
+#if defined(SYNC_BOOST)
+	printf(" with Boost synchronization\n");
+#elif defined(SYNC_WIN32)
+	printf(" with Win32 synchronization\n");
+#elif defined(SYNC_WIN32_SPIN)
+	printf(" with Win32 spinlock synchronization\n");
+#elif defined(SYNC_INTEL_SPIN)
+	printf(" with Intel spinlock synchronization\n");
+#else
+#error Sync engine not set
+#endif
+	
 	printf("Using node lookup hashtable of %d elements (%lld bytes)\n", 1<<HASHSIZE, (long long)(1<<HASHSIZE) * sizeof(NODEI));
 
 #ifndef DFS
