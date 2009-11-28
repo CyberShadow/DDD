@@ -249,7 +249,7 @@ Node* newNode(NODEI* index)
 	/* LOCK */
 	{
 #ifdef MULTITHREADING
-		boost::mutex::scoped_lock lock(cacheMutex);
+		SCOPED_LOCK lock(cacheMutex);
 #endif
 		*index = nodeCount;
 		c = cacheRoot = cacheInsert(nodeCount, cacheRoot, true);
@@ -278,7 +278,7 @@ Node* getNode(NODEI index)
 	/* LOCK */
 	{
 #ifdef MULTITHREADING
-		boost::mutex::scoped_lock lock(cacheMutex);
+		SCOPED_LOCK lock(cacheMutex);
 #endif
 		uint32_t a = cacheArchived[archiveIndex];
 		archived = (a & archiveMask) != 0;
@@ -314,7 +314,7 @@ INLINE const Node* getNodeFast(NODEI index)
 	uint32_t archiveMask = 1<<(index%32);
 
 #ifdef MULTITHREADING
-	boost::mutex::scoped_lock lock(cacheMutex);
+	SCOPED_LOCK lock(cacheMutex);
 #endif
 	if ((cacheArchived[archiveIndex] & archiveMask) != 0)
 	{
@@ -400,8 +400,12 @@ void cacheTest()
 	cacheTestNode(cacheRoot);
 	for (NODEI n = 1; n < nodeCount; n++)
 		if ((cacheArchived[n/32] & (1<<(n%32))) == 0)
-			assert(nodePresent[n])
+		{
+			assert(nodePresent[n]);
+		}
 		else
+		{
 			assert(!nodePresent[n]);
+		}
 	delete[] nodePresent;
 }

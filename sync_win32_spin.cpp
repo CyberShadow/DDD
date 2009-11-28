@@ -11,7 +11,7 @@ public:
 
     inline void enter()
     {
-        while (InterlockedExchange(&x, 0xDEADC0DE))
+        while (InterlockedExchange(&x, 1))
         {
         	//Sleep(0);
         }
@@ -74,7 +74,7 @@ public:
 	void wait(ScopedLock& lock)
 	{
 		lock.unlock();
-		while (InterlockedExchange(&x, 0)==0)
+		while (!InterlockedExchange(&x, 0))
 		{
 			//Sleep(0);
 		}
@@ -82,7 +82,7 @@ public:
 	}
 	void notify_all()
 	{
-		InterlockedExchange(&x, 0xAC1DCAFE);
+		InterlockedExchange(&x, 1);
 	}
 };
 

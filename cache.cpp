@@ -2,10 +2,12 @@
 MUTEX cacheMutex;
 #endif
 
-#ifdef SPLAY
+#if defined(CACHE_SPLAY)
 #include "cache_splay.cpp"
-#else
+#elif defined(CACHE_HASH)
 #include "cache_hash.cpp"
+#else
+#error No cache engine
 #endif
 
 #ifndef MULTITHREADING

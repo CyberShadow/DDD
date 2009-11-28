@@ -15,7 +15,7 @@
 #ifdef SWAP
 #include <string>
 #include <sstream>
-#ifdef MMAP
+#ifdef SWAP_MMAP
 #include <boost/iostreams/device/mapped_file.hpp>
 #else
 #include <io.h>
@@ -99,13 +99,13 @@ void testNode(const Node* data, NODEI index, const char* comment);
 #define testNode(x,y,z)
 #endif
 
-#if defined (MMAP)
+#if defined (SWAP_MMAP)
 #include "swap_mmap.cpp"
-#elif defined(RAM)
+#elif defined(SWAP_RAM)
 #include "swap_ram.cpp"
-#elif defined(WINFILES)
+#elif defined(SWAP_WINFILES)
 #include "swap_file_windows.cpp"
-#elif defined(POSIX)
+#elif defined(SWAP_POSIX)
 #include "swap_file_posix.cpp"
 #else
 #error No swap engine
@@ -240,28 +240,30 @@ int run(int argc, const char* argv[])
 #ifdef SWAP
 	printf("Using node cache of %d records (%lld bytes)\n", CACHE_SIZE, (long long)CACHE_SIZE * sizeof(CacheNode));
 
-#if defined(MMAP)
+#if defined(SWAP_MMAP)
 	printf("Using memory-mapped swap files of %d records (%lld bytes) each\n", ARCHIVE_CLUSTER_SIZE, (long long)ARCHIVE_CLUSTER_SIZE * sizeof(Node));
-#elif defined(RAM)
+#elif defined(SWAP_RAM)
 	printf("Using RAM blocks for swap testing of %d records (%lld bytes) each\n", ARCHIVE_CLUSTER_SIZE, (long long)ARCHIVE_CLUSTER_SIZE * sizeof(Node));
-#elif defined(WINFILES)
+#elif defined(SWAP_WINFILES)
 	printf("Using Windows API swap file\n");
-#elif defined(POSIX)
+#elif defined(SWAP_POSIX)
 	printf("Using POSIX swap file\n");
 #else
 #error No swap engine
 #endif
 
-#ifdef SPLAY
+#if defined(CACHE_SPLAY)
 	printf("Using splay tree caching\n");
 	enforce(sizeof(CacheNode) == sizeof(Node)+14, format("sizeof CacheNode is %d", sizeof(CacheNode)));
-#else
+#elif defined(CACHE_HASH)
 	printf("Using hashtable caching\n");
 	printf("Using cache lookup hashtable of %d elements (%lld bytes)\n", CACHE_LOOKUPSIZE, (long long)CACHE_LOOKUPSIZE * sizeof(CACHEI));
 	printf("Cache lookup hashtable is trimmed to %d elements\n", cacheTrimThreshold+1);
 	enforce(cacheTrimThreshold>0, "Cache lookup hashtable trim threshold too low");
 	enforce(cacheTrimThreshold<=16, "Cache lookup hashtable trim threshold too high");
 	enforce(sizeof(CacheNode) == sizeof(Node)+10, format("sizeof CacheNode is %d", sizeof(CacheNode)));
+#else
+#error No cache engine
 #endif
 #endif
 	

@@ -6,7 +6,7 @@
 #error Unsupported architecture
 #endif
 
-const char* debug = "OMGWTFBBQ";
+//const char* debug = "OMGWTFBBQ";
 
 class CriticalSection
 {
@@ -20,7 +20,7 @@ public:
 		__asm
 		{
 			mov REG_THIS, this
-			mov eax, 0xDEADC0DE
+			mov eax, 1
 		l:
 			xchg eax, dword ptr [REG_THIS]
 			test eax, eax
@@ -108,7 +108,7 @@ public:
 	{
 		__asm
 		{
-			mov eax, 0xAC1DCAFE
+			mov eax, 1
 			mov REG_THIS, this
 			xchg eax, dword ptr [REG_THIS]
 		}
