@@ -23,6 +23,8 @@ public:
 #ifdef DEBUG
 		if (old==0) throw "CriticalSection wasn't locked";
 #endif
+		
+		//x = 0;
     }
 };
 
@@ -64,6 +66,7 @@ public:
 
 #define SCOPED_LOCK ScopedLock
 
+// TODO: this is currently broken
 class Condition
 {
 private:

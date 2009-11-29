@@ -77,6 +77,7 @@ public:
 
 #define SCOPED_LOCK ScopedLock
 
+// TODO: this is currently broken
 class Condition
 {
 private:

@@ -18,6 +18,10 @@ void cacheTrim();
 
 INLINE CACHEI cacheAlloc()
 {
+#ifdef MULTITHREADING
+	SCOPED_LOCK lock(cacheMutex);
+#endif
+
 	if (cacheSize == CACHE_SIZE)
 	{
 #ifdef MULTITHREADING
@@ -71,9 +75,9 @@ CACHEI cacheNew(NODEI index)
     CACHEI c = cacheAlloc();
     cache[c].index = index;
 
-    CACHEHASH hash = cacheHash(index);
+	CACHEHASH hash = cacheHash(index);
 	//printf("Allocated %d for %d -> h=%d -> %d\n", c, index, h, cache[c].next);
-    /* LOCK */
+	/* LOCK */
 	{
 #ifdef MULTITHREADING
 		SCOPED_LOCK lock(cacheLookupMutex[hash % CACHE_PARTITIONS]);
@@ -88,8 +92,8 @@ const int cacheTrimThreshold = (CACHE_SIZE / CACHE_LOOKUPSIZE / 2) - 1;
 
 void cacheTrim()
 {
-	printf("*");
-	// TODO: paralellize?
+	printf("<");
+	// TODO: parallelize?
 	for (CACHEHASH h=0; h<CACHE_LOOKUPSIZE; h++)
 	{
 		CACHEI c = cacheLookup[h];
@@ -118,25 +122,31 @@ void cacheTrim()
 			n++;
 		}
 	}
+	printf(">");
 }
 
 // ******************************************************************************************************
 
+#ifdef MULTITHREADING
+MUTEX nodeCountMutex;
+#endif
+
 Node* newNode(NODEI* index)
 {
+	NODEI n;
 	/* LOCK */
-	CACHEI c;
 	{
 #ifdef MULTITHREADING
-		SCOPED_LOCK lock(cacheMutex);
+		SCOPED_LOCK lock(nodeCountMutex);
 #endif
-		*index = nodeCount;
-		c = cacheNew(nodeCount);
-		cache[c].dirty = true;
-		nodeCount++;
+		n = nodeCount++;
 		if (nodeCount == MAX_NODES)
 			error("Too many nodes");
 	}
+	*index = n;
+
+	CACHEI c = cacheNew(n);
+	cache[c].dirty = true;
 
 	Node* result = &cache[c].data;
 	result->next = 0;
@@ -179,16 +189,17 @@ Node* getNode(NODEI index)
 			prev = c;
 			c = cache[c].next;
 		}
-		
+
 		// unarchive
-		c = cacheNew(index);
-		cache[c].dirty = false;
+		c = cacheAlloc();
+		cache[c].index = index;
 		cache[c].next = first;
 		cacheLookup[hash] = c;
+		cache[c].dirty = false;
 		onCacheMiss();
+		cacheUnarchive(cache[c].index, &cache[c].data);
 	}
 	
-	cacheUnarchive(cache[c].index, &cache[c].data);
 	return &cache[c].data;
 }
 
