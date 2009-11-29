@@ -6,8 +6,6 @@
 #error Unsupported architecture
 #endif
 
-//const char* debug = "OMGWTFBBQ";
-
 class CriticalSection
 {
 private:

@@ -19,12 +19,12 @@ public:
 
     inline void leave()
     {
-        int old = InterlockedExchange(&x, 0);
+        /*int old = InterlockedExchange(&x, 0);
 #ifdef DEBUG
 		if (old==0) throw "CriticalSection wasn't locked";
 #endif
-		
-		//x = 0;
+		*/
+		x = 0;
     }
 };
 
