@@ -66,27 +66,4 @@ public:
 
 #define SCOPED_LOCK ScopedLock
 
-// TODO: this is currently broken
-class Condition
-{
-private:
-	volatile LONG x;
-public:
-	Condition() : x(0) {}
-
-	void wait(ScopedLock& lock)
-	{
-		lock.unlock();
-		while (!InterlockedExchange(&x, 0))
-		{
-			//Sleep(0);
-		}
-		lock.lock();
-	}
-	void notify_all()
-	{
-		InterlockedExchange(&x, 1);
-	}
-};
-
-#define CONDITION Condition
+#include "sync_simple_condition.cpp"

@@ -77,45 +77,6 @@ public:
 
 #define SCOPED_LOCK ScopedLock
 
-// TODO: this is currently broken
-class Condition
-{
-private:
-	volatile uint32_t x;
-public:
-	Condition() : x(0) {}
-
-	inline void __fastcall wait_sync()
-	{
-		__asm
-		{
-			mov eax, 0
-			mov REG_THIS, this
-		l:
-			xchg eax, dword ptr [REG_THIS]
-			test eax, eax
-			jz l
-		}
-	}
-
-	inline void wait(ScopedLock& lock)
-	{
-		lock.unlock();
-		wait_sync();
-		lock.lock();
-	}
-
-	inline void __fastcall notify_all()
-	{
-		__asm
-		{
-			mov eax, 1
-			mov REG_THIS, this
-			xchg eax, dword ptr [REG_THIS]
-		}
-	}
-};
-
-#define CONDITION Condition
+#include "sync_simple_condition.cpp"
 
 #undef REG_THIS

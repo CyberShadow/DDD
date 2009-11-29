@@ -34,6 +34,8 @@ void postNode()
 			if (threadsReady==0)
 			{
 				threadsReady = 1;
+				CONDITION_RESET(trimReady);
+				CONDITION_RESET(trimDone);
 				while (threadsReady < threadsRunning)
 					trimReady.wait(lock);
 				cacheTrim();

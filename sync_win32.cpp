@@ -88,3 +88,4 @@ public:
 };
 
 #define CONDITION Condition
+#define CONDITION_RESET(condition)
