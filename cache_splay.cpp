@@ -205,6 +205,7 @@ void cacheDoTrim(CACHEI n, int level)
 
 void cacheTrim()
 {
+	onCacheTrim();
 	for (int i=0; i<MAX_CACHE_TREE_DEPTH; i++)
 		cacheDepthCounts[i] = 0;
 	cacheCount(cacheRoot, 0);

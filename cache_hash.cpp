@@ -90,11 +90,27 @@ CACHEI cacheNew(NODEI index)
 
 const int cacheTrimThreshold = (CACHE_SIZE / CACHE_LOOKUPSIZE / 2) - 1;
 
-void cacheTrim()
+#ifdef MULTITHREADING
+//#define PARALLEL_TRIM  // might be slower!
+#endif
+
+#ifdef PARALLEL_TRIM
+int trimTask;
+MUTEX trimTaskMutex;
+#endif
+
+void cacheDoTrim()
 {
-	printf("<");
-	// TODO: parallelize?
+#ifdef PARALLEL_TRIM
+	CACHEHASH start;
+	{
+		SCOPED_LOCK lock(trimTaskMutex);
+		start = trimTask++;
+	}
+	for (CACHEHASH h=start; h<CACHE_LOOKUPSIZE; h+=THREADS)
+#else
 	for (CACHEHASH h=0; h<CACHE_LOOKUPSIZE; h++)
+#endif
 	{
 		CACHEI c = cacheLookup[h];
 		unsigned n = 0;
@@ -122,6 +138,25 @@ void cacheTrim()
 			n++;
 		}
 	}
+}
+
+void cacheTrim()
+{
+	onCacheTrim();
+	printf("<");
+#ifdef PARALLEL_TRIM
+	THREAD threads[THREADS];
+	trimTask = 0;
+	for (int i=0; i<THREADS; i++)
+		threads[i] = THREAD_CREATE(&cacheDoTrim);
+	for (int i=0; i<THREADS; i++)
+	{
+		THREAD_JOIN(threads[i]);
+		THREAD_DESTROY(threads[i]);
+	}
+#else
+	cacheDoTrim();
+#endif
 	printf(">");
 }
 

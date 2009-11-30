@@ -11,10 +11,8 @@ public:
 
     inline void enter()
     {
-        while (InterlockedExchange(&x, 1))
-        {
-        	//Sleep(0);
-        }
+        //do;
+        while (InterlockedExchange(&x, 1));
     }
 
     inline void leave()

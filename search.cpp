@@ -32,25 +32,32 @@
 
 // ******************************************************************************************************
 
+#ifndef MULTITHREADING
+#undef THREADS
+#define THREADS 1
+#endif
+
+// ******************************************************************************************************
+
 #ifdef MULTITHREADING
 #if defined(THREAD_BOOST)
 #include "thread_boost.cpp"
-#elif defined(THREAD_WIN32)
-#include "thread_win32.cpp"
+#elif defined(THREAD_WINAPI)
+#include "thread_winapi.cpp"
 #else
-#error Thread engine not set
+#error Thread plugin not set
 #endif
 
 #if defined(SYNC_BOOST)
 #include "sync_boost.cpp"
-#elif defined(SYNC_WIN32)
-#include "sync_win32.cpp"
-#elif defined(SYNC_WIN32_SPIN)
-#include "sync_win32_spin.cpp"
+#elif defined(SYNC_WINAPI)
+#include "sync_winapi.cpp"
+#elif defined(SYNC_WINAPI_SPIN)
+#include "sync_winapi_spin.cpp"
 #elif defined(SYNC_INTEL_SPIN)
 #include "sync_intel_spin.cpp"
 #else
-#error Sync engine not set
+#error Sync plugin not set
 #endif
 // TODO: look into user-mode scheduling
 #endif
@@ -108,7 +115,7 @@ void testNode(const Node* data, NODEI index, const char* comment);
 #elif defined(SWAP_POSIX)
 #include "swap_file_posix.cpp"
 #else
-#error No swap engine
+#error No swap plugin
 #endif
 
 // ******************************************************************************************************
@@ -207,23 +214,23 @@ int run(int argc, const char* argv[])
 #ifdef MULTITHREADING
 #if defined(THREAD_BOOST)
 	printf("Using %d Boost threads ", THREADS);
-#elif defined(THREAD_WIN32)
-	printf("Using %d Win32 threads ", THREADS);
+#elif defined(THREAD_WINAPI)
+	printf("Using %d WinAPI threads ", THREADS);
 #else
-#error Thread engine not set
+#error Thread plugin not set
 #endif
 #endif
 
 #if defined(SYNC_BOOST)
-	printf(" with Boost synchronization\n");
-#elif defined(SYNC_WIN32)
-	printf(" with Win32 synchronization\n");
-#elif defined(SYNC_WIN32_SPIN)
-	printf(" with Win32 spinlock synchronization\n");
+	printf(" with Boost sync\n");
+#elif defined(SYNC_WINAPI)
+	printf(" with WinAPI sync\n");
+#elif defined(SYNC_WINAPI_SPIN)
+	printf(" with WinAPI spinlock sync\n");
 #elif defined(SYNC_INTEL_SPIN)
-	printf(" with Intel spinlock synchronization\n");
+	printf(" with Intel spinlock sync\n");
 #else
-#error Sync engine not set
+#error Sync plugin not set
 #endif
 	
 	printf("Using node lookup hashtable of %d elements (%lld bytes)\n", 1<<HASHSIZE, (long long)(1<<HASHSIZE) * sizeof(NODEI));
@@ -249,7 +256,7 @@ int run(int argc, const char* argv[])
 #elif defined(SWAP_POSIX)
 	printf("Using POSIX swap file\n");
 #else
-#error No swap engine
+#error Swap plugin not set
 #endif
 
 #if defined(CACHE_SPLAY)
@@ -263,7 +270,7 @@ int run(int argc, const char* argv[])
 	enforce(cacheTrimThreshold<=16, "Cache lookup hashtable trim threshold too high");
 	enforce(sizeof(CacheNode) == sizeof(Node)+10, format("sizeof CacheNode is %d", sizeof(CacheNode)));
 #else
-#error No cache engine
+#error Cache plugin not set
 #endif
 #endif
 	

@@ -10,12 +10,12 @@
 
 // THREAD_* defines how will threads be created.
 #define THREAD_BOOST
-//#define THREAD_WIN32
+//#define THREAD_WINAPI
 
 // SYNC_* selects the synchronization (mutex and condition) methods.
 //#define SYNC_BOOST
-//#define SYNC_WIN32
-//#define SYNC_WIN32_SPIN
+//#define SYNC_WINAPI
+//#define SYNC_WINAPI_SPIN
 #define SYNC_INTEL_SPIN
 
 // Collect cache statistics?

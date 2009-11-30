@@ -407,6 +407,9 @@ int search()
 #ifdef DEBUG
 		cacheTest();
 #endif
+#ifdef ARCHIVE_STATS
+		printCacheStatsDelta();
+#endif
 	}
 	printf("Exit not found.\n");
 	//dumpCache(); dumpNodes();

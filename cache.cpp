@@ -7,13 +7,9 @@ MUTEX cacheMutex;
 #elif defined(CACHE_HASH)
 #include "cache_hash.cpp"
 #else
-#error No cache engine
+#error Cache plugin not set
 #endif
 
-#ifndef MULTITHREADING
-#undef THREADS
-#define THREADS 1
-#endif
 #define CACHE_TRIM_THRESHOLD (CACHE_SIZE-(X*Y*2*THREADS))
 
 #ifdef MULTITHREADING
@@ -26,32 +22,35 @@ void postNode()
 	if (cacheSize >= CACHE_TRIM_THRESHOLD)
 	{
 #ifdef MULTITHREADING
-		// (re)create barrier, set trimPending
-		SCOPED_LOCK lock(cacheMutex);
-
-		if (cacheSize >= CACHE_TRIM_THRESHOLD) // synchronized check
+		/* LOCK */
 		{
-			if (threadsReady==0)
+			SCOPED_LOCK lock(cacheMutex);
+
+			if (cacheSize >= CACHE_TRIM_THRESHOLD) // synchronized check
 			{
-				threadsReady = 1;
-				CONDITION_RESET(trimReady);
-				CONDITION_RESET(trimDone);
-				while (threadsReady < threadsRunning)
-					trimReady.wait(lock);
-				cacheTrim();
-				assert(cacheSize < CACHE_TRIM_THRESHOLD, "Trim failed");
-				threadsReady = 0;
-				trimDone.notify_all();
-			}
-			else
-			{
-				threadsReady++;
-				trimReady.notify_all();
-				trimDone.wait(lock);
-				assert(cacheSize < CACHE_TRIM_THRESHOLD, "Trim failed");
+				if (threadsReady==0)
+				{
+					threadsReady = 1;
+					CONDITION_RESET(trimReady);
+					CONDITION_RESET(trimDone);
+					while (threadsReady < threadsRunning)
+						CONDITION_WAIT(trimReady, lock);
+					cacheTrim();
+					assert(cacheSize < CACHE_TRIM_THRESHOLD, "Trim failed");
+					threadsReady = 0;
+					CONDITION_NOTIFY(trimDone, lock);
+				}
+				else
+				{
+					threadsReady++;
+					CONDITION_NOTIFY(trimReady, lock);
+					CONDITION_WAIT(trimDone, lock);
+					assert(cacheSize < CACHE_TRIM_THRESHOLD, "Trim failed");
+				}
 			}
 
 		}
+		CONDITION_BARRIER(trimDone);
 #else
 		cacheTrim();
 		assert(cacheSize < CACHE_TRIM_THRESHOLD, "Trim failed");
@@ -66,7 +65,7 @@ void onThreadExit()
 	{
 		SCOPED_LOCK lock(cacheMutex);
 		threadsRunning--;
-		trimReady.notify_all();
+		CONDITION_NOTIFY(trimReady, lock);
 	}
 #endif
 }

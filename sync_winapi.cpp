@@ -81,7 +81,7 @@ public:
 	{
 		SleepConditionVariableCS(&cv, &lock.cs->cs, INFINITE);
 	}
-	void notify_all()
+	void notify()
 	{
 		WakeAllConditionVariable(&cv);
 	}
@@ -89,3 +89,6 @@ public:
 
 #define CONDITION Condition
 #define CONDITION_RESET(condition)
+#define CONDITION_WAIT(condition, lock) (condition).wait(lock)
+#define CONDITION_NOTIFY(condition, lock) (condition).notify()
+#define CONDITION_BARRIER(condition)
