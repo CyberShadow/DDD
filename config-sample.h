@@ -47,5 +47,5 @@
 //#define DFS
 
 // QUEUE_* selects how to queue nodes (BFS only).
-//#define QUEUE_STL
-#define QUEUE_FILE
+#define QUEUE_STL
+//#define QUEUE_FILE
