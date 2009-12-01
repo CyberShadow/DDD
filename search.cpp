@@ -147,7 +147,7 @@ INLINE int replayStep(State* state, FRAME* frame, Step step)
 
 void dumpNodesToDisk()
 {
-	FILE* f = fopen("nodes-" BOOST_PP_STRINGIZE(LEVEL) ".bin", "wb");
+	FILE* f = fopen("nodes-" STRINGIZE(LEVEL) ".bin", "wb");
 	for (NODEI n=1; n<nodeCount; n++)
 	{
 		const Node* np = getNodeFast(n);

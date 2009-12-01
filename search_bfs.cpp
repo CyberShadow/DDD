@@ -322,7 +322,7 @@ void processNode(NODEI n)
 	if (state.playersLeft()==0)
 	{
 		printf("\nExit found, writing path...\n");
-		FILE* f = fopen(BOOST_PP_STRINGIZE(LEVEL) ".txt", "wt");
+		FILE* f = fopen(STRINGIZE(LEVEL) ".txt", "wt");
 		dumpChain(f, n);
 		fclose(f);
 		//File.set(LEVEL ~ ".txt", chainToString(state));

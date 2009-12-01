@@ -3,11 +3,11 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
-#include <boost/preprocessor/cat.hpp>
-#include <boost/preprocessor/stringize.hpp>
-#include <algorithm>
 
-#include BOOST_PP_STRINGIZE(Levels/LEVEL.h)
+#define STRINGIZE_EXPANDED(x) #x
+#define STRINGIZE(x) STRINGIZE_EXPANDED(x)
+
+#include STRINGIZE(Levels/LEVEL.h)
 
 void error(const char* message = NULL)
 {
@@ -334,7 +334,7 @@ struct State
 	}
 
 	#ifdef HAVE_VALIDATOR
-	#include BOOST_PP_STRINGIZE(Levels/LEVEL-validator.h)
+	#include STRINGIZE(Levels/LEVEL-validator.h)
 	#endif
 
 	void load()

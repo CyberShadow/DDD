@@ -114,7 +114,7 @@ void cacheDoTrim()
 	{
 	    if (h % (CACHE_LOOKUPSIZE>>8) == 0)
 	    {
-	    	printf(" <%3d%%>\x08\x08\x08\x08\x08\x08\x08", (int)(h * 100LL / CACHE_LOOKUPSIZE));
+	    	printf(" <%3d%%>\x08\x08\x08\x08\x08\x08\x08", (int)(h * 100LL / CACHE_LOOKUPSIZE)); fflush(stdout);
 	    }
 		
 		CACHEI c = cacheLookup[h];
