@@ -157,7 +157,7 @@ CACHEI cacheInsert(NODEI index, CACHEI t, bool dirty)
 
 // ******************************************************************************************************
 
-CACHEI cacheFreePtr=1, cacheSize=1, cacheRoot=0;
+CACHEI cacheFreePtr=1, cacheRoot=0;
 // this is technically not required, but provides an optimization (we don't need to check if a possibly-archived node is in the cache)
 uint32_t cacheArchived[(MAX_NODES+31)/32];
 

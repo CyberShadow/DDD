@@ -45,3 +45,7 @@
 // Use a depth-first search algorithm instead of the default Dijksta BFS.
 // (Untested) Should be faster when the number of accessed nodes for each BFS frame exceeds CACHE_SIZE (the number of nodes that fit in physical RAM).
 //#define DFS
+
+// QUEUE_* selects how to queue nodes (BFS only).
+//#define QUEUE_STL
+#define QUEUE_FILE

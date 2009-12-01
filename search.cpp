@@ -6,7 +6,6 @@
 #include <time.h>
 #include <sys/timeb.h>
 #include <fstream>
-#include <queue>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -121,6 +120,7 @@ void testNode(const Node* data, NODEI index, const char* comment);
 // ******************************************************************************************************
 
 typedef uint32_t CACHEI;
+CACHEI cacheSize=1;
 
 #include "stats_cache.cpp"
 
@@ -222,13 +222,13 @@ int run(int argc, const char* argv[])
 #endif
 
 #if defined(SYNC_BOOST)
-	printf(" with Boost sync\n");
+	printf("with Boost sync\n");
 #elif defined(SYNC_WINAPI)
-	printf(" with WinAPI sync\n");
+	printf("with WinAPI sync\n");
 #elif defined(SYNC_WINAPI_SPIN)
-	printf(" with WinAPI spinlock sync\n");
+	printf("with WinAPI spinlock sync\n");
 #elif defined(SYNC_INTEL_SPIN)
-	printf(" with Intel spinlock sync\n");
+	printf("with Intel spinlock sync\n");
 #else
 #error Sync plugin not set
 #endif
@@ -237,8 +237,17 @@ int run(int argc, const char* argv[])
 
 #ifndef DFS
 	printf("Using breadth-first search\n");
-	//enforce(sizeof(Node) == 10, format("sizeof Node is %d", sizeof(Node)));
+	enforce(sizeof(Node) == 10, format("sizeof Node is %d", sizeof(Node)));
+
+#if defined(QUEUE_STL)
+	printf("Using STL queue\n");
+#elif defined(QUEUE_FILE)
+	printf("Using FILE queue\n");
 #else
+#error Queue plugin not set
+#endif
+
+#else // DFS
 	printf("Using depth-first search\n");
 	enforce(sizeof(Node) == 16, format("sizeof Node is %d", sizeof(Node)));
 #endif
@@ -283,9 +292,7 @@ int run(int argc, const char* argv[])
 		maxFrames = strtol(argv[1], NULL, 10);
 
 #ifdef SWAP
-#ifdef ARCHIVE_STATS
 	atexit(&printCacheStats);
-#endif
 #endif
 	ftime(&startTime);
 	atexit(&printExecutionTime);

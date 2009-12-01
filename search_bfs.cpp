@@ -1,41 +1,16 @@
 // Simple Dijkstra BFS.
 
+#if defined(QUEUE_STL)
+#include "queue_stl.cpp"
+#elif defined(QUEUE_FILE)
+#include "queue_file.cpp"
+#else
+#error Queue plugin not set
+#endif
+
+// ******************************************************************************************************
+
 void processNodeChildren(NODEI n, FRAME frame, const State* state);
-
-std::vector<NODEI>* queue[MAX_FRAMES];
-#ifdef MULTITHREADING
-MUTEX queueMutex[MAX_FRAMES];
-#endif
-
-void queueNode(NODEI node, FRAME frame, const State* state)
-{
-#ifdef MULTITHREADING
-	SCOPED_LOCK lock(queueMutex[frame]);
-#endif
-	if (frame >= MAX_FRAMES)
-		return;
-	if (queue[frame]==NULL)
-		queue[frame] = new std::vector<NODEI>();
-	queue[frame]->push_back(node);
-}
-
-NODEI dequeueNode(FRAME frame)
-{
-#ifdef MULTITHREADING
-	SCOPED_LOCK lock(queueMutex[frame]);
-#endif
-	if (queue[frame]==NULL)
-		return 0;
-	std::vector<NODEI>* q = queue[frame];
-	NODEI result = q->back();
-	q->pop_back();
-	if (q->empty())
-	{
-		delete q;
-		queue[frame] = NULL;
-	}
-	return result;
-}
 
 // ******************************************************************************************************
 
@@ -54,7 +29,9 @@ int replayState(NODEI n, const Node* np, State* state, FRAME* frame)
 	{
 		/* LOCK */
 		{
+#ifdef MULTITHREADING
 			SCOPED_LOCK lock(nodeMutex[n % NODE_PARTITIONS]);
+#endif
 			if ((Action)cur->step.action == NONE)
 				break;
 			
@@ -179,7 +156,7 @@ void dumpNodes()
 
 // ******************************************************************************************************
 
-INLINE void reparentNode(NODEI n, NODEI parent, Node* np, FRAME frame, const State* state, Step step)
+INLINE void reparentNode(NODEI n, NODEI parent, Node* np, FRAME frame, Step step)
 {
 	// this node will always be still queued, so we don't need to worry about its children
 	testNode(np, n, "Reparenting");
@@ -192,7 +169,7 @@ INLINE void reparentNode(NODEI n, NODEI parent, Node* np, FRAME frame, const Sta
 		np->parent = parent;
 		markDirty(np);
 	}
-	queueNode(n, frame, state);
+	queueNode(n, frame);
 	testNode(np, n, "Reparented");
 }
 
@@ -224,7 +201,7 @@ void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 				if (otherFrame > frame) // better path found? reparent and requeue
 				{
 					//printf("node[%2d] << %2d: @%2d,%2d: %6s (%3d)\n", n, parent, step.x+1, step.y+1, actionNames[step.action], frame);
-					reparentNode(n, parent, np, frame, state, step);
+					reparentNode(n, parent, np, frame, step);
 				}
 				else
 				{
@@ -253,7 +230,7 @@ void addNode(const State* state, NODEI parent, Step step, FRAME frame)
 		lookup[hash] = nn;
 		//printf("node[%2d] <- %2d: @%2d,%2d: %6s (%3d)\n", nn, parent, step.x+1, step.y+1, actionNames[step.action], frame);
 	}
-	queueNode(nn, frame, state);
+	queueNode(nn, frame);
 }
 
 void processNodeChildren(NODEI n, FRAME frame, const State* state)
@@ -407,9 +384,7 @@ int search()
 #ifdef DEBUG
 		cacheTest();
 #endif
-#ifdef ARCHIVE_STATS
 		printCacheStatsDelta();
-#endif
 	}
 	printf("Exit not found.\n");
 	//dumpCache(); dumpNodes();

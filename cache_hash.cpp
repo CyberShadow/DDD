@@ -12,7 +12,7 @@ struct CacheNode
 //CacheNode cache[CACHE_SIZE];
 //CacheNode *cache = new CacheNode[CACHE_SIZE];
 CacheNode* cache = (CacheNode*)calloc(CACHE_SIZE, sizeof(CacheNode));
-CACHEI cacheFreeSearchPtr=1, cacheFreeFirstPtr=0, cacheSize=1;
+CACHEI cacheFreeSearchPtr=1, cacheFreeFirstPtr=0;
 
 void cacheTrim();
 
@@ -56,8 +56,8 @@ INLINE CACHEI cacheAlloc()
 //#define CACHE_HASHSIZE 24
 //#define CACHE_HASHSIZE 12
 //#define CACHE_LOOKUPSIZE (1<<CACHE_HASHSIZE)
-#define CACHE_LOOKUPSIZE (CACHE_SIZE>>2)
-//#define CACHE_LOOKUPSIZE 0x1000000
+//#define CACHE_LOOKUPSIZE (CACHE_SIZE>>2)
+#define CACHE_LOOKUPSIZE 0x4000000
 typedef uint32_t CACHEHASH;
 CACHEI cacheLookup[CACHE_LOOKUPSIZE];
 #ifdef MULTITHREADING
@@ -210,6 +210,7 @@ Node* getNode(NODEI index)
 		{
 			if (cache[c].index == index)
 			{
+				onCacheHit();
 				// pop node to front of hash list
 				if (prev)
 				{
@@ -218,7 +219,6 @@ Node* getNode(NODEI index)
 					cache[c].next = first;
 					cacheLookup[hash] = c;
 				}
-				onCacheHit();
 				return &cache[c].data;
 			}
 			prev = c;
