@@ -1,9 +1,13 @@
 // Simple Dijkstra BFS.
 
-#if defined(QUEUE_STL)
+#if defined(QUEUE_LINKEDLIST)
+#include "queue_linkedlist.cpp"
+#elif defined(QUEUE_STL)
 #include "queue_stl.cpp"
 #elif defined(QUEUE_FILE)
 #include "queue_file.cpp"
+#elif defined(QUEUE_FILE_BUF)
+#include "queue_file_buf.cpp"
 #else
 #error Queue plugin not set
 #endif
@@ -357,11 +361,12 @@ int search()
 	
 	for (currentFrame=0;currentFrame<maxFrames;currentFrame++)
 	{
-		if (!queue[currentFrame])
+		NODEI qsize = queueRewind(currentFrame);
+		if (!qsize)
 			continue;
 		
 		printTime();
-		printf("Frame %d/%d: %d/%d nodes", currentFrame, maxFrames, queue[currentFrame]->size(), nodeCount-1); fflush(stdout);
+		printf("Frame %d/%d: %d/%d nodes", currentFrame, maxFrames, qsize, nodeCount-1); fflush(stdout);
 		NODEI oldNodes = nodeCount;
 		
 #ifdef MULTITHREADING
@@ -377,7 +382,7 @@ int search()
 #else
 		worker();
 #endif
-		assert(queue[currentFrame]==NULL);
+        queueDestroy(currentFrame);
 		//assert(queueCount[currentFrame]-queuePos[currentFrame]==0);
 
 		printf(", %d new\n", nodeCount-oldNodes);

@@ -239,10 +239,14 @@ int run(int argc, const char* argv[])
 	printf("Using breadth-first search\n");
 	enforce(sizeof(Node) == 10, format("sizeof Node is %d", sizeof(Node)));
 
-#if defined(QUEUE_STL)
+#if defined(QUEUE_LINKEDLIST)
+	printf("Using linked-list queue\n");
+#elif defined(QUEUE_STL)
 	printf("Using STL queue\n");
 #elif defined(QUEUE_FILE)
 	printf("Using FILE queue\n");
+#elif defined(QUEUE_FILE_BUF)
+	printf("Using buffered FILE queue, with a buffer of %d nodes (%lld bytes) per frame\n", QUEUE_BUF_SIZE, (long long)QUEUE_BUF_SIZE * sizeof(NODEI));
 #else
 #error Queue plugin not set
 #endif

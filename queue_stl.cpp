@@ -1,4 +1,4 @@
-#include <queue>
+#include <vector>
 
 std::vector<NODEI>* queue[MAX_FRAMES];
 #ifdef MULTITHREADING
@@ -19,18 +19,24 @@ void queueNode(NODEI node, FRAME frame)
 
 NODEI dequeueNode(FRAME frame)
 {
+	std::vector<NODEI>* q = queue[frame];
 #ifdef MULTITHREADING
 	SCOPED_LOCK lock(queueMutex[frame]);
 #endif
-	if (queue[frame]==NULL)
+	if (q->empty())
 		return 0;
-	std::vector<NODEI>* q = queue[frame];
 	NODEI result = q->back();
 	q->pop_back();
-	if (q->empty())
-	{
-		delete q;
-		queue[frame] = NULL;
-	}
 	return result;
+}
+
+void queueDestroy(FRAME frame)
+{
+	delete queue[frame];
+	queue[frame] = NULL;
+}
+
+NODEI queueRewind(FRAME frame)
+{
+	return queue[frame] ? queue[frame]->size() : 0;
 }

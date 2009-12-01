@@ -56,8 +56,8 @@ INLINE CACHEI cacheAlloc()
 //#define CACHE_HASHSIZE 24
 //#define CACHE_HASHSIZE 12
 //#define CACHE_LOOKUPSIZE (1<<CACHE_HASHSIZE)
-//#define CACHE_LOOKUPSIZE (CACHE_SIZE>>2)
-#define CACHE_LOOKUPSIZE 0x4000000
+#define CACHE_LOOKUPSIZE (CACHE_SIZE>>2)
+//#define CACHE_LOOKUPSIZE 0x4000000
 typedef uint32_t CACHEHASH;
 CACHEI cacheLookup[CACHE_LOOKUPSIZE];
 #ifdef MULTITHREADING
@@ -112,6 +112,11 @@ void cacheDoTrim()
 	for (CACHEHASH h=0; h<CACHE_LOOKUPSIZE; h++)
 #endif
 	{
+	    if (h % (CACHE_LOOKUPSIZE>>8) == 0)
+	    {
+	    	printf(" <%3d%%>\x08\x08\x08\x08\x08\x08\x08", (int)(h * 100LL / CACHE_LOOKUPSIZE));
+	    }
+		
 		CACHEI c = cacheLookup[h];
 		unsigned n = 0;
 		while (c)
@@ -143,7 +148,6 @@ void cacheDoTrim()
 void cacheTrim()
 {
 	onCacheTrim();
-	printf("<");
 #ifdef PARALLEL_TRIM
 	THREAD threads[THREADS];
 	trimTask = 0;
@@ -157,7 +161,6 @@ void cacheTrim()
 #else
 	cacheDoTrim();
 #endif
-	printf(">");
 }
 
 // ******************************************************************************************************

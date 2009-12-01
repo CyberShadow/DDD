@@ -18,7 +18,7 @@
 //#define SYNC_WINAPI_SPIN
 #define SYNC_INTEL_SPIN
 
-// Collect cache statistics?
+// Count cache hits? (Affects performance)
 //#define ARCHIVE_STATS
 
 // This shouldn't normally be changed.
@@ -47,5 +47,7 @@
 //#define DFS
 
 // QUEUE_* selects how to queue nodes (BFS only).
-#define QUEUE_STL
+//#define QUEUE_LINKEDLIST
+//#define QUEUE_STL
 //#define QUEUE_FILE
+#define QUEUE_FILE_BUF
