@@ -53,11 +53,12 @@ INLINE CACHEI cacheAlloc()
 
 // ******************************************************************************************************
 
+#ifndef CACHE_LOOKUPSIZE
 //#define CACHE_HASHSIZE 24
 //#define CACHE_HASHSIZE 12
 //#define CACHE_LOOKUPSIZE (1<<CACHE_HASHSIZE)
 #define CACHE_LOOKUPSIZE (CACHE_SIZE>>2)
-//#define CACHE_LOOKUPSIZE 0x4000000
+#endif
 typedef uint32_t CACHEHASH;
 CACHEI cacheLookup[CACHE_LOOKUPSIZE];
 #ifdef MULTITHREADING

@@ -33,8 +33,9 @@
 #define CACHE_HASH
 
 // Number of nodes to cache. The size of each node varies depending on the CACHE_* and BFS/DFS options.
-// If this is not a power of two and you use CACHE_HASH, adjust CACHE_LOOKUPSIZE to be a power of two manually.
 #define CACHE_SIZE 0x10000000
+// If CACHE_SIZE is not a power of two and you use CACHE_HASH, set CACHE_LOOKUPSIZE to be a power of two manually.
+//#define CACHE_LOOKUPSIZE 0x4000000
 
 // SWAP_* selects the back-end storage to be used for the node swap.
 //#define SWAP_RAM
