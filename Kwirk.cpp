@@ -570,8 +570,8 @@ struct State
 				}
 			}
 
+#if (ROTATORS > 0)
 		int seenRotators = 0;
-
 		for (int y=0;y<Y;y++)
 			for (int x=0;x<X;x++)
 				if (map[y][x] >= OBJ_ROTATORUP && map[y][x] <= OBJ_ROTATORLEFT)
@@ -586,6 +586,8 @@ struct State
 					rotators[seenRotators].y = y;
 					seenRotators++;
 				}
+		enforce(seenRotators == ROTATORS, format("Mismatching number of rotators: is %d, should be %d", ROTATORS, seenRotators));
+#endif
 
 #if (BLOCKS > 0)
 		int index = 0;
@@ -603,7 +605,6 @@ struct State
 #endif
 
 		enforce(maxPlayer+1 == PLAYERS, format("Mismatching number of players: is %d, should be %d", PLAYERS, maxPlayer+1));
-		enforce(seenRotators == ROTATORS, format("Mismatching number of rotators: is %d, should be %d", ROTATORS, seenRotators));
 		enforce(seenHoles == HOLES, format("Mismatching number of holes: is %d, should be %d", HOLES, seenHoles));
 
 

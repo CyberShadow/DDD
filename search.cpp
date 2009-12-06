@@ -94,6 +94,74 @@ typedef CompressedState Node;
 
 // ******************************************************************************************************
 
+#define STREAM_BUFFER_SIZE (1024*1024 / sizeof(Node))
+
+class BufferedOutputStream
+{
+	OutputStream s;
+	Node buf[STREAM_BUFFER_SIZE];
+	int pos;
+public:
+	BufferedOutputStream(const char* filename) : s(filename), pos(0) { }
+
+	void write(const Node* p)
+	{
+		buf[pos++] = *p;
+		if (pos == STREAM_BUFFER_SIZE)
+		{
+			flush();
+			pos = 0;
+		}
+	}
+
+	INLINE void flush()
+	{
+		s.write(buf, pos);
+	}
+
+	~BufferedOutputStream()
+	{
+		flush();
+	}
+};
+
+class BufferedInputStream
+{
+	InputStream s;
+	Node buf[STREAM_BUFFER_SIZE];
+	int pos, end;
+	size_t left;
+public:
+	BufferedInputStream(const char* filename) : s(filename), pos(0), end(0) 
+	{
+		left = s.size();
+	}
+
+	bool read(Node* p)
+	{
+		if (pos == end)
+		{
+			if (left == 0)
+				return false;
+			buffer();
+			assert (pos != end);
+		}
+		*p = buf[pos++];
+		return true;
+	}
+
+	INLINE void buffer()
+	{
+		pos = 0;
+		end = s.read(buf, left < STREAM_BUFFER_SIZE ? left : STREAM_BUFFER_SIZE);
+		left -= end;
+	}
+
+	size_t size() { return s.size(); }
+};
+
+// ******************************************************************************************************
+
 void* ram = malloc(RAM_SIZE);
 
 struct CacheNode
@@ -121,7 +189,7 @@ void printTime()
 
 // ******************************************************************************************************
 
-void mergeStreams(InputStream** inputs, int inputCount, OutputStream* output)
+void mergeStreams(BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
 {
 	bool* inputsActive = new bool[inputCount];
 	CompressedState* states = new CompressedState[inputCount];
@@ -129,7 +197,7 @@ void mergeStreams(InputStream** inputs, int inputCount, OutputStream* output)
 	memset(&last, 0, sizeof(last));
 	
 	for (int i=0; i<inputCount; i++)
-		inputsActive[i] = inputs[i]->read(&states[i], 1) != 0;
+		inputsActive[i] = inputs[i]->read(&states[i]);
 
 	while (true)
 	{
@@ -148,21 +216,21 @@ void mergeStreams(InputStream** inputs, int inputCount, OutputStream* output)
 
 		if (lowest != last)
 		{
-			output->write(&lowest, 1);
+			output->write(&lowest);
 			last = lowest;
 		}
 
-		inputsActive[lowestIndex] = inputs[lowestIndex]->read(&states[lowestIndex], 1) != 0;
+		inputsActive[lowestIndex] = inputs[lowestIndex]->read(&states[lowestIndex]);
 	}
 }
 
-void filterStream(InputStream** inputs, int inputCount, OutputStream* output)
+void filterStream(BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
 {
 	bool* inputsActive = new bool[inputCount];
 	CompressedState* states = new CompressedState[inputCount];
 	
 	for (int i=0; i<inputCount; i++)
-		inputsActive[i] = inputs[i]->read(&states[i], 1) != 0;
+		inputsActive[i] = inputs[i]->read(&states[i]);
 
 	while (inputsActive[0])
 	{
@@ -179,8 +247,8 @@ void filterStream(InputStream** inputs, int inputCount, OutputStream* output)
 	recheck:
 		if (lowestIndex==-1 || states[0]<lowest) // advance source
 		{
-			output->write(&states[0], 1);
-			inputsActive[0] = inputs[0]->read(&states[0], 1) != 0;
+			output->write(&states[0]);
+			inputsActive[0] = inputs[0]->read(&states[0]);
 			if (!inputsActive[0])
 				break;
 			goto recheck;
@@ -188,17 +256,17 @@ void filterStream(InputStream** inputs, int inputCount, OutputStream* output)
 		else
 		if (states[0] == lowest) // advance both
 		{
-			inputsActive[0] = inputs[0]->read(&states[0], 1) != 0;
-			inputsActive[lowestIndex] = inputs[lowestIndex]->read(&states[lowestIndex], 1) != 0;
+			inputsActive[0] = inputs[0]->read(&states[0]);
+			inputsActive[lowestIndex] = inputs[lowestIndex]->read(&states[lowestIndex]);
 		}
 		else // advance other
-			inputsActive[lowestIndex] = inputs[lowestIndex]->read(&states[lowestIndex], 1) != 0;
+			inputsActive[lowestIndex] = inputs[lowestIndex]->read(&states[lowestIndex]);
 	}
 }
 
 // ******************************************************************************************************
 
-OutputStream* queue[MAX_FRAMES];
+BufferedOutputStream* queue[MAX_FRAMES];
 #ifdef MULTITHREADING
 MUTEX queueMutex[MAX_FRAMES];
 #endif
@@ -214,8 +282,8 @@ void queueState(const CompressedState* state, FRAME frame)
 	SCOPED_LOCK lock(queueMutex[frame]);
 #endif
 	if (!queue[frame])
-		queue[frame] = new OutputStream(format("open-%d-%d.bin", LEVEL, frame));
-	queue[frame]->write(state, 1);
+		queue[frame] = new BufferedOutputStream(format("open-%d-%d.bin", LEVEL, frame));
+	queue[frame]->write(state);
 }
 
 void addState(const State* state, FRAME frame)
@@ -291,10 +359,10 @@ void preprocessQueue()
 	// Step 2: merge + dedup chunks
 	printf("Merging... "); fflush(stdout);
 	{
-		InputStream** chunkInput = new InputStream*[chunks];
+		BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
 		for (int i=0; i<chunks; i++)
-			chunkInput[i] = new InputStream(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, i));
-		OutputStream output(format("merged-%d-%d.bin", LEVEL, currentFrame));
+			chunkInput[i] = new BufferedInputStream(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, i));
+		BufferedOutputStream output(format("merged-%d-%d.bin", LEVEL, currentFrame));
 		mergeStreams(chunkInput, chunks, &output);
 		for (int i=0; i<chunks; i++)
 			delete chunkInput[i];
@@ -306,13 +374,13 @@ void preprocessQueue()
 	// Step 3: dedup against previous frames
 	printf("Filtering... "); fflush(stdout);
 	{
-		InputStream* inputs[MAX_FRAMES+1];
-		inputs[0] = new InputStream(format("merged-%d-%d.bin", LEVEL, currentFrame));
+		BufferedInputStream* inputs[MAX_FRAMES+1];
+		inputs[0] = new BufferedInputStream(format("merged-%d-%d.bin", LEVEL, currentFrame));
 		int inputCount = 1;
 		for (FRAME f=0; f<currentFrame; f++)
 			if (frameHasNodes[f])
-				inputs[inputCount++] = new InputStream(format("closed-%d-%u.bin", LEVEL, f));
-		OutputStream output(format("closed-%d-%d.bin", LEVEL, currentFrame));
+				inputs[inputCount++] = new BufferedInputStream(format("closed-%d-%u.bin", LEVEL, f));
+		BufferedOutputStream output(format("closed-%d-%d.bin", LEVEL, currentFrame));
 		filterStream(inputs, inputCount, &output);
 		for (int i=0; i<inputCount; i++)
 			delete inputs[i];
@@ -322,7 +390,7 @@ void preprocessQueue()
 
 // ******************************************************************************************************
 
-InputStream* currentInput;
+BufferedInputStream* currentInput;
 #ifdef MULTITHREADING
 MUTEX currentInputMutex;
 #endif
@@ -332,7 +400,7 @@ INLINE bool dequeueNode(CompressedState* state)
 #ifdef MULTITHREADING
 	SCOPED_LOCK lock(currentInputMutex);
 #endif
-	return currentInput->read(state, 1) != 0;
+	return currentInput->read(state);
 }
 
 // ******************************************************************************************************
@@ -409,7 +477,7 @@ void traceExit()
 			for (; frame >= 0; frame--)
 				if (frameHasNodes[frame])
 				{
-					printf("Frame %d...\n", frame);
+					printf("Frame %d... \r", frame);
 					// TODO: parallelize
 					InputStream input(format("closed-%d-%d.bin", LEVEL, frame));
 					CompressedState cs;
@@ -420,7 +488,7 @@ void traceExit()
 						checkChildren(frame, &state);
 						if (exitSearchStateFound)
 						{
-							printf("Found!\n");
+							printf("\nFound!\n");
 							steps[stepNr++] = exitSearchStateStep;
 							exitSearchState = state; 
 							goto nextStep;
@@ -445,6 +513,19 @@ void traceExit()
 	// last one
 	fprintf(f, "@%d,%d: %s\n%s", steps[0].x+1, steps[0].y+1, actionNames[steps[0].action], state.toString());
 	fprintf(f, "Total steps: %d", totalSteps);
+}
+
+void cleanUp()
+{
+	for (FRAME f=0; f<=currentFrame; f++)
+		if (frameHasNodes[f])
+			deleteFile(format("closed-%d-%d.bin", LEVEL, f));
+	for (FRAME f=currentFrame; f<MAX_FRAMES; f++)
+		if (queue[f])
+		{
+			delete queue[f];
+			deleteFile(format("open-%d-%d.bin", LEVEL, f));
+		}
 }
 
 // ******************************************************************************************************
@@ -472,12 +553,13 @@ int search()
 		if (!queue[currentFrame])
 			continue;
 		delete queue[currentFrame];
+		queue[currentFrame] = NULL;
 
 		printTime(); printf("Frame %d/%d: ", currentFrame, maxFrames); fflush(stdout);
 
 		preprocessQueue();
 
-		currentInput = new InputStream(format("closed-%d-%d.bin", LEVEL, currentFrame));
+		currentInput = new BufferedInputStream(format("closed-%d-%d.bin", LEVEL, currentFrame));
 		
 		printf("Clearing... "); fflush(stdout);
 		memset(ram, 0, RAM_SIZE); // clear cache
@@ -504,10 +586,13 @@ int search()
 		{
 			printf("Exit found, tracing path...\n");
 			traceExit();
+			cleanUp();
 			return 0;
 		}
 	}
+	
 	printf("Exit not found.\n");
+	cleanUp();
 	return 2;
 }
 
