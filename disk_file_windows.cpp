@@ -74,7 +74,7 @@ public:
 	{
 		ULARGE_INTEGER li;
 		li.LowPart = GetFileSize(archive, &li.HighPart);
-		return li.QuadPart / sizeof(Node);
+		return (size_t)(li.QuadPart / sizeof(Node));
 	}
 
 	~InputStream()

@@ -68,6 +68,12 @@ public:
 		return n;
 	}
 
+	int size()
+	{
+		// TODO
+		error("Not implemented");
+	}
+
 	~InputStream()
 	{
 		_close(archive);

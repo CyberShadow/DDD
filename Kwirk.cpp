@@ -203,9 +203,41 @@ struct CompressedState
 	#endif
 };
 
+#define COMPRESSED_BITS ( \
+	(PLAYERS>2 ? 2 : (PLAYERS>1 ? 1 : 0)) + \
+	(XBITS_WITH_INVAL + YBITS_WITH_INVAL) * PLAYERS + \
+	(XBITS_WITH_INVAL + YBITS_WITH_INVAL) * BLOCKS + \
+	4 * ROTATORS + \
+	HOLES \
+)
+
+#if (COMPRESSED_BITS <= 32) // 4 bytes
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] == ((const uint32_t*)&b)[0]; }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] != ((const uint32_t*)&b)[0]; }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] <  ((const uint32_t*)&b)[0]; }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] <= ((const uint32_t*)&b)[0]; }
+#elif (COMPRESSED_BITS <= 64) // 8 bytes
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0]; }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] != ((const uint64_t*)&b)[0]; }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0]; }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <= ((const uint64_t*)&b)[0]; }
+#elif (COMPRESSED_BITS > 96 && COMPRESSED_BITS <= 128) // 16 bytes
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint64_t*)&a)[1] == ((const uint64_t*)&b)[1]; }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] != ((const uint64_t*)&b)[0] || ((const uint64_t*)&a)[1] != ((const uint64_t*)&b)[1]; }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0] || 
+                                                                                   (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint64_t*)&a)[1] <  ((const uint64_t*)&b)[1] ); }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0] || 
+                                                                                   (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint64_t*)&a)[1] <= ((const uint64_t*)&b)[1] ); }
+#else
+#pragma message("Performance warning: using memcmp for CompressedState comparison")
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)==0; }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)!=0; }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)< 0; }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)<=0; }
+#endif
+
+INLINE bool operator> (const CompressedState& a, const CompressedState& b) { return b< a; }
+INLINE bool operator>=(const CompressedState& a, const CompressedState& b) { return b<=a; }
 
 #if (BLOCKS > 0)
 struct { BYTE x, y; } blockSize[BLOCKS];

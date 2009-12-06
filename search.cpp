@@ -55,6 +55,7 @@ State initialState, blankState;
 // ******************************************************************************************************
 
 typedef uint32_t FRAME;
+typedef uint16_t PACKED_FRAME;
 
 #pragma pack(1)
 struct Step
@@ -166,7 +167,7 @@ void* ram = malloc(RAM_SIZE);
 struct CacheNode
 {
 	CompressedState state;
-	uint16_t frame;
+	PACKED_FRAME frame;
 };
 
 const size_t CACHE_HASH_SIZE = RAM_SIZE / sizeof(CacheNode) / NODES_PER_HASH;
@@ -187,6 +188,134 @@ void printTime()
 }
 
 // ******************************************************************************************************
+
+class InputHeap
+{
+	struct HeapNode
+	{
+		const CompressedState* state;
+		BufferedInputStream* input;
+		INLINE bool operator<(const HeapNode& b) const { return *this->state < *b.state; }
+	};
+
+	HeapNode *heap, *head;
+	int size;
+
+public:
+	InputHeap(BufferedInputStream** inputs, int count)
+	{
+		size = count;
+		heap = new HeapNode[size];
+		for (int i=0; i<size; i++)
+		{
+			heap[i].input = inputs[i];
+			heap[i].state = inputs[i]->read();
+		}
+		std::sort(heap, heap+size);
+		head = heap;
+		heap--; // heap[0] is now invalid, use heap[1] to heap[size] inclusively; head == heap[1]
+		test();
+	}
+
+	~InputHeap()
+	{
+		heap++;
+		delete[] heap;
+	}
+
+	const CompressedState* getHead() const { return head->state; }
+
+	enum ScanResult
+	{
+		SCAN_NOTEQUAL,
+		SCAN_EQUAL,
+		SCAN_END
+	};
+
+	ScanResult scanTo(const CompressedState& target)
+	{
+		test();
+		if (size == 0)
+			return SCAN_END;
+		ScanResult r = SCAN_NOTEQUAL;
+		while (*head->state <= target)
+		{
+			if (*head->state == target)
+				r = SCAN_EQUAL;
+			if (size>1)
+			{
+				CompressedState readUntil = target;
+				const CompressedState* minChild = heap[2].state;
+				if (size>2 && *minChild > *heap[3].state)
+					minChild = heap[3].state;
+				if (readUntil > *minChild)
+					readUntil = *minChild;
+				
+				do
+					head->state = head->input->read();
+				while (head->state && *head->state < readUntil);
+
+				if (head->state == NULL)
+				{
+					*head = heap[size];
+					size--;
+				}
+				else
+				{
+					if (*head->state <= *minChild)
+						continue;
+				}
+				bubbleDown();
+			}
+			else
+			{
+				do
+					head->state = head->input->read();
+				while (head->state && *head->state < target);
+				if (head->state == NULL)
+				{
+					size = 0;
+					return SCAN_END;
+				}
+			}
+		}
+		test();
+		return r;
+	}
+
+	void bubbleDown()
+	{
+		int p = 1;
+		while (1)
+		{
+			int c = p*2;
+			if (c > size)
+				return;
+			int c2 = c+1;
+			if (c2 <= size)
+				if (*heap[c2].state < *heap[c].state)
+					c=c2;
+			if (*heap[p].state < *heap[c].state)
+				return;
+			HeapNode t = heap[p];
+			heap[p] = heap[c];
+			heap[c] = t;
+			p = c;
+		}
+		test();
+	}
+
+	void test() const
+	{
+#ifdef DEBUG
+		for (int p=1; p<size; p++)
+		{
+			assert(p*2   > size || *heap[p].state <= *heap[p*2  ].state);
+			assert(p*2+1 > size || *heap[p].state <= *heap[p*2+1].state);
+		}
+#endif
+	}
+};
 
 void mergeStreams(BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
 {
@@ -222,42 +351,38 @@ void mergeStreams(BufferedInputStream** inputs, int inputCount, BufferedOutputSt
 	}
 }
 
-void filterStream(BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
+void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
 {
-	const CompressedState** states = new const CompressedState*[inputCount];
-	
-	for (int i=0; i<inputCount; i++)
-		states[i] = inputs[i]->read();
-
-	while (states[0])
+	const CompressedState* sourceState = source->read();
+	if (inputCount == 0)
 	{
-		int lowestIndex;
-		const CompressedState* lowest = NULL;
-		for (int i=1; i<inputCount; i++)
-			if (states[i])
-				if (lowest == NULL || *states[i] < *lowest)
-				{
-					lowestIndex = i;
-					lowest = states[i];
-				}
+		while (sourceState)
+		{
+			output->write(sourceState);
+			sourceState = source->read();
+		}
+		return;
+	}
+	
+	InputHeap heap(inputs, inputCount);
 
-	recheck:
-		if (lowest == NULL || *states[0] < *lowest) // advance source
+	while (sourceState)
+	{
+		InputHeap::ScanResult r = heap.scanTo(*sourceState);
+		if (r==InputHeap::SCAN_END)
 		{
-			output->write(states[0]);
-			states[0] = inputs[0]->read();
-			if (!states[0])
-				break;
-			goto recheck;
+			do {
+				output->write(sourceState);
+				sourceState = source->read();
+			} while (sourceState);
+			return;
 		}
-		else
-		if (*states[0] == *lowest) // advance both
-		{
-			states[0] = inputs[0]->read();
-			states[lowestIndex] = inputs[lowestIndex]->read();
-		}
-		else // advance other
-			states[lowestIndex] = inputs[lowestIndex]->read();
+		if (r==InputHeap::SCAN_NOTEQUAL)
+			output->write(sourceState);
+		const CompressedState* head = heap.getHead();
+		do
+			sourceState = source->read();
+		while (sourceState && *sourceState < *head);
 	}
 }
 
@@ -315,13 +440,13 @@ void addState(const State* state, FRAME frame)
 					memmove(nodes+1, nodes, i * sizeof(CacheNode));
 					nodes[0].state = cs;
 				}
-				nodes[0].frame = frame;
+				nodes[0].frame = (PACKED_FRAME)frame;
 				return;
 			}
 		
 		// new node
 		memmove(nodes+1, nodes, (NODES_PER_HASH-1) * sizeof(CacheNode));
-		nodes[0].frame = frame;
+		nodes[0].frame = (PACKED_FRAME)frame;
 		nodes[0].state = cs;
 	}
 	queueState(&cs, frame);
@@ -351,7 +476,6 @@ void preprocessQueue()
 			chunks++;
 		}
 	}
-	deleteFile(format("open-%d-%d.bin", LEVEL, currentFrame));
 
 	// Step 2: merge + dedup chunks
 	printf("Merging... "); fflush(stdout);
@@ -359,11 +483,12 @@ void preprocessQueue()
 		BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
 		for (int i=0; i<chunks; i++)
 			chunkInput[i] = new BufferedInputStream(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, i));
-		BufferedOutputStream output(format("merged-%d-%d.bin", LEVEL, currentFrame));
-		mergeStreams(chunkInput, chunks, &output);
+		BufferedOutputStream* output = new BufferedOutputStream(format("merged-%d-%d.bin", LEVEL, currentFrame));
+		mergeStreams(chunkInput, chunks, output);
 		for (int i=0; i<chunks; i++)
 			delete chunkInput[i];
 		delete[] chunkInput;
+		delete output;
 	}
 	for (int i=0; i<chunks; i++)
 		deleteFile(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, i));
@@ -371,18 +496,23 @@ void preprocessQueue()
 	// Step 3: dedup against previous frames
 	printf("Filtering... "); fflush(stdout);
 	{
-		BufferedInputStream* inputs[MAX_FRAMES+1];
-		inputs[0] = new BufferedInputStream(format("merged-%d-%d.bin", LEVEL, currentFrame));
-		int inputCount = 1;
+		BufferedInputStream* source = new BufferedInputStream(format("merged-%d-%d.bin", LEVEL, currentFrame));
+		BufferedInputStream* inputs[MAX_FRAMES];
+		int inputCount = 0;
 		for (FRAME f=0; f<currentFrame; f++)
 			if (frameHasNodes[f])
 				inputs[inputCount++] = new BufferedInputStream(format("closed-%d-%u.bin", LEVEL, f));
-		BufferedOutputStream output(format("closed-%d-%d.bin", LEVEL, currentFrame));
-		filterStream(inputs, inputCount, &output);
+		BufferedOutputStream* output = new BufferedOutputStream(format("closed-%d-%d.bin", LEVEL, currentFrame));
+		filterStream(source, inputs, inputCount, output);
 		for (int i=0; i<inputCount; i++)
 			delete inputs[i];
+		delete source;
+		delete output;
 	}
 	deleteFile(format("merged-%d-%d.bin", LEVEL, currentFrame));
+
+	// delete "open" file only after "closed" is completely created
+	deleteFile(format("open-%d-%d.bin", LEVEL, currentFrame));
 }
 
 // ******************************************************************************************************
@@ -651,7 +781,7 @@ int run(int argc, const char* argv[])
 #error Sync plugin not set
 #endif
 	
-	printf("Compressed state is %d bytes\n", sizeof(CompressedState));
+	printf("Compressed state is %d bits (%d bytes)\n", COMPRESSED_BITS, sizeof(CompressedState));
 	enforce(ram, "RAM allocation failed");
 	printf("Using %lld bytes of RAM for %lld cache nodes and %lld buffer nodes\n", (long long)RAM_SIZE, (long long)CACHE_HASH_SIZE, (long long)BUFFER_SIZE);
 
