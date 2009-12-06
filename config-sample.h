@@ -18,37 +18,12 @@
 //#define SYNC_WINAPI_SPIN
 #define SYNC_INTEL_SPIN
 
-// Count cache hits? (Affects performance)
-//#define ARCHIVE_STATS
+// How much bytes of RAM to use?
+#define RAM_SIZE (8LL*1024*1024*1024)
 
-// This shouldn't normally be changed.
-#define MAX_NODES 0xFFFFFFFFLL
+// How many nodes to group under a single hash in the cache? Higher values reduce speed but allow better distribution.
+#define NODES_PER_HASH 4
 
-// SWAP enables swapping the state node set to disk, and using a memory cache. 
-// If the solved level is not expected to exhaust memory without SWAP, it should be turned off for better performance.
-#define SWAP
-
-// CACHE_* selects the caching algorithm to use. CACHE_SPLAY needs more CPU, but causes somewhat fewer cache misses. CACHE_HASH parallelizes a lot better.
-//#define CACHE_SPLAY
-#define CACHE_HASH
-
-// Number of nodes to cache. The size of each node varies depending on the CACHE_* and BFS/DFS options.
-#define CACHE_SIZE 0x10000000
-// If CACHE_SIZE is not a power of two and you use CACHE_HASH, set CACHE_LOOKUPSIZE to be a power of two manually.
-//#define CACHE_LOOKUPSIZE 0x4000000
-
-// SWAP_* selects the back-end storage to be used for the node swap.
-//#define SWAP_RAM
-//#define SWAP_MMAP
-#define SWAP_WINFILES
-//#define SWAP_POSIX
-
-// Use a depth-first search algorithm instead of the default Dijksta BFS.
-// (Untested) Should be faster when the number of accessed nodes for each BFS frame exceeds CACHE_SIZE (the number of nodes that fit in physical RAM).
-//#define DFS
-
-// QUEUE_* selects how to queue nodes (BFS only).
-//#define QUEUE_LINKEDLIST
-//#define QUEUE_STL
-//#define QUEUE_FILE
-#define QUEUE_FILE_BUF
+// DISK_* selects the back-end storage to be used for the node disk files.
+#define DISK_WINFILES
+//#define DISK_POSIX

@@ -5,35 +5,17 @@
 
 #include <time.h>
 #include <sys/timeb.h>
-#include <fstream>
+//#include <fstream>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <windows.h>
-#endif
-
-#ifdef SWAP
-#include <string>
-#include <sstream>
-#ifdef SWAP_MMAP
-#include <boost/iostreams/device/mapped_file.hpp>
-#else
-#include <io.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#endif
 #endif
 
 #ifdef __GNUC__
 #include <stdint.h>
 #else
 #include "pstdint.h"
-#endif
-
-// ******************************************************************************************************
-
-#ifndef MULTITHREADING
-#undef THREADS
-#define THREADS 1
 #endif
 
 // ******************************************************************************************************
@@ -68,67 +50,20 @@
 
 // ******************************************************************************************************
 
-State initialState;
+State initialState, blankState;
 
 // ******************************************************************************************************
 
-typedef uint32_t NODEI;
 typedef uint32_t FRAME;
 
 #pragma pack(1)
 struct Step
 {
-	unsigned action:3;
-	unsigned x:5;
-	unsigned y:4;
-	unsigned extraSteps:4; // steps above dx+dy
+	Action action;
+	uint8_t x;
+	uint8_t y;
+	uint8_t extraSteps;
 };
-
-#ifdef DFS
-#include "node_fw.h"
-#else
-#include "node_bw.h"
-#endif
-
-// ******************************************************************************************************
-
-NODEI nodeCount = 0;
-
-#ifndef SWAP
-#include "cache_none.cpp"
-#else
-
-INLINE const Node* cachePeek(NODEI index);
-#ifdef DEBUG_VERBOSE
-void testNode(const Node* data, NODEI index, const char* comment);
-#else
-#define testNode(x,y,z)
-#endif
-
-#if defined (SWAP_MMAP)
-#include "swap_mmap.cpp"
-#elif defined(SWAP_RAM)
-#include "swap_ram.cpp"
-#elif defined(SWAP_WINFILES)
-#include "swap_file_windows.cpp"
-#elif defined(SWAP_POSIX)
-#include "swap_file_posix.cpp"
-#else
-#error No swap plugin
-#endif
-
-// ******************************************************************************************************
-
-typedef uint32_t CACHEI;
-CACHEI cacheSize=1;
-
-#include "stats_cache.cpp"
-
-#include "cache.cpp"
-
-#endif // SWAP
-
-// ******************************************************************************************************
 
 INLINE int replayStep(State* state, FRAME* frame, Step step)
 {
@@ -145,16 +80,35 @@ INLINE int replayStep(State* state, FRAME* frame, Step step)
 	return steps; // not counting actual action
 }
 
-void dumpNodesToDisk()
+// ******************************************************************************************************
+
+typedef CompressedState Node;
+
+#if defined(DISK_WINFILES)
+#include "disk_file_windows.cpp"
+#elif defined(DISK_POSIX)
+#include "disk_file_posix.cpp"
+#else
+#error Disk plugin not set
+#endif
+
+// ******************************************************************************************************
+
+void* ram = malloc(RAM_SIZE);
+
+struct CacheNode
 {
-	FILE* f = fopen("nodes-" STRINGIZE(LEVEL) ".bin", "wb");
-	for (NODEI n=1; n<nodeCount; n++)
-	{
-		const Node* np = getNodeFast(n);
-		fwrite(np, sizeof(Node), 1, f);
-	}
-	fclose(f);
-}
+	CompressedState state;
+	uint16_t frame;
+};
+
+const size_t CACHE_HASH_SIZE = RAM_SIZE / sizeof(CacheNode) / NODES_PER_HASH;
+CacheNode (*cache)[NODES_PER_HASH] = (CacheNode (*)[NODES_PER_HASH]) ram;
+
+const size_t BUFFER_SIZE = RAM_SIZE / sizeof(Node);
+Node* buffer = (Node*) ram;
+
+// ******************************************************************************************************
 
 void printTime()
 {
@@ -167,22 +121,397 @@ void printTime()
 
 // ******************************************************************************************************
 
-#define HASHSIZE 28
-//#define HASHSIZE 26
-typedef uint32_t HASH;
-NODEI lookup[1<<HASHSIZE];
+void mergeStreams(InputStream** inputs, int inputCount, OutputStream* output)
+{
+	bool* inputsActive = new bool[inputCount];
+	CompressedState* states = new CompressedState[inputCount];
+	CompressedState last;
+	memset(&last, 0, sizeof(last));
+	
+	for (int i=0; i<inputCount; i++)
+		inputsActive[i] = inputs[i]->read(&states[i], 1) != 0;
+
+	while (true)
+	{
+		int lowestIndex = -1;
+		CompressedState lowest;
+		for (int i=0; i<inputCount; i++)
+			if (inputsActive[i])
+				if (lowestIndex == -1 || states[i] < lowest)
+				{
+					lowestIndex = i;
+					lowest = states[i];
+				}
+
+		if (lowestIndex==-1) // all done
+			return;
+
+		if (lowest != last)
+		{
+			output->write(&lowest, 1);
+			last = lowest;
+		}
+
+		inputsActive[lowestIndex] = inputs[lowestIndex]->read(&states[lowestIndex], 1) != 0;
+	}
+}
+
+void filterStream(InputStream** inputs, int inputCount, OutputStream* output)
+{
+	bool* inputsActive = new bool[inputCount];
+	CompressedState* states = new CompressedState[inputCount];
+	
+	for (int i=0; i<inputCount; i++)
+		inputsActive[i] = inputs[i]->read(&states[i], 1) != 0;
+
+	while (inputsActive[0])
+	{
+		int lowestIndex = -1;
+		CompressedState lowest;
+		for (int i=1; i<inputCount; i++)
+			if (inputsActive[i])
+				if (lowestIndex == -1 || states[i] < lowest)
+				{
+					lowestIndex = i;
+					lowest = states[i];
+				}
+
+	recheck:
+		if (lowestIndex==-1 || states[0]<lowest) // advance source
+		{
+			output->write(&states[0], 1);
+			inputsActive[0] = inputs[0]->read(&states[0], 1) != 0;
+			if (!inputsActive[0])
+				break;
+			goto recheck;
+		}
+		else
+		if (states[0] == lowest) // advance both
+		{
+			inputsActive[0] = inputs[0]->read(&states[0], 1) != 0;
+			inputsActive[lowestIndex] = inputs[lowestIndex]->read(&states[lowestIndex], 1) != 0;
+		}
+		else // advance other
+			inputsActive[lowestIndex] = inputs[lowestIndex]->read(&states[lowestIndex], 1) != 0;
+	}
+}
+
+// ******************************************************************************************************
+
+OutputStream* queue[MAX_FRAMES];
 #ifdef MULTITHREADING
-#define PARTITIONS ((MAX_NODES+1)>>8)
-MUTEX lookupMutex[PARTITIONS];
+MUTEX queueMutex[MAX_FRAMES];
 #endif
 
-FRAME maxFrames;
+#ifdef MULTITHREADING
+#define PARTITIONS (CACHE_HASH_SIZE/256)
+MUTEX cacheMutex[PARTITIONS];
+#endif
 
-#ifndef DFS
-#include "search_bfs.cpp"
+void queueState(const CompressedState* state, FRAME frame)
+{
+#ifdef MULTITHREADING
+	SCOPED_LOCK lock(queueMutex[frame]);
+#endif
+	if (!queue[frame])
+		queue[frame] = new OutputStream(format("open-%d-%d.bin", LEVEL, frame));
+	queue[frame]->write(state, 1);
+}
+
+void addState(const State* state, FRAME frame)
+{
+	CompressedState cs;
+	state->compress(&cs);
+#ifdef DEBUG
+	State test = blankState;
+	test.decompress(&cs);
+	if (!(test == *state))
+	{
+		printf("%s\n", state->toString());
+		printf("%s\n", test.toString());
+		error("Compression/decompression failed");
+	}
+#endif
+	uint32_t hash = SuperFastHash((const char*)&cs, sizeof(cs)) % CACHE_HASH_SIZE;
+	
+	{
+#ifdef MULTITHREADING
+		SCOPED_LOCK lock(cacheMutex[hash % PARTITIONS]);
+#endif
+		CacheNode* nodes = cache[hash];
+		for (int i=0; i<NODES_PER_HASH; i++)
+			if (nodes[i].state == cs)
+			{
+				if (nodes[i].frame > frame)
+					queueState(&cs, frame);
+				// pop to front
+				if (i>0)
+				{
+					memmove(nodes+1, nodes, i * sizeof(CacheNode));
+					nodes[0].state = cs;
+				}
+				nodes[0].frame = frame;
+				return;
+			}
+		
+		// new node
+		memmove(nodes+1, nodes, (NODES_PER_HASH-1) * sizeof(CacheNode));
+		nodes[0].frame = frame;
+		nodes[0].state = cs;
+	}
+	queueState(&cs, frame);
+}
+
+// ******************************************************************************************************
+
+FRAME maxFrames, currentFrame;
+bool frameHasNodes[MAX_FRAMES];
+
+void preprocessQueue()
+{
+	// Step 1: read chunks of BUFFER_SIZE nodes, sort them and write them to disk
+	int chunks = 0;
+	printf("Sorting... "); fflush(stdout);
+	{
+		InputStream input(format("open-%d-%d.bin", LEVEL, currentFrame));
+		size_t amount = input.size();
+		if (amount > BUFFER_SIZE)
+			amount = BUFFER_SIZE;
+		size_t records;
+		while (records = input.read(buffer, amount))
+		{
+			std::sort(buffer, buffer + records);
+			OutputStream output(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, chunks));
+			output.write(buffer, records);
+			chunks++;
+		}
+	}
+	deleteFile(format("open-%d-%d.bin", LEVEL, currentFrame));
+
+	// Step 2: merge + dedup chunks
+	printf("Merging... "); fflush(stdout);
+	{
+		InputStream** chunkInput = new InputStream*[chunks];
+		for (int i=0; i<chunks; i++)
+			chunkInput[i] = new InputStream(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, i));
+		OutputStream output(format("merged-%d-%d.bin", LEVEL, currentFrame));
+		mergeStreams(chunkInput, chunks, &output);
+		for (int i=0; i<chunks; i++)
+			delete chunkInput[i];
+		delete[] chunkInput;
+	}
+	for (int i=0; i<chunks; i++)
+		deleteFile(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, i));
+
+	// Step 3: dedup against previous frames
+	printf("Filtering... "); fflush(stdout);
+	{
+		InputStream* inputs[MAX_FRAMES+1];
+		inputs[0] = new InputStream(format("merged-%d-%d.bin", LEVEL, currentFrame));
+		int inputCount = 1;
+		for (FRAME f=0; f<currentFrame; f++)
+			if (frameHasNodes[f])
+				inputs[inputCount++] = new InputStream(format("closed-%d-%u.bin", LEVEL, f));
+		OutputStream output(format("closed-%d-%d.bin", LEVEL, currentFrame));
+		filterStream(inputs, inputCount, &output);
+		for (int i=0; i<inputCount; i++)
+			delete inputs[i];
+	}
+	deleteFile(format("merged-%d-%d.bin", LEVEL, currentFrame));
+}
+
+// ******************************************************************************************************
+
+InputStream* currentInput;
+#ifdef MULTITHREADING
+MUTEX currentInputMutex;
+#endif
+
+INLINE bool dequeueNode(CompressedState* state)
+{
+#ifdef MULTITHREADING
+	SCOPED_LOCK lock(currentInputMutex);
+#endif
+	return currentInput->read(state, 1) != 0;
+}
+
+// ******************************************************************************************************
+
+INLINE void addStateStep(const State* state, Step step, FRAME frame)
+{
+	addState(state, frame);
+}
+
+#define EXPAND_NAME addChildren
+#define EXPAND_HANDLE_CHILD addStateStep
+#include "expand.cpp"
+
+// ******************************************************************************************************
+
+bool exitFound;
+State exitState;
+
+void worker()
+{
+	CompressedState cs;
+	while (!exitFound && dequeueNode(&cs))
+	{
+		State s = blankState;
+		s.decompress(&cs);
+#ifdef DEBUG
+		CompressedState test;
+		s.compress(&test);
+		assert(test == cs, "Compression/decompression failed");
+#endif
+		if (s.playersLeft()==0)
+		{
+			exitFound = true;
+			exitState = s;
+			return;
+		}
+		addChildren(currentFrame, &s);
+	}
+}
+
+// ******************************************************************************************************
+
+State exitSearchState;
+FRAME exitSearchStateFrame;
+Step exitSearchStateStep;
+bool exitSearchStateFound = false;
+
+INLINE void checkState(const State* state, Step step, FRAME frame)
+{
+	if (*state==exitSearchState && frame==exitSearchStateFrame)
+	{
+		exitSearchStateFound = true;
+		exitSearchStateStep = step;
+	}
+}
+
+#define EXPAND_NAME checkChildren
+#define EXPAND_HANDLE_CHILD checkState
+#include "expand.cpp"
+
+void traceExit()
+{
+	Step steps[MAX_STEPS];
+	int stepNr = 0;
+	{
+		exitSearchState = exitState;
+		int frame = currentFrame;
+		while (frame >= 0)
+		{
+	nextStep:
+			exitSearchStateFound = false;
+			exitSearchStateFrame = frame;
+			frame -= 9;
+			for (; frame >= 0; frame--)
+				if (frameHasNodes[frame])
+				{
+					printf("Frame %d...\n", frame);
+					// TODO: parallelize
+					InputStream input(format("closed-%d-%d.bin", LEVEL, frame));
+					CompressedState cs;
+					while (input.read(&cs, 1))
+					{
+						State state = blankState;
+						state.decompress(&cs);
+						checkChildren(frame, &state);
+						if (exitSearchStateFound)
+						{
+							printf("Found!\n");
+							steps[stepNr++] = exitSearchStateStep;
+							exitSearchState = state; 
+							goto nextStep;
+						}
+					}
+				}
+		}
+	}
+
+	FILE* f = fopen(format("%d.txt", LEVEL), "wt");
+	steps[stepNr].action = NONE;
+	steps[stepNr].x = initialState.players[0].x-1;
+	steps[stepNr].y = initialState.players[0].y-1;
+	unsigned int totalSteps = 0;
+	State state = initialState;
+	FRAME frame = 0;
+	while (stepNr)
+	{
+		fprintf(f, "@%d,%d: %s\n%s", steps[stepNr].x+1, steps[stepNr].y+1, actionNames[steps[stepNr].action], state.toString());
+		totalSteps += (steps[stepNr].action<SWITCH ? 1 : 0) + replayStep(&state, &frame, steps[--stepNr]);
+	}
+	// last one
+	fprintf(f, "@%d,%d: %s\n%s", steps[0].x+1, steps[0].y+1, actionNames[steps[0].action], state.toString());
+	fprintf(f, "Total steps: %d", totalSteps);
+}
+
+// ******************************************************************************************************
+
+int search()
+{
+	{
+		CompressedState c;
+		initialState.compress(&c);
+#ifdef DEBUG
+		State test = blankState;
+		test.decompress(&c);
+		if (!(test == initialState))
+		{
+			printf("%s\n", initialState.toString());
+			printf("%s\n", test.toString());
+			error("Compression/decompression failed");
+		}
+#endif
+		queueState(&c, 0);
+	}
+	
+	for (currentFrame=0;currentFrame<maxFrames;currentFrame++)
+	{
+		if (!queue[currentFrame])
+			continue;
+		delete queue[currentFrame];
+
+		printTime(); printf("Frame %d/%d: ", currentFrame, maxFrames); fflush(stdout);
+
+		preprocessQueue();
+
+		currentInput = new InputStream(format("closed-%d-%d.bin", LEVEL, currentFrame));
+		
+		printf("Clearing... "); fflush(stdout);
+		memset(ram, 0, RAM_SIZE); // clear cache
+		
+		printf("Searching... "); fflush(stdout);
+#ifdef MULTITHREADING
+		THREAD threads[THREADS];
+		//threadsRunning = THREADS;
+		for (int i=0; i<THREADS; i++)
+			threads[i] = THREAD_CREATE(&worker);
+		for (int i=0; i<THREADS; i++)
+		{
+			THREAD_JOIN(threads[i]);
+			THREAD_DESTROY(threads[i]);
+		}
 #else
-#include "search_dfs.cpp"
+		worker();
 #endif
+		printf("Done.\n"); fflush(stdout);
+		delete currentInput;
+		frameHasNodes[currentFrame] = true;
+
+		if (exitFound)
+		{
+			printf("Exit found, tracing path...\n");
+			traceExit();
+			return 0;
+		}
+	}
+	printf("Exit not found.\n");
+	return 2;
+}
+
+// ******************************************************************************************************
 
 timeb startTime;
 
@@ -233,61 +562,21 @@ int run(int argc, const char* argv[])
 #error Sync plugin not set
 #endif
 	
-	printf("Using node lookup hashtable of %d elements (%lld bytes)\n", 1<<HASHSIZE, (long long)(1<<HASHSIZE) * sizeof(NODEI));
+	printf("Compressed state is %d bytes\n", sizeof(CompressedState));
+	enforce(ram, "RAM allocation failed");
+	printf("Using %lld bytes of RAM for %lld cache nodes and %lld buffer nodes\n", (long long)RAM_SIZE, (long long)CACHE_HASH_SIZE, (long long)BUFFER_SIZE);
 
-#ifndef DFS
-	printf("Using breadth-first search\n");
-	enforce(sizeof(Node) == 10, format("sizeof Node is %d", sizeof(Node)));
-
-#if defined(QUEUE_LINKEDLIST)
-	printf("Using linked-list queue\n");
-#elif defined(QUEUE_STL)
-	printf("Using STL queue\n");
-#elif defined(QUEUE_FILE)
-	printf("Using FILE queue\n");
-#elif defined(QUEUE_FILE_BUF)
-	printf("Using buffered FILE queue, with a buffer of %d nodes (%lld bytes) per frame\n", QUEUE_BUF_SIZE, (long long)QUEUE_BUF_SIZE * sizeof(NODEI));
+#if defined(DISK_WINFILES)
+	printf("Using Windows API files\n");
+#elif defined(DISK_POSIX)
+	printf("Using POSIX files\n");
 #else
-#error Queue plugin not set
+#error Disk plugin not set
 #endif
 
-#else // DFS
-	printf("Using depth-first search\n");
-	enforce(sizeof(Node) == 16, format("sizeof Node is %d", sizeof(Node)));
-#endif
-	enforce(sizeof(Action) == 1, format("sizeof Action is %d", sizeof(Action)));
-
-#ifdef SWAP
-	printf("Using node cache of %d records (%lld bytes)\n", CACHE_SIZE, (long long)CACHE_SIZE * sizeof(CacheNode));
-
-#if defined(SWAP_MMAP)
-	printf("Using memory-mapped swap files of %d records (%lld bytes) each\n", ARCHIVE_CLUSTER_SIZE, (long long)ARCHIVE_CLUSTER_SIZE * sizeof(Node));
-#elif defined(SWAP_RAM)
-	printf("Using RAM blocks for swap testing of %d records (%lld bytes) each\n", ARCHIVE_CLUSTER_SIZE, (long long)ARCHIVE_CLUSTER_SIZE * sizeof(Node));
-#elif defined(SWAP_WINFILES)
-	printf("Using Windows API swap file\n");
-#elif defined(SWAP_POSIX)
-	printf("Using POSIX swap file\n");
-#else
-#error Swap plugin not set
-#endif
-
-#if defined(CACHE_SPLAY)
-	printf("Using splay tree caching\n");
-	enforce(sizeof(CacheNode) == sizeof(Node)+14, format("sizeof CacheNode is %d", sizeof(CacheNode)));
-#elif defined(CACHE_HASH)
-	printf("Using hashtable caching\n");
-	printf("Using cache lookup hashtable of %d elements (%lld bytes)\n", CACHE_LOOKUPSIZE, (long long)CACHE_LOOKUPSIZE * sizeof(CACHEI));
-	printf("Cache lookup hashtable is trimmed to %d elements\n", cacheTrimThreshold+1);
-	enforce(cacheTrimThreshold>0, "Cache lookup hashtable trim threshold too low");
-	enforce(cacheTrimThreshold<=16, "Cache lookup hashtable trim threshold too high");
-	enforce(sizeof(CacheNode) == sizeof(Node)+10, format("sizeof CacheNode is %d", sizeof(CacheNode)));
-#else
-#error Cache plugin not set
-#endif
-#endif
-	
 	initialState.load();
+	blankState = initialState;
+	blankState.blank();
 
 	maxFrames = MAX_FRAMES;
 	if (argc>2)
@@ -295,9 +584,6 @@ int run(int argc, const char* argv[])
 	if (argc==2)
 		maxFrames = strtol(argv[1], NULL, 10);
 
-#ifdef SWAP
-	atexit(&printCacheStats);
-#endif
 	ftime(&startTime);
 	atexit(&printExecutionTime);
 
