@@ -203,9 +203,9 @@ struct CompressedState
 	#endif
 };
 
-INLINE bool operator==(CompressedState& a, CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)==0; }
-INLINE bool operator!=(CompressedState& a, CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)!=0; }
-INLINE bool operator< (CompressedState& a, CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)< 0; }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)==0; }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)!=0; }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)< 0; }
 
 #if (BLOCKS > 0)
 struct { BYTE x, y; } blockSize[BLOCKS];

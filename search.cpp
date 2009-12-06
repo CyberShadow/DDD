@@ -114,7 +114,7 @@ public:
 		}
 	}
 
-	INLINE void flush()
+	void flush()
 	{
 		s.write(buf, pos);
 	}
@@ -137,20 +137,19 @@ public:
 		left = s.size();
 	}
 
-	bool read(Node* p)
+	const Node* read()
 	{
 		if (pos == end)
 		{
 			if (left == 0)
-				return false;
+				return NULL;
 			buffer();
 			assert (pos != end);
 		}
-		*p = buf[pos++];
-		return true;
+		return &buf[pos++];
 	}
 
-	INLINE void buffer()
+	void buffer()
 	{
 		pos = 0;
 		end = s.read(buf, left < STREAM_BUFFER_SIZE ? left : STREAM_BUFFER_SIZE);
@@ -191,76 +190,74 @@ void printTime()
 
 void mergeStreams(BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
 {
-	bool* inputsActive = new bool[inputCount];
-	CompressedState* states = new CompressedState[inputCount];
+	const CompressedState** states = new const CompressedState*[inputCount];
 	CompressedState last;
 	memset(&last, 0, sizeof(last));
 	
 	for (int i=0; i<inputCount; i++)
-		inputsActive[i] = inputs[i]->read(&states[i]);
+		states[i] = inputs[i]->read();
 
 	while (true)
 	{
-		int lowestIndex = -1;
-		CompressedState lowest;
+		int lowestIndex;
+		const CompressedState* lowest = NULL;
 		for (int i=0; i<inputCount; i++)
-			if (inputsActive[i])
-				if (lowestIndex == -1 || states[i] < lowest)
+			if (states[i])
+				if (lowest == NULL || *states[i] < *lowest)
 				{
 					lowestIndex = i;
 					lowest = states[i];
 				}
 
-		if (lowestIndex==-1) // all done
+		if (lowest == NULL) // all done
 			return;
 
-		if (lowest != last)
+		if (*lowest != last)
 		{
-			output->write(&lowest);
-			last = lowest;
+			output->write(lowest);
+			last = *lowest;
 		}
 
-		inputsActive[lowestIndex] = inputs[lowestIndex]->read(&states[lowestIndex]);
+		states[lowestIndex] = inputs[lowestIndex]->read();
 	}
 }
 
 void filterStream(BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
 {
-	bool* inputsActive = new bool[inputCount];
-	CompressedState* states = new CompressedState[inputCount];
+	const CompressedState** states = new const CompressedState*[inputCount];
 	
 	for (int i=0; i<inputCount; i++)
-		inputsActive[i] = inputs[i]->read(&states[i]);
+		states[i] = inputs[i]->read();
 
-	while (inputsActive[0])
+	while (states[0])
 	{
-		int lowestIndex = -1;
-		CompressedState lowest;
+		int lowestIndex;
+		const CompressedState* lowest = NULL;
 		for (int i=1; i<inputCount; i++)
-			if (inputsActive[i])
-				if (lowestIndex == -1 || states[i] < lowest)
+			if (states[i])
+				if (lowest == NULL || *states[i] < *lowest)
 				{
 					lowestIndex = i;
 					lowest = states[i];
 				}
 
 	recheck:
-		if (lowestIndex==-1 || states[0]<lowest) // advance source
+		if (lowest == NULL || *states[0] < *lowest) // advance source
 		{
-			output->write(&states[0]);
-			inputsActive[0] = inputs[0]->read(&states[0]);
-			if (!inputsActive[0])
+			output->write(states[0]);
+			states[0] = inputs[0]->read();
+			if (!states[0])
 				break;
 			goto recheck;
 		}
 		else
-		if (states[0] == lowest) // advance both
+		if (*states[0] == *lowest) // advance both
 		{
-			inputsActive[0] = inputs[0]->read(&states[0]);
-			inputsActive[lowestIndex] = inputs[lowestIndex]->read(&states[lowestIndex]);
+			states[0] = inputs[0]->read();
+			states[lowestIndex] = inputs[lowestIndex]->read();
 		}
 		else // advance other
-			inputsActive[lowestIndex] = inputs[lowestIndex]->read(&states[lowestIndex]);
+			states[lowestIndex] = inputs[lowestIndex]->read();
 	}
 }
 
@@ -400,7 +397,14 @@ INLINE bool dequeueNode(CompressedState* state)
 #ifdef MULTITHREADING
 	SCOPED_LOCK lock(currentInputMutex);
 #endif
-	return currentInput->read(state);
+	const CompressedState* res = currentInput->read();
+	if (res)
+	{
+		*state = *res;
+		return true;
+	}
+	else
+		return false;
 }
 
 // ******************************************************************************************************
