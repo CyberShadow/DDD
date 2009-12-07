@@ -19,7 +19,7 @@ void error(const char* message = NULL)
 	exit(1);
 }
 
-const char* format(const char *fmt, ...) 
+const char* format(const char *fmt, ...)
 {    
 	va_list argptr;
 	va_start(argptr,fmt);

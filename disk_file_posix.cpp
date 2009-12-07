@@ -71,7 +71,7 @@ public:
 	int size()
 	{
 		// TODO
-		error("Not implemented");
+		#error "Not implemented"
 	}
 
 	~InputStream()
@@ -85,4 +85,10 @@ void deleteFile(const char* filename)
 	int r = _unlink(filename);
 	if (r)
 		error("Error deleting file");
+}
+
+void renameFile(const char* from, const char* to)
+{
+	// TODO
+	#error "Not implemented"
 }

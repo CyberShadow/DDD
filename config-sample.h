@@ -1,5 +1,5 @@
 // DEBUG enables asserts and some other debug checks.
-#define DEBUG
+//#define DEBUG
 
 // Specify the level to solve here.
 #define LEVEL 11

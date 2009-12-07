@@ -89,3 +89,11 @@ void deleteFile(const char* filename)
 	if (!b)
 		error("Error deleting file");
 }
+
+void renameFile(const char* from, const char* to)
+{
+	DeleteFile(to); // ignore error
+	BOOL b = MoveFile(from, to);
+	if (!b)
+		error("Error moving file");
+}
