@@ -27,3 +27,6 @@
 // DISK_* selects the back-end storage to be used for the node disk files.
 #define DISK_WINFILES
 //#define DISK_POSIX
+
+// Keep a file with all nodes to filter against, instead of filtering against each individual frame. Uses less CPU but more I/O.
+//#define USE_ALL

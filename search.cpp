@@ -105,9 +105,13 @@ class BufferedOutputStream
 public:
 	BufferedOutputStream(const char* filename) : s(filename), pos(0) { }
 
-	void write(const Node* p)
+	void write(const Node* p, bool verify=false)
 	{
 		buf[pos++] = *p;
+#ifdef DEBUG
+		if (verify && pos > 1)
+			assert(buf[pos-1] > buf[pos-2], "Output is not sorted");
+#endif
 		if (pos == STREAM_BUFFER_SIZE)
 		{
 			flush();
@@ -147,6 +151,10 @@ public:
 			buffer();
 			assert (pos != end);
 		}
+#ifdef DEBUG
+		if (pos > 0) 
+			assert(buf[pos-1] <= buf[pos], "Input is not sorted");
+#endif
 		return &buf[pos++];
 	}
 
@@ -185,6 +193,18 @@ void printTime()
 	char* tstr = ctime(&t);
 	tstr[strlen(tstr)-1] = 0;
 	printf("[%s] ", tstr);
+}
+
+void copyFile(const char* from, const char* to)
+{
+	InputStream input(from);
+	OutputStream output(to);
+	size_t amount = input.size();
+	if (amount > BUFFER_SIZE)
+		amount = BUFFER_SIZE;
+	size_t records;
+	while (records = input.read(buffer, amount))
+		output.write(buffer, records);
 }
 
 // ******************************************************************************************************
@@ -313,6 +333,7 @@ public:
 
 void mergeStreams(BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
 {
+	// TODO: use InputHeap
 	const CompressedState** states = new const CompressedState*[inputCount];
 	CompressedState last;
 	memset(&last, 0, sizeof(last));
@@ -383,6 +404,78 @@ void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int
 	}
 }
 
+void mergeTwoStreams(BufferedInputStream* input1, BufferedInputStream* input2, BufferedOutputStream* output, BufferedOutputStream* output1)
+{
+	// output <= merged
+	// output1 <= only in input1
+	
+	BufferedInputStream *inputs[2];
+	const CompressedState* states[2];
+	inputs[0] = input1;
+	inputs[1] = input2;
+	states[0] = inputs[0]->read();
+	states[1] = inputs[1]->read();
+	
+	int c;
+	while (*states[0] == *states[1])
+	{
+		output->write(states[0]);
+		states[0] = inputs[0]->read();
+		states[1] = inputs[1]->read();
+		if (states[0] == NULL) { c = 0; goto eof; }
+		if (states[1] == NULL) { c = 1; goto eof; }
+	}
+
+	c = *states[0] < *states[1] ? 0 : 1;
+	while (true)
+	{
+		const CompressedState* cc = states[c];
+		const CompressedState* co = states[c^1];
+#ifdef DEBUG
+		assert(*cc < *co);
+#endif
+		BufferedInputStream *ci = inputs[c];
+		do
+		{
+			output->write(cc, true);
+			if (c==0)
+				output1->write(cc, true);
+			cc = ci->read();
+			if (cc==NULL)
+				goto eof;
+		} while (*cc < *co);
+		if (*cc == *co)
+		{
+			states[0] = cc;
+			do 
+			{
+				output->write(states[0]);
+				states[0] = inputs[0]->read();
+				states[1] = inputs[1]->read();
+				if (states[0] == NULL) { c = 0; goto eof; }
+				if (states[1] == NULL) { c = 1; goto eof; }
+			} while (*states[0] == *states[1]);
+			c = *states[0] < *states[1] ? 0 : 1;
+		}
+		else
+		{
+			states[c] = cc;
+			c ^= 1;
+			states[c] = co;
+		}
+	}
+eof:
+	c ^= 1;
+	const CompressedState* cc = states[c];
+	BufferedInputStream* ci = inputs[c];
+	while (cc)
+	{
+		output->write(cc, true);
+		if (c==0)
+			output1->write(cc, true);
+		cc = ci->read();
+	}
+}
 
 // ******************************************************************************************************
 
@@ -487,12 +580,34 @@ void preprocessQueue()
 			delete chunkInput[i];
 		delete[] chunkInput;
 		delete output;
+		for (int i=0; i<chunks; i++)
+			deleteFile(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, i));
 	}
-	for (int i=0; i<chunks; i++)
-		deleteFile(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, i));
 
 	// Step 3: dedup against previous frames
 	printf("Filtering... "); fflush(stdout);
+#ifdef USE_ALL
+	if (currentFrame==0)
+	{
+		copyFile(format("merged-%d-%d.bin", LEVEL, currentFrame), format("closed-%d-%d.bin", LEVEL, currentFrame));
+		renameFile(format("merged-%d-%d.bin", LEVEL, currentFrame), format("all-%d.bin", LEVEL));
+	}
+	else
+	{
+		BufferedInputStream* source = new BufferedInputStream(format("merged-%d-%d.bin", LEVEL, currentFrame));
+		BufferedInputStream* all = new BufferedInputStream(format("all-%d.bin", LEVEL));
+		BufferedOutputStream* allnew = new BufferedOutputStream(format("allnew-%d.bin", LEVEL, currentFrame));
+		BufferedOutputStream* closed = new BufferedOutputStream(format("closed-%d-%d.bin", LEVEL, currentFrame));
+		mergeTwoStreams(source, all, allnew, closed);
+		delete all;
+		delete source;
+		delete allnew;
+		delete closed;
+		deleteFile(format("all-%d.bin", LEVEL));
+		renameFile(format("allnew-%d.bin", LEVEL), format("all-%d.bin", LEVEL));
+		deleteFile(format("merged-%d-%d.bin", LEVEL, currentFrame));
+	}
+#else
 	{
 		BufferedInputStream* source = new BufferedInputStream(format("merged-%d-%d.bin", LEVEL, currentFrame));
 		BufferedInputStream* inputs[MAX_FRAMES];
@@ -512,9 +627,9 @@ void preprocessQueue()
 			delete inputs[i];
 		delete source;
 		delete output;
+		deleteFile(format("merged-%d-%d.bin", LEVEL, currentFrame));
 	}
-	deleteFile(format("merged-%d-%d.bin", LEVEL, currentFrame));
-
+#endif
 	// delete "open" file only after "closed" is completely created
 	deleteFile(format("open-%d-%d.bin", LEVEL, currentFrame));
 }
