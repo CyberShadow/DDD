@@ -225,24 +225,14 @@ public:
 
 	const CompressedState* getHead() const { return head->state; }
 
-	enum ScanResult
-	{
-		SCAN_NOTEQUAL,
-		SCAN_EQUAL,
-		SCAN_END
-	};
-
-	ScanResult scanTo(const CompressedState& target)
+	bool scanTo(const CompressedState& target)
 	{
 		test();
 		if (size == 0)
-			return SCAN_END;
-		ScanResult r = SCAN_NOTEQUAL;
-		while (*head->state <= target)
+			return false;
+		if (size>1)
 		{
-			if (*head->state == target)
-				r = SCAN_EQUAL;
-			if (size>1)
+			do
 			{
 				CompressedState readUntil = target;
 				const CompressedState* minChild = heap[2].state;
@@ -261,26 +251,30 @@ public:
 					size--;
 				}
 				else
-				{
 					if (*head->state <= *minChild)
 						continue;
-				}
 				bubbleDown();
-			}
-			else
+				if (size==1)
+					if (*head->state < target)
+						goto size1;
+					else
+						return true;
+			} while (*head->state < target);
+		}
+		else
+		{
+		size1:
+			do
+				head->state = head->input->read();
+			while (head->state && *head->state < target);
+			if (head->state == NULL)
 			{
-				do
-					head->state = head->input->read();
-				while (head->state && *head->state < target);
-				if (head->state == NULL)
-				{
-					size = 0;
-					return SCAN_END;
-				}
+				size = 0;
+				return false;
 			}
 		}
 		test();
-		return r;
+		return true;
 	}
 
 	void bubbleDown()
@@ -368,8 +362,8 @@ void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int
 
 	while (sourceState)
 	{
-		InputHeap::ScanResult r = heap.scanTo(*sourceState);
-		if (r==InputHeap::SCAN_END)
+		bool b = heap.scanTo(*sourceState);
+		if (!b) // EOF of heap sources
 		{
 			do {
 				output->write(sourceState);
@@ -377,14 +371,18 @@ void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int
 			} while (sourceState);
 			return;
 		}
-		if (r==InputHeap::SCAN_NOTEQUAL)
-			output->write(sourceState);
 		const CompressedState* head = heap.getHead();
-		do
+		assert(sourceState);
+		while (sourceState && *sourceState < *head)
+		{
+			output->write(sourceState);
 			sourceState = source->read();
-		while (sourceState && *sourceState < *head);
+		}
+		while (sourceState && *sourceState == *head)
+			sourceState = source->read();
 	}
 }
+
 
 // ******************************************************************************************************
 
@@ -501,7 +499,13 @@ void preprocessQueue()
 		int inputCount = 0;
 		for (FRAME f=0; f<currentFrame; f++)
 			if (frameHasNodes[f])
-				inputs[inputCount++] = new BufferedInputStream(format("closed-%d-%u.bin", LEVEL, f));
+			{
+				BufferedInputStream* input = new BufferedInputStream(format("closed-%d-%u.bin", LEVEL, f));
+				if (input->size())
+					inputs[inputCount++] = input;
+				else
+					delete input;
+			}
 		BufferedOutputStream* output = new BufferedOutputStream(format("closed-%d-%d.bin", LEVEL, currentFrame));
 		filterStream(source, inputs, inputCount, output);
 		for (int i=0; i<inputCount; i++)
@@ -693,12 +697,11 @@ int search()
 
 		preprocessQueue();
 
-		currentInput = new BufferedInputStream(format("closed-%d-%d.bin", LEVEL, currentFrame));
-		
 		printf("Clearing... "); fflush(stdout);
 		memset(ram, 0, RAM_SIZE); // clear cache
 		
-		printf("Searching... "); fflush(stdout);
+		currentInput = new BufferedInputStream(format("closed-%d-%d.bin", LEVEL, currentFrame));
+		printf("Searching (%d)... ", currentInput->size()); fflush(stdout);
 #ifdef MULTITHREADING
 		THREAD threads[THREADS];
 		//threadsRunning = THREADS;
