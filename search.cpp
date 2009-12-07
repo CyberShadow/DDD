@@ -274,6 +274,7 @@ public:
 					if (*head->state <= *minChild)
 						continue;
 				bubbleDown();
+				test();
 				if (size==1)
 					if (*head->state < target)
 						goto size1;
@@ -299,24 +300,33 @@ public:
 
 	void bubbleDown()
 	{
-		int p = 1;
+		// Force local variables
+		int64_t c = 1;
+		int64_t size = this->size;
+		HeapNode* heap = this->heap;
+		HeapNode* pp = head; // pointer to parent
 		while (1)
 		{
-			int c = p*2;
+			c = c*2;
 			if (c > size)
 				return;
-			int c2 = c+1;
-			if (c2 <= size)
-				if (*heap[c2].state < *heap[c].state)
-					c=c2;
-			if (*heap[p].state < *heap[c].state)
+			HeapNode* pc = &heap[c];
+			if (c < size) // if (c+1 <= size)
+			{
+				HeapNode* pc2 = pc+1;
+				if (*pc2->state < *pc->state)
+				{
+					pc = pc2;
+					c++;
+				}
+			}
+			if (*pp->state <= *pc->state)
 				return;
-			HeapNode t = heap[p];
-			heap[p] = heap[c];
-			heap[c] = t;
-			p = c;
+			HeapNode t = *pp;
+			*pp = *pc;
+			*pc = t;
+			pp = pc;
 		}
-		test();
 	}
 
 	void test() const
