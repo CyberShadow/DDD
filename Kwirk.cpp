@@ -11,12 +11,10 @@
 
 void error(const char* message = NULL)
 {
-	puts(""); // newline
 	if (message)
-		puts(message);
+		throw message;
 	else
-		puts("Unspecified error");
-	exit(1);
+		throw "Unspecified error";
 }
 
 const char* format(const char *fmt, ...)

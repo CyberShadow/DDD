@@ -29,6 +29,12 @@ public:
 		}
 	}
 
+	void flush()
+	{
+		// TODO
+		#error "Not implemented"
+	}
+
 	~OutputStream()
 	{
 		_close(archive);

@@ -114,19 +114,25 @@ public:
 #endif
 		if (pos == STREAM_BUFFER_SIZE)
 		{
-			flush();
+			flushBuffer();
 			pos = 0;
 		}
 	}
 
-	void flush()
+	void flushBuffer()
 	{
 		s.write(buf, pos);
 	}
 
+	void flush()
+	{
+		flushBuffer();
+		s.flush();
+	}
+
 	~BufferedOutputStream()
 	{
-		flush();
+		flushBuffer();
 	}
 };
 
@@ -553,6 +559,13 @@ void addState(const State* state, FRAME frame)
 	queueState(&cs, frame);
 }
 
+void flushQueue()
+{
+	for (FRAME f=0; f<MAX_FRAMES; f++)
+		if (queue[f])
+			queue[f]->flush();
+}
+
 // ******************************************************************************************************
 
 FRAME maxFrames, currentFrame;
@@ -840,8 +853,14 @@ int search()
 #else
 		worker();
 #endif
-		printf("Done.\n"); fflush(stdout);
 		delete currentInput;
+		
+#if !defined(PROFILE) && !defined(DEBUG)
+		printf("Flushing... "); fflush(stdout);
+		flushQueue();
+#endif
+
+		printf("Done.\n"); fflush(stdout);
 		frameHasNodes[currentFrame] = true;
 
 		if (exitFound)
@@ -941,5 +960,5 @@ int run(int argc, const char* argv[])
 
 // ***********************************************************************************
 
-int main(int argc, const char* argv[]) { return run(argc, argv); }
+int main(int argc, const char* argv[]) { try { return run(argc, argv); } catch(const char* s) { printf("\n%s\n", s); return 1; } }
 //#include "test_body.cpp"

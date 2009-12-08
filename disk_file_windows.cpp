@@ -29,6 +29,11 @@ public:
 			bytes += r;
 		}
 	}
+	
+	void flush()
+	{
+		FlushFileBuffers(archive);
+	}
 
 	~OutputStream()
 	{
