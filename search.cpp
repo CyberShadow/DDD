@@ -182,7 +182,7 @@ class BufferedInputStream : BufferedStream
 {
 	InputStream s;
 	int end;
-	size_t left;
+	uint64_t left;
 public:
 	BufferedInputStream(const char* filename) : s(filename), end(0)
 	{
@@ -212,7 +212,7 @@ public:
 		left -= end;
 	}
 
-	size_t size() { return s.size(); }
+	uint64_t size() { return s.size(); }
 };
 
 // ******************************************************************************************************
@@ -230,7 +230,7 @@ void copyFile(const char* from, const char* to)
 {
 	InputStream input(from);
 	OutputStream output(to);
-	size_t amount = input.size();
+	uint64_t amount = input.size();
 	if (amount > BUFFER_SIZE)
 		amount = BUFFER_SIZE;
 	size_t records;
@@ -553,7 +553,7 @@ void queueState(const CompressedState* state, FRAME frame)
 	SCOPED_LOCK lock(queueMutex[frame]);
 #endif
 	if (!queue[frame])
-		queue[frame] = new BufferedOutputStream(format("open-%d-%d.bin", LEVEL, frame));
+		queue[frame] = new BufferedOutputStream(format("open-%u-%u.bin", LEVEL, frame));
 	queue[frame]->write(state);
 }
 
@@ -611,7 +611,6 @@ void flushQueue()
 // ******************************************************************************************************
 
 FRAME maxFrames, currentFrame;
-bool frameHasNodes[MAX_FRAMES];
 
 void preprocessQueue()
 {
@@ -619,8 +618,8 @@ void preprocessQueue()
 	int chunks = 0;
 	printf("Sorting... "); fflush(stdout);
 	{
-		InputStream input(format("open-%d-%d.bin", LEVEL, currentFrame));
-		size_t amount = input.size();
+		InputStream input(format("open-%u-%u.bin", LEVEL, currentFrame));
+		uint64_t amount = input.size();
 		if (amount > BUFFER_SIZE)
 			amount = BUFFER_SIZE;
 		size_t records;
@@ -628,7 +627,7 @@ void preprocessQueue()
 		{
 			std::sort(buffer, buffer + records);
 			records = deduplicate(buffer, records);
-			OutputStream output(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, chunks));
+			OutputStream output(format("chunk-%u-%u-%d.bin", LEVEL, currentFrame, chunks));
 			output.write(buffer, records);
 			chunks++;
 		}
@@ -641,15 +640,15 @@ void preprocessQueue()
 	{
 		BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
 		for (int i=0; i<chunks; i++)
-			chunkInput[i] = new BufferedInputStream(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, i));
-		BufferedOutputStream* output = new BufferedOutputStream(format("merged-%d-%d.bin", LEVEL, currentFrame));
+			chunkInput[i] = new BufferedInputStream(format("chunk-%u-%u-%d.bin", LEVEL, currentFrame, i));
+		BufferedOutputStream* output = new BufferedOutputStream(format("merged-%u-%u.bin", LEVEL, currentFrame));
 		mergeStreams(chunkInput, chunks, output);
 		for (int i=0; i<chunks; i++)
 			delete chunkInput[i];
 		delete[] chunkInput;
 		delete output;
 		for (int i=0; i<chunks; i++)
-			deleteFile(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, i));
+			deleteFile(format("chunk-%u-%u-%d.bin", LEVEL, currentFrame, i));
 	}
 
 	streamBufPtr = buffer;
@@ -659,50 +658,50 @@ void preprocessQueue()
 #ifdef USE_ALL
 	if (currentFrame==0)
 	{
-		copyFile(format("merged-%d-%d.bin", LEVEL, currentFrame), format("closing-%d-%d.bin", LEVEL, currentFrame));
-		renameFile(format("merged-%d-%d.bin", LEVEL, currentFrame), format("all-%d.bin", LEVEL));
+		copyFile(format("merged-%u-%u.bin", LEVEL, currentFrame), format("closing-%u-%u.bin", LEVEL, currentFrame));
+		renameFile(format("merged-%u-%u.bin", LEVEL, currentFrame), format("all-%u.bin", LEVEL));
 	}
 	else
 	{
-		BufferedInputStream* source = new BufferedInputStream(format("merged-%d-%d.bin", LEVEL, currentFrame));
-		BufferedInputStream* all = new BufferedInputStream(format("all-%d.bin", LEVEL));
-		BufferedOutputStream* allnew = new BufferedOutputStream(format("allnew-%d.bin", LEVEL, currentFrame));
-		BufferedOutputStream* closed = new BufferedOutputStream(format("closed-%d-%d.bin", LEVEL, currentFrame));
+		BufferedInputStream* source = new BufferedInputStream(format("merged-%u-%u.bin", LEVEL, currentFrame));
+		BufferedInputStream* all = new BufferedInputStream(format("all-%u.bin", LEVEL));
+		BufferedOutputStream* allnew = new BufferedOutputStream(format("allnew-%u.bin", LEVEL, currentFrame));
+		BufferedOutputStream* closed = new BufferedOutputStream(format("closed-%u-%u.bin", LEVEL, currentFrame));
 		mergeTwoStreams(source, all, allnew, closed);
 		delete all;
 		delete source;
 		delete allnew;
 		delete closed;
-		deleteFile(format("all-%d.bin", LEVEL));
-		renameFile(format("allnew-%d.bin", LEVEL), format("all-%d.bin", LEVEL));
-		deleteFile(format("merged-%d-%d.bin", LEVEL, currentFrame));
+		deleteFile(format("all-%u.bin", LEVEL));
+		renameFile(format("allnew-%u.bin", LEVEL), format("all-%u.bin", LEVEL));
+		deleteFile(format("merged-%u-%u.bin", LEVEL, currentFrame));
 	}
 #else
 	{
-		BufferedInputStream* source = new BufferedInputStream(format("merged-%d-%d.bin", LEVEL, currentFrame));
+		BufferedInputStream* source = new BufferedInputStream(format("merged-%u-%u.bin", LEVEL, currentFrame));
 		BufferedInputStream* inputs[MAX_FRAMES];
 		int inputCount = 0;
 		for (FRAME f=0; f<currentFrame; f++)
-			if (frameHasNodes[f])
+			if (fileExists(format("closed-%u-%u.bin", LEVEL, f)))
 			{
-				BufferedInputStream* input = new BufferedInputStream(format("closed-%d-%u.bin", LEVEL, f));
+				BufferedInputStream* input = new BufferedInputStream(format("closed-%u-%u.bin", LEVEL, f));
 				if (input->size())
 					inputs[inputCount++] = input;
 				else
 					delete input;
 			}
-		BufferedOutputStream* output = new BufferedOutputStream(format("closing-%d-%d.bin", LEVEL, currentFrame));
+		BufferedOutputStream* output = new BufferedOutputStream(format("closing-%u-%u.bin", LEVEL, currentFrame));
 		filterStream(source, inputs, inputCount, output);
 		for (int i=0; i<inputCount; i++)
 			delete inputs[i];
 		delete source;
 		output->flush(); // force disk flush
 		delete output;
-		deleteFile(format("merged-%d-%d.bin", LEVEL, currentFrame));
+		deleteFile(format("merged-%u-%u.bin", LEVEL, currentFrame));
 	}
 #endif
-	deleteFile(format("open-%d-%d.bin", LEVEL, currentFrame));
-	renameFile(format("closing-%d-%d.bin", LEVEL, currentFrame), format("closed-%d-%d.bin", LEVEL, currentFrame));
+	deleteFile(format("open-%u-%u.bin", LEVEL, currentFrame));
+	renameFile(format("closing-%u-%u.bin", LEVEL, currentFrame), format("closed-%u-%u.bin", LEVEL, currentFrame));
 
 	streamBufPtr = NULL;
 }
@@ -801,11 +800,11 @@ void traceExit()
 			exitSearchStateFrame = frame;
 			frame -= 9;
 			for (; frame >= 0; frame--)
-				if (frameHasNodes[frame])
+				if (fileExists(format("closed-%u-%d.bin", LEVEL, frame)))
 				{
 					printf("Frame %d... \r", frame);
 					// TODO: parallelize
-					InputStream input(format("closed-%d-%d.bin", LEVEL, frame));
+					InputStream input(format("closed-%u-%d.bin", LEVEL, frame));
 					CompressedState cs;
 					while (input.read(&cs, 1))
 					{
@@ -824,7 +823,7 @@ void traceExit()
 		}
 	}
 
-	FILE* f = fopen(format("%d.txt", LEVEL), "wt");
+	FILE* f = fopen(format("%u.txt", LEVEL), "wt");
 	steps[stepNr].action = NONE;
 	steps[stepNr].x = initialState.players[0].x-1;
 	steps[stepNr].y = initialState.players[0].y-1;
@@ -833,12 +832,12 @@ void traceExit()
 	FRAME frame = 0;
 	while (stepNr)
 	{
-		fprintf(f, "@%d,%d: %s\n%s", steps[stepNr].x+1, steps[stepNr].y+1, actionNames[steps[stepNr].action], state.toString());
+		fprintf(f, "@%u,%u: %s\n%s", steps[stepNr].x+1, steps[stepNr].y+1, actionNames[steps[stepNr].action], state.toString());
 		totalSteps += (steps[stepNr].action<SWITCH ? 1 : 0) + replayStep(&state, &frame, steps[--stepNr]);
 	}
 	// last one
-	fprintf(f, "@%d,%d: %s\n%s", steps[0].x+1, steps[0].y+1, actionNames[steps[0].action], state.toString());
-	fprintf(f, "Total steps: %d", totalSteps);
+	fprintf(f, "@%u,%u: %s\n%s", steps[0].x+1, steps[0].y+1, actionNames[steps[0].action], state.toString());
+	fprintf(f, "Total steps: %u", totalSteps);
 }
 
 // ******************************************************************************************************
@@ -848,18 +847,18 @@ int search()
 	FRAME startFrame = 0;
 
 	for (FRAME f=MAX_FRAMES; f>0; f--)
-		if (fileExists(format("closed-%d-%d.bin", LEVEL, f)))
+		if (fileExists(format("closed-%u-%u.bin", LEVEL, f)))
 		{
-			printf("Resuming from frame %d\n", f);
+			printf("Resuming from frame %u\n", f);
 			startFrame = f;
 			break;
 	    }
 
 	for (FRAME f=startFrame; f<MAX_FRAMES; f++)
-		if (fileExists(format("open-%d-%d.bin", LEVEL, f)))
+		if (fileExists(format("open-%u-%u.bin", LEVEL, f)))
 		{
-			printTime(); printf("Reopening queue for frame %d\n", f);
-			queue[f] = new BufferedOutputStream(format("open-%d-%d.bin", LEVEL, f), true);
+			printTime(); printf("Reopening queue for frame %u\n", f);
+			queue[f] = new BufferedOutputStream(format("open-%u-%u.bin", LEVEL, f), true);
 		}
 
 	if (startFrame==0 && !queue[0])
@@ -881,9 +880,9 @@ int search()
 
 	for (currentFrame=startFrame; currentFrame<maxFrames; currentFrame++)
 	{
-		if (fileExists(format("closed-%d-%d.bin", LEVEL, currentFrame)))
+		if (fileExists(format("closed-%u-%u.bin", LEVEL, currentFrame)))
 		{
-			printTime(); printf("Frame %d/%d: (loading closed nodes from disk)               ", currentFrame, maxFrames); fflush(stdout);
+			printTime(); printf("Frame %u/%u: (loading closed nodes from disk)               ", currentFrame, maxFrames); fflush(stdout);
 		}
 		else
 		{
@@ -892,7 +891,7 @@ int search()
 			delete queue[currentFrame];
 			queue[currentFrame] = NULL;
 
-			printTime(); printf("Frame %d/%d: ", currentFrame, maxFrames); fflush(stdout);
+			printTime(); printf("Frame %u/%u: ", currentFrame, maxFrames); fflush(stdout);
 
 			preprocessQueue();
 
@@ -900,8 +899,8 @@ int search()
 			memset(ram, 0, RAM_SIZE); // clear cache
 		}
 		
-		currentInput = new BufferedInputStream(format("closed-%d-%d.bin", LEVEL, currentFrame));
-		printf("Searching (%d)... ", currentInput->size()); fflush(stdout);
+		currentInput = new BufferedInputStream(format("closed-%u-%u.bin", LEVEL, currentFrame));
+		printf("Searching (%llu)... ", currentInput->size()); fflush(stdout);
 #ifdef MULTITHREADING
 		THREAD threads[THREADS];
 		//threadsRunning = THREADS;
@@ -923,7 +922,6 @@ int search()
 #endif
 
 		printf("Done.\n");
-		frameHasNodes[currentFrame] = true;
 
 		if (exitFound)
 		{
@@ -932,7 +930,7 @@ int search()
 			return 0;
 		}
 
-		if (fileExists(format("stop-%d.txt", LEVEL)))
+		if (fileExists(format("stop-%u.txt", LEVEL)))
 		{
 			printf("Stop file found.\n");
 			return 3;
@@ -948,13 +946,13 @@ int search()
 int packOpen()
 {
     for (FRAME f=0; f<MAX_FRAMES; f++)
-    	if (fileExists(format("open-%d-%d.bin", LEVEL, f)))
+    	if (fileExists(format("open-%u-%u.bin", LEVEL, f)))
     	{
-			printTime(); printf("Frame %d: ", f);
+			printTime(); printf("Frame %u: ", f);
 
-			InputStream input(format("open-%d-%d.bin", LEVEL, f));
-			OutputStream output(format("op_p-%d-%d.bin", LEVEL, f));
-			size_t amount = input.size();
+			InputStream input(format("open-%u-%u.bin", LEVEL, f));
+			OutputStream output(format("op_p-%u-%u.bin", LEVEL, f));
+			uint64_t amount = input.size();
 			if (amount > BUFFER_SIZE)
 				amount = BUFFER_SIZE;
 			size_t records;
@@ -1000,7 +998,7 @@ enum RunMode
 
 int run(int argc, const char* argv[])
 {
-	printf("Level %d: %dx%d, %d players\n", LEVEL, X, Y, PLAYERS);
+	printf("Level %u: %ux%u, %u players\n", LEVEL, X, Y, PLAYERS);
 
 	enforce(sizeof(intptr_t)==sizeof(size_t), "Bad intptr_t!");
 
@@ -1016,9 +1014,9 @@ int run(int argc, const char* argv[])
 
 #ifdef MULTITHREADING
 #if defined(THREAD_BOOST)
-	printf("Using %d Boost threads ", THREADS);
+	printf("Using %u Boost threads ", THREADS);
 #elif defined(THREAD_WINAPI)
-	printf("Using %d WinAPI threads ", THREADS);
+	printf("Using %u WinAPI threads ", THREADS);
 #else
 #error Thread plugin not set
 #endif
@@ -1036,7 +1034,7 @@ int run(int argc, const char* argv[])
 #error Sync plugin not set
 #endif
 	
-	printf("Compressed state is %d bits (%d bytes)\n", COMPRESSED_BITS, sizeof(CompressedState));
+	printf("Compressed state is %u bits (%u bytes)\n", COMPRESSED_BITS, sizeof(CompressedState));
 	enforce(ram, "RAM allocation failed");
 	printf("Using %lld bytes of RAM for %lld cache nodes and %lld buffer nodes\n", (long long)RAM_SIZE, (long long)CACHE_HASH_SIZE, (long long)BUFFER_SIZE);
 

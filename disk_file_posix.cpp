@@ -74,7 +74,7 @@ public:
 		return n;
 	}
 
-	int size()
+	uint64_t size()
 	{
 		// TODO
 		#error "Not implemented"

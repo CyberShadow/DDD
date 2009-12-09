@@ -77,11 +77,11 @@ public:
 		return n;
 	}
 
-	size_t size()
+	uint64_t size()
 	{
 		ULARGE_INTEGER li;
 		li.LowPart = GetFileSize(archive, &li.HighPart);
-		return (size_t)(li.QuadPart / sizeof(Node));
+		return li.QuadPart / sizeof(Node);
 	}
 
 	~InputStream()
