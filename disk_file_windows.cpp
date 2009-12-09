@@ -4,11 +4,13 @@ class OutputStream
 {
 	HANDLE archive;
 public:
-	OutputStream(const char* filename)
+	OutputStream(const char* filename, bool resume=false)
 	{
-		archive = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+		archive = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
 			error("File creation failure");
+		if (resume)
+			SetFilePointer(archive, 0, NULL, FILE_END);
 	}
 
 	void write(const Node* p, int n)
@@ -101,4 +103,9 @@ void renameFile(const char* from, const char* to)
 	BOOL b = MoveFile(from, to);
 	if (!b)
 		error("Error moving file");
+}
+
+bool fileExists(const char* filename)
+{
+	return GetFileAttributes(filename) != INVALID_FILE_ATTRIBUTES;
 }

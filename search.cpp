@@ -95,15 +95,57 @@ typedef CompressedState Node;
 
 // ******************************************************************************************************
 
+void* ram = malloc(RAM_SIZE);
+
+struct CacheNode
+{
+	CompressedState state;
+	PACKED_FRAME frame;
+};
+
+const size_t CACHE_HASH_SIZE = RAM_SIZE / sizeof(CacheNode) / NODES_PER_HASH;
+CacheNode (*cache)[NODES_PER_HASH] = (CacheNode (*)[NODES_PER_HASH]) ram;
+
+const size_t BUFFER_SIZE = RAM_SIZE / sizeof(Node);
+Node* buffer = (Node*) ram;
+
+// ******************************************************************************************************
+
 #define STREAM_BUFFER_SIZE (1024*1024 / sizeof(Node))
 
-class BufferedOutputStream
+Node* streamBufPtr = NULL; // where in "ram" to allocate the next stream's buffer; if NULL, allocate it dynamically
+
+class BufferedStream
 {
-	OutputStream s;
-	Node buf[STREAM_BUFFER_SIZE];
+protected:
+	Node* buf;
 	int pos;
 public:
-	BufferedOutputStream(const char* filename) : s(filename), pos(0) { }
+	BufferedStream() : pos(0)
+	{
+		if (streamBufPtr)
+		{
+			buf = streamBufPtr;
+			streamBufPtr += STREAM_BUFFER_SIZE;
+			if ((char*)streamBufPtr > (char*)ram + RAM_SIZE)
+				error("Out of RAM for stream buffers!");
+		}
+		else
+			buf = new Node[STREAM_BUFFER_SIZE];
+	}
+
+	~BufferedStream()
+	{
+		if (streamBufPtr==NULL) // used dynamic allocation
+			delete[] buf;
+	}
+};
+
+class BufferedOutputStream : BufferedStream
+{
+	OutputStream s;
+public:
+	BufferedOutputStream(const char* filename, bool resume=false) : s(filename, resume) { }
 
 	void write(const Node* p, bool verify=false)
 	{
@@ -136,14 +178,13 @@ public:
 	}
 };
 
-class BufferedInputStream
+class BufferedInputStream : BufferedStream
 {
 	InputStream s;
-	Node buf[STREAM_BUFFER_SIZE];
-	int pos, end;
+	int end;
 	size_t left;
 public:
-	BufferedInputStream(const char* filename) : s(filename), pos(0), end(0) 
+	BufferedInputStream(const char* filename) : s(filename), end(0)
 	{
 		left = s.size();
 	}
@@ -176,22 +217,6 @@ public:
 
 // ******************************************************************************************************
 
-void* ram = malloc(RAM_SIZE);
-
-struct CacheNode
-{
-	CompressedState state;
-	PACKED_FRAME frame;
-};
-
-const size_t CACHE_HASH_SIZE = RAM_SIZE / sizeof(CacheNode) / NODES_PER_HASH;
-CacheNode (*cache)[NODES_PER_HASH] = (CacheNode (*)[NODES_PER_HASH]) ram;
-
-const size_t BUFFER_SIZE = RAM_SIZE / sizeof(Node);
-Node* buffer = (Node*) ram;
-
-// ******************************************************************************************************
-
 void printTime()
 {
 	time_t t;
@@ -211,6 +236,7 @@ void copyFile(const char* from, const char* to)
 	size_t records;
 	while (records = input.read(buffer, amount))
 		output.write(buffer, records);
+	output.flush(); // force disk flush
 }
 
 // ******************************************************************************************************
@@ -307,8 +333,8 @@ public:
 	void bubbleDown()
 	{
 		// Force local variables
-		int64_t c = 1;
-		int64_t size = this->size;
+		intptr_t c = 1;
+		intptr_t size = this->size;
 		HeapNode* heap = this->heap;
 		HeapNode* pp = head; // pointer to parent
 		while (1)
@@ -493,6 +519,22 @@ eof:
 	}
 }
 
+size_t deduplicate(CompressedState* start, size_t records)
+{
+	CompressedState *read=start+1, *write=start+1;
+	CompressedState *end = start+records;
+	while (read < end)
+	{
+		if (*read != *(read-1))
+		{
+			*write = *read;
+            write++;
+		}
+        read++;
+	}
+	return write-start;
+}
+
 // ******************************************************************************************************
 
 BufferedOutputStream* queue[MAX_FRAMES];
@@ -585,11 +627,14 @@ void preprocessQueue()
 		while (records = input.read(buffer, amount))
 		{
 			std::sort(buffer, buffer + records);
+			records = deduplicate(buffer, records);
 			OutputStream output(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, chunks));
 			output.write(buffer, records);
 			chunks++;
 		}
 	}
+
+	streamBufPtr = buffer;
 
 	// Step 2: merge + dedup chunks
 	printf("Merging... "); fflush(stdout);
@@ -607,12 +652,14 @@ void preprocessQueue()
 			deleteFile(format("chunk-%d-%d-%d.bin", LEVEL, currentFrame, i));
 	}
 
+	streamBufPtr = buffer;
+
 	// Step 3: dedup against previous frames
 	printf("Filtering... "); fflush(stdout);
 #ifdef USE_ALL
 	if (currentFrame==0)
 	{
-		copyFile(format("merged-%d-%d.bin", LEVEL, currentFrame), format("closed-%d-%d.bin", LEVEL, currentFrame));
+		copyFile(format("merged-%d-%d.bin", LEVEL, currentFrame), format("closing-%d-%d.bin", LEVEL, currentFrame));
 		renameFile(format("merged-%d-%d.bin", LEVEL, currentFrame), format("all-%d.bin", LEVEL));
 	}
 	else
@@ -644,17 +691,20 @@ void preprocessQueue()
 				else
 					delete input;
 			}
-		BufferedOutputStream* output = new BufferedOutputStream(format("closed-%d-%d.bin", LEVEL, currentFrame));
+		BufferedOutputStream* output = new BufferedOutputStream(format("closing-%d-%d.bin", LEVEL, currentFrame));
 		filterStream(source, inputs, inputCount, output);
 		for (int i=0; i<inputCount; i++)
 			delete inputs[i];
 		delete source;
+		output->flush(); // force disk flush
 		delete output;
 		deleteFile(format("merged-%d-%d.bin", LEVEL, currentFrame));
 	}
 #endif
-	// delete "open" file only after "closed" is completely created
 	deleteFile(format("open-%d-%d.bin", LEVEL, currentFrame));
+	renameFile(format("closing-%d-%d.bin", LEVEL, currentFrame), format("closed-%d-%d.bin", LEVEL, currentFrame));
+
+	streamBufPtr = NULL;
 }
 
 // ******************************************************************************************************
@@ -791,23 +841,28 @@ void traceExit()
 	fprintf(f, "Total steps: %d", totalSteps);
 }
 
-void cleanUp()
-{
-	for (FRAME f=0; f<=currentFrame; f++)
-		if (frameHasNodes[f])
-			deleteFile(format("closed-%d-%d.bin", LEVEL, f));
-	for (FRAME f=currentFrame; f<MAX_FRAMES; f++)
-		if (queue[f])
-		{
-			delete queue[f];
-			deleteFile(format("open-%d-%d.bin", LEVEL, f));
-		}
-}
-
 // ******************************************************************************************************
 
 int search()
 {
+	FRAME startFrame = 0;
+
+	for (FRAME f=MAX_FRAMES; f>0; f--)
+		if (fileExists(format("closed-%d-%d.bin", LEVEL, f)))
+		{
+			printf("Resuming from frame %d\n", f);
+			startFrame = f;
+			break;
+	    }
+
+	for (FRAME f=startFrame; f<MAX_FRAMES; f++)
+		if (fileExists(format("open-%d-%d.bin", LEVEL, f)))
+		{
+			printTime(); printf("Reopening queue for frame %d\n", f);
+			queue[f] = new BufferedOutputStream(format("open-%d-%d.bin", LEVEL, f), true);
+		}
+
+	if (startFrame==0 && !queue[0])
 	{
 		CompressedState c;
 		initialState.compress(&c);
@@ -823,20 +878,27 @@ int search()
 #endif
 		queueState(&c, 0);
 	}
-	
-	for (currentFrame=0;currentFrame<maxFrames;currentFrame++)
+
+	for (currentFrame=startFrame; currentFrame<maxFrames; currentFrame++)
 	{
-		if (!queue[currentFrame])
-			continue;
-		delete queue[currentFrame];
-		queue[currentFrame] = NULL;
+		if (fileExists(format("closed-%d-%d.bin", LEVEL, currentFrame)))
+		{
+			printTime(); printf("Frame %d/%d: (loading closed nodes from disk)               ", currentFrame, maxFrames); fflush(stdout);
+		}
+		else
+		{
+			if (!queue[currentFrame])
+				continue;
+			delete queue[currentFrame];
+			queue[currentFrame] = NULL;
 
-		printTime(); printf("Frame %d/%d: ", currentFrame, maxFrames); fflush(stdout);
+			printTime(); printf("Frame %d/%d: ", currentFrame, maxFrames); fflush(stdout);
 
-		preprocessQueue();
+			preprocessQueue();
 
-		printf("Clearing... "); fflush(stdout);
-		memset(ram, 0, RAM_SIZE); // clear cache
+			printf("Clearing... "); fflush(stdout);
+			memset(ram, 0, RAM_SIZE); // clear cache
+		}
 		
 		currentInput = new BufferedInputStream(format("closed-%d-%d.bin", LEVEL, currentFrame));
 		printf("Searching (%d)... ", currentInput->size()); fflush(stdout);
@@ -860,21 +922,59 @@ int search()
 		flushQueue();
 #endif
 
-		printf("Done.\n"); fflush(stdout);
+		printf("Done.\n");
 		frameHasNodes[currentFrame] = true;
 
 		if (exitFound)
 		{
 			printf("Exit found, tracing path...\n");
 			traceExit();
-			cleanUp();
 			return 0;
+		}
+
+		if (fileExists(format("stop-%d.txt", LEVEL)))
+		{
+			printf("Stop file found.\n");
+			return 3;
 		}
 	}
 	
 	printf("Exit not found.\n");
-	cleanUp();
 	return 2;
+}
+
+// ******************************************************************************************************
+
+int packOpen()
+{
+    for (FRAME f=0; f<MAX_FRAMES; f++)
+    	if (fileExists(format("open-%d-%d.bin", LEVEL, f)))
+    	{
+			printTime(); printf("Frame %d: ", f);
+
+			InputStream input(format("open-%d-%d.bin", LEVEL, f));
+			OutputStream output(format("op_p-%d-%d.bin", LEVEL, f));
+			size_t amount = input.size();
+			if (amount > BUFFER_SIZE)
+				amount = BUFFER_SIZE;
+			size_t records;
+			uint64_t read=0, written=0;
+			while (records = input.read(buffer, amount))
+			{
+				read += records;
+				std::sort(buffer, buffer + records);
+				records = deduplicate(buffer, records);
+				written += records;
+				output.write(buffer, records);
+			}
+			output.flush();
+
+			if (read == written)
+				printf("No improvement.\n");
+			else
+				printf("%llu -> %llu.\n", read, written);
+    	}
+	return 0;
 }
 
 // ******************************************************************************************************
@@ -892,9 +992,17 @@ void printExecutionTime()
 
 // ***********************************************************************************
 
+enum RunMode
+{
+	MODE_SEARCH,
+	MODE_PACKOPEN
+};
+
 int run(int argc, const char* argv[])
 {
 	printf("Level %d: %dx%d, %d players\n", LEVEL, X, Y, PLAYERS);
+
+	enforce(sizeof(intptr_t)==sizeof(size_t), "Bad intptr_t!");
 
 #ifdef HAVE_VALIDATOR
 	printf("Level state validator present\n");
@@ -945,15 +1053,29 @@ int run(int argc, const char* argv[])
 	blankState.blank();
 
 	maxFrames = MAX_FRAMES;
+	RunMode runMode = MODE_SEARCH;
+
 	if (argc>2)
 		error("Too many arguments");
 	if (argc==2)
-		maxFrames = strtol(argv[1], NULL, 10);
+		if (strcmp(argv[1], "pack-open")==0)
+			runMode = MODE_PACKOPEN;
+		else
+			maxFrames = strtol(argv[1], NULL, 10);
 
 	ftime(&startTime);
 	atexit(&printExecutionTime);
 
-	int result = search();
+	int result;
+	switch (runMode)
+	{
+		case MODE_SEARCH:
+			result = search();
+			break;
+		case MODE_PACKOPEN:
+			result = packOpen();
+			break;
+	}
 	//dumpNodes();
 	return result;
 }

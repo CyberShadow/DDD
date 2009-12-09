@@ -4,9 +4,9 @@ class OutputStream
 {
 	int archive;
 public:
-	OutputStream(const char* filename)
+	OutputStream(const char* filename, bool resume=false)
 	{
-		archive = _open(filename, _O_BINARY | _O_WRONLY | _O_TRUNC | _O_CREAT | _O_SEQUENTIAL, _S_IREAD);
+		archive = _open(filename, _O_BINARY | _O_WRONLY | _O_SEQUENTIAL | (resume ? _O_APPEND : _O_CREAT | _O_EXCL), _S_IREAD);
 		if (archive == -1)
 			error(_strerror(NULL));
 	}
@@ -94,6 +94,12 @@ void deleteFile(const char* filename)
 }
 
 void renameFile(const char* from, const char* to)
+{
+	// TODO
+	#error "Not implemented"
+}
+
+bool fileExists(const char* filename)
 {
 	// TODO
 	#error "Not implemented"

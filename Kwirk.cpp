@@ -22,7 +22,10 @@ const char* format(const char *fmt, ...)
 	va_list argptr;
 	va_start(argptr,fmt);
 	//static char buf[1024];
-	char* buf = (char*)malloc(1024);
+	//char* buf = (char*)malloc(1024);
+	static char buffers[16][1024];
+	static int bufIndex = 0;
+	char* buf = buffers[bufIndex++ % 16];
 	vsprintf(buf, fmt, argptr);
 	va_end(argptr);
 	return buf;
