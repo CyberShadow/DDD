@@ -819,6 +819,9 @@ struct State
 	const char* toString() const
 	{
 		char level[Y][X];
+		int blockSizeCount[BLOCKY][BLOCKX];
+		memset(blockSizeCount, 0, sizeof blockSizeCount);
+
 		for (int y=0; y<Y; y++)
 			for (int x=0; x<X; x++)
 				switch (map[y][x] & OBJ_MASK)
@@ -847,8 +850,32 @@ struct State
 						}
 						break;
 					default:
-						level[y][x] = 'x';
-						//level[y][x] = "0123456789ABCDEF"[objs[y][x]];
+						//level[y][x] = 'x';
+						/*if ((map[y][x] & (OBJ_BLOCKUP | OBJ_BLOCKLEFT)) == (OBJ_BLOCKUP | OBJ_BLOCKLEFT))
+							level[y][x] = blockLetter++;
+						else
+						if (map[y][x] & OBJ_BLOCKUP)
+							level[y][x] = level[y][x-1];
+						else
+							level[y][x] = level[y-1][x];*/
+						if ((map[y][x] & (OBJ_BLOCKUP | OBJ_BLOCKLEFT)) == (OBJ_BLOCKUP | OBJ_BLOCKLEFT))
+						{
+							int x2 = x;
+							while ((map[y][x2] & OBJ_BLOCKRIGHT) == 0)
+								x2++;
+							int y2 = y;
+							while ((map[y2][x] & OBJ_BLOCKDOWN) == 0)
+								y2++;
+							x2-=x;
+							y2-=y;
+							assert(x2 < BLOCKX, "Block too wide");
+							assert(y2 < BLOCKY, "Block too tall");
+							int index = blockSizeIndex[y2][x2] + blockSizeCount[y2][x2];
+							for (int by=y; by<=y+y2; by++)
+								for (int bx=x; bx<=x+x2; bx++)
+									level[by][bx] = 'a'+index;
+							blockSizeCount[y2][x2]++;
+						}
 						break;
 				}
 		for (int p=0;p<PLAYERS;p++)

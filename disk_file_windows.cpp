@@ -84,6 +84,15 @@ public:
 		return li.QuadPart / sizeof(Node);
 	}
 
+	void seek(uint64_t pos)
+	{
+		LARGE_INTEGER li;
+		li.QuadPart = pos * sizeof(Node);
+		BOOL b = SetFilePointerEx(archive, li, NULL, FILE_BEGIN);
+		if (!b)
+			error("Seek error");
+	}
+
 	~InputStream()
 	{
 		CloseHandle(archive);

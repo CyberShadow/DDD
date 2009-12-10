@@ -981,6 +981,27 @@ int packOpen()
 
 // ******************************************************************************************************
 
+int sample(FRAME f)
+{
+	const char* fn = format("closed-%u-%u.bin", LEVEL, f);
+	if (!fileExists(fn))
+		fn = format("open-%u-%u.bin", LEVEL, f);
+	if (!fileExists(fn))
+		error(format("Can't find neither open nor closed node file for frame %u", f));
+	
+	InputStream in(fn);
+	srand(time(NULL));
+	in.seek(rand() % in.size());
+	CompressedState cs;
+	in.read(&cs, 1);
+	State s = blankState;
+	s.decompress(&cs);
+	puts(s.toString());
+	return 0;
+}
+
+// ******************************************************************************************************
+
 timeb startTime;
 
 void printExecutionTime()
@@ -997,7 +1018,8 @@ void printExecutionTime()
 enum RunMode
 {
 	MODE_SEARCH,
-	MODE_PACKOPEN
+	MODE_PACKOPEN,
+	MODE_SAMPLE
 };
 
 int run(int argc, const char* argv[])
@@ -1056,14 +1078,25 @@ int run(int argc, const char* argv[])
 
 	maxFrames = MAX_FRAMES;
 	RunMode runMode = MODE_SEARCH;
+	FRAME sampleFrame;
 
-	if (argc>2)
-		error("Too many arguments");
-	if (argc==2)
+	if (argc>1)
+	{
 		if (strcmp(argv[1], "pack-open")==0)
+		{
 			runMode = MODE_PACKOPEN;
+			enforce(argc==2, "Too many arguments");
+		}
+		else
+		if (strcmp(argv[1], "sample")==0)
+		{
+			runMode = MODE_SAMPLE;
+			enforce(argc==3, "Specify a frame number to sample");
+			sampleFrame = strtol(argv[2], NULL, 10);
+		}
 		else
 			maxFrames = strtol(argv[1], NULL, 10);
+	}
 
 	ftime(&startTime);
 	atexit(&printExecutionTime);
@@ -1076,6 +1109,9 @@ int run(int argc, const char* argv[])
 			break;
 		case MODE_PACKOPEN:
 			result = packOpen();
+			break;
+		case MODE_SAMPLE:
+			result = sample(sampleFrame);
 			break;
 	}
 	//dumpNodes();
