@@ -6,7 +6,15 @@ DWORD WINAPI CallCFunction(__in LPVOID lpParameter)
 {
 	typedef void (*C_FUNC)();
 	C_FUNC f = (C_FUNC)lpParameter;
-	f();
+	try
+	{
+		f();
+	}
+	catch (const char* s)
+	{
+		puts(s);
+		exit(1);
+	}
 	return 0;
 }
 

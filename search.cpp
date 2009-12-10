@@ -950,27 +950,31 @@ int packOpen()
     	{
 			printTime(); printf("Frame %u: ", f);
 
-			InputStream input(format("open-%u-%u.bin", LEVEL, f));
-			OutputStream output(format("op_p-%u-%u.bin", LEVEL, f));
-			uint64_t amount = input.size();
-			if (amount > BUFFER_SIZE)
-				amount = BUFFER_SIZE;
-			size_t records;
-			uint64_t read=0, written=0;
-			while (records = input.read(buffer, amount))
 			{
-				read += records;
-				std::sort(buffer, buffer + records);
-				records = deduplicate(buffer, records);
-				written += records;
-				output.write(buffer, records);
-			}
-			output.flush();
+				InputStream input(format("open-%u-%u.bin", LEVEL, f));
+				OutputStream output(format("openpacked-%u-%u.bin", LEVEL, f));
+				uint64_t amount = input.size();
+				if (amount > BUFFER_SIZE)
+					amount = BUFFER_SIZE;
+				size_t records;
+				uint64_t read=0, written=0;
+				while (records = input.read(buffer, amount))
+				{
+					read += records;
+					std::sort(buffer, buffer + records);
+					records = deduplicate(buffer, records);
+					written += records;
+					output.write(buffer, records);
+				}
+				output.flush();
 
-			if (read == written)
-				printf("No improvement.\n");
-			else
-				printf("%llu -> %llu.\n", read, written);
+				if (read == written)
+					printf("No improvement.\n");
+				else
+					printf("%llu -> %llu.\n", read, written);
+			}
+			deleteFile(format("open-%u-%u.bin", LEVEL, f));
+			renameFile(format("openpacked-%u-%u.bin", LEVEL, f), format("open-%u-%u.bin", LEVEL, f));
     	}
 	return 0;
 }
