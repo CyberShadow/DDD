@@ -637,6 +637,7 @@ void preprocessQueue()
 
 	// Step 2: merge + dedup chunks
 	printf("Merging... "); fflush(stdout);
+	if (chunks>1)
 	{
 		BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
 		for (int i=0; i<chunks; i++)
@@ -649,6 +650,10 @@ void preprocessQueue()
 		delete output;
 		for (int i=0; i<chunks; i++)
 			deleteFile(format("chunk-%u-%u-%d.bin", LEVEL, currentFrame, i));
+	}
+	else
+	{
+		renameFile(format("chunk-%u-%u-%d.bin", LEVEL, currentFrame, 0), format("merged-%u-%u.bin", LEVEL, currentFrame));
 	}
 
 	streamBufPtr = buffer;
@@ -1002,6 +1007,34 @@ int sample(FRAME f)
 
 // ******************************************************************************************************
 
+int countDups(const char* fn1, const char* fn2)
+{
+	BufferedInputStream i1(fn1), i2(fn2);
+	printf("%s: %llu states\n%s: %llu states\n", fn1, i1.size(), fn2, i2.size());
+	const CompressedState *cs1, *cs2;
+	cs1 = i1.read();
+	cs2 = i2.read();
+	uint64_t dups = 0;
+	while (cs1 && cs2)
+	{
+		if (*cs1 < *cs2)
+			cs1 = i1.read();
+		else
+		if (*cs1 > *cs2)
+			cs2 = i2.read();
+		else
+		{
+			dups++;
+			cs1 = i1.read();
+			cs2 = i2.read();
+		}
+	}
+	printf("%llu duplicate states\n", dups);
+	return 0;
+}
+
+// ******************************************************************************************************
+
 timeb startTime;
 
 void printExecutionTime()
@@ -1019,7 +1052,8 @@ enum RunMode
 {
 	MODE_SEARCH,
 	MODE_PACKOPEN,
-	MODE_SAMPLE
+	MODE_SAMPLE,
+	MODE_COUNTDUPS
 };
 
 int run(int argc, const char* argv[])
@@ -1027,6 +1061,7 @@ int run(int argc, const char* argv[])
 	printf("Level %u: %ux%u, %u players\n", LEVEL, X, Y, PLAYERS);
 
 	enforce(sizeof(intptr_t)==sizeof(size_t), "Bad intptr_t!");
+	enforce(sizeof(long long)==8, "Bad long long!");
 
 #ifdef HAVE_VALIDATOR
 	printf("Level state validator present\n");
@@ -1095,6 +1130,12 @@ int run(int argc, const char* argv[])
 			sampleFrame = strtol(argv[2], NULL, 10);
 		}
 		else
+		if (strcmp(argv[1], "count-dups")==0)
+		{
+			runMode = MODE_COUNTDUPS;
+			enforce(argc==4, "Specify two files to compare");
+		}
+		else
 			maxFrames = strtol(argv[1], NULL, 10);
 	}
 
@@ -1112,6 +1153,9 @@ int run(int argc, const char* argv[])
 			break;
 		case MODE_SAMPLE:
 			result = sample(sampleFrame);
+			break;
+		case MODE_COUNTDUPS:
+			result = countDups(argv[2], argv[3]);
 			break;
 	}
 	//dumpNodes();
