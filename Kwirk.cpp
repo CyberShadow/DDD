@@ -33,11 +33,16 @@ const char* format(const char *fmt, ...)
 
 const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; }
 
+// enforce - check condition in both DEBUG/RELEASE, error() on fail
+// assert - check condition in DEBUG builds, try to instruct compiler to assume the condition is true in RELEASE builds
+// debug_assert - check condition in DEBUG builds, do nothing in RELEASE builds (classic ASSERT)
+
 #define enforce(expr,...) while(!(expr)){error(defaultstr(format("Check failed at %s:%d", __FILE__,  __LINE__), __VA_ARGS__));throw "Unreachable";}
 
 #undef assert
 #ifdef DEBUG
 #define assert enforce
+#define debug_assert enforce
 #define INLINE
 #else
 #if defined(_MSC_VER)
@@ -49,6 +54,7 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 #else
 #error Unknown compiler
 #endif
+#define debug_assert(...) do{}while(0)
 #endif
 
 
@@ -146,6 +152,7 @@ enum
 	DELAY_FILL   = 26,
 	DELAY_ROTATE = 12,
 	DELAY_SWITCH = 30,
+	DELAY_EXIT   =  1, // fake delay to prevent grouping into one frame group
 };
 
 const char DX[4] = {0, 1, 0, -1};
@@ -161,10 +168,20 @@ struct Player
 	INLINE void exit() { x=INVALID_X+1, y=INVALID_Y+1; }
 };
 
+#define COMPRESSED_BITS ( \
+	(PLAYERS>2 ? 2 : (PLAYERS>1 ? 1 : 0)) + \
+	(XBITS_WITH_INVAL + YBITS_WITH_INVAL) * PLAYERS + \
+	(XBITS_WITH_INVAL + YBITS_WITH_INVAL) * BLOCKS + \
+	4 * ROTATORS + \
+	HOLES \
+)
+
+#define COMPRESSED_BYTES ((COMPRESSED_BITS + 7) / 8)
+#define COMPRESSED_SLACK_BYTES (3 - ((3 + COMPRESSED_BYTES) % 4))
+
 struct CompressedState
 {
-	// OPTIMIZATION TODO: check if order of these affects speed
-	// OPTIMIZATION TODO: get rid of exited
+	// OPTIMIZATION TODO: use 2 bits instead of 4 for rotators?
 
 	#if (PLAYERS>2)
 		unsigned activePlayer : 2;
@@ -202,39 +219,53 @@ struct CompressedState
 		unsigned BOOST_PP_CAT(hole, n) : 1;
 	#include BOOST_PP_LOCAL_ITERATE()
 	#endif
+
+	#if (COMPRESSED_BITS % 8 != 0) // Align the next field to a byte boundary. This must be done in bitfield semantics, 
+	unsigned _align : 8 - (COMPRESSED_BITS % 8); // because the size of a bitfield seems to always be a multiple of 4 bytes.
+	#endif
+	#if (COMPRESSED_SLACK_BYTES == 3) // Align to word boundary if we have the space.
+	unsigned _align2 : 8;
+	#endif
+
+	unsigned subframe : 8; // Used in search (actually, only 3 bits are needed
+
+	#if (COMPRESSED_SLACK_BYTES != 1) // Align the structure size to dword boundary
+	unsigned _align3 : 8 * (COMPRESSED_SLACK_BYTES == 0 ? 3 : 1);
+	#endif
 };
 
-#define COMPRESSED_BITS ( \
-	(PLAYERS>2 ? 2 : (PLAYERS>1 ? 1 : 0)) + \
-	(XBITS_WITH_INVAL + YBITS_WITH_INVAL) * PLAYERS + \
-	(XBITS_WITH_INVAL + YBITS_WITH_INVAL) * BLOCKS + \
-	4 * ROTATORS + \
-	HOLES \
-)
+// It is very important that these comparison operators are as fast as possible.
 
-#if (COMPRESSED_BITS <= 32) // 4 bytes
+#if   (COMPRESSED_BITS >  24 && COMPRESSED_BITS <=  32) // 4 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] == ((const uint32_t*)&b)[0]; }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] != ((const uint32_t*)&b)[0]; }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] <  ((const uint32_t*)&b)[0]; }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] <= ((const uint32_t*)&b)[0]; }
-#elif (COMPRESSED_BITS <= 64) // 8 bytes
+#elif (COMPRESSED_BITS >  56 && COMPRESSED_BITS <=  64) // 8 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0]; }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] != ((const uint64_t*)&b)[0]; }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0]; }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <= ((const uint64_t*)&b)[0]; }
-#elif (COMPRESSED_BITS > 96 && COMPRESSED_BITS <= 128) // 16 bytes
+#elif (COMPRESSED_BITS >  96 && COMPRESSED_BITS <= 112) // 13-14 bytes
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && (((const uint64_t*)&a)[1]&0x0000FFFFFFFFFFFFLL) == (((const uint64_t*)&b)[1]&0x0000FFFFFFFFFFFFLL); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] != ((const uint64_t*)&b)[0] || (((const uint64_t*)&a)[1]&0x0000FFFFFFFFFFFFLL) != (((const uint64_t*)&b)[1]&0x0000FFFFFFFFFFFFLL); }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0] || 
+                                                                                   (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && (((const uint64_t*)&a)[1]&0x0000FFFFFFFFFFFFLL) <  (((const uint64_t*)&b)[1]&0x0000FFFFFFFFFFFFLL)); }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0] || 
+                                                                                   (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && (((const uint64_t*)&a)[1]&0x0000FFFFFFFFFFFFLL) <= (((const uint64_t*)&b)[1]&0x0000FFFFFFFFFFFFLL)); }
+#elif (COMPRESSED_BITS > 120 && COMPRESSED_BITS <= 128) // 16 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint64_t*)&a)[1] == ((const uint64_t*)&b)[1]; }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] != ((const uint64_t*)&b)[0] || ((const uint64_t*)&a)[1] != ((const uint64_t*)&b)[1]; }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0] || 
-                                                                                   (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint64_t*)&a)[1] <  ((const uint64_t*)&b)[1] ); }
+                                                                                   (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint64_t*)&a)[1] <  ((const uint64_t*)&b)[1]); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0] || 
-                                                                                   (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint64_t*)&a)[1] <= ((const uint64_t*)&b)[1] ); }
+                                                                                   (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint64_t*)&a)[1] <= ((const uint64_t*)&b)[1]); }
 #else
 #pragma message("Performance warning: using memcmp for CompressedState comparison")
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)==0; }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)!=0; }
-INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)< 0; }
-INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, sizeof CompressedState)<=0; }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, COMPRESSED_BYTES)==0; }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, COMPRESSED_BYTES)!=0; }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, COMPRESSED_BYTES)< 0; }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, COMPRESSED_BYTES)<=0; }
 #endif
 
 INLINE bool operator> (const CompressedState& a, const CompressedState& b) { return b< a; }
@@ -296,7 +327,7 @@ struct State
 				return DELAY_MOVE + DELAY_SWITCH;
 			}
 			else
-				return DELAY_MOVE;
+				return DELAY_MOVE + DELAY_EXIT;
 		}
 		if (dmap & CELL_MASK) // neither wall nor hole
 			return -1;

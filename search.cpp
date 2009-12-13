@@ -55,9 +55,10 @@ State initialState, blankState;
 // ******************************************************************************************************
 
 typedef uint32_t FRAME;
+typedef uint32_t FRAME_GROUP;
 typedef uint16_t PACKED_FRAME;
 
-#pragma pack(1)
+//#pragma pack(1)
 struct Step
 {
 	Action action;
@@ -390,37 +391,29 @@ public:
 
 void mergeStreams(BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
 {
-	// TODO: use InputHeap
-	const CompressedState** states = new const CompressedState*[inputCount];
-	CompressedState last;
-	memset(&last, 0, sizeof(last));
+	InputHeap heap(inputs, inputCount);
+
+	const CompressedState* first = heap.getHead();
+	if (!first)
+		return;
+	CompressedState cs = *first;
 	
-	for (int i=0; i<inputCount; i++)
-		states[i] = inputs[i]->read();
-
-	while (true)
+	while (heap.next())
 	{
-		int lowestIndex;
-		const CompressedState* lowest = NULL;
-		for (int i=0; i<inputCount; i++)
-			if (states[i])
-				if (lowest == NULL || *states[i] < *lowest)
-				{
-					lowestIndex = i;
-					lowest = states[i];
-				}
-
-		if (lowest == NULL) // all done
-			return;
-
-		if (*lowest != last)
+		CompressedState cs2 = *heap.getHead();
+		debug_assert(cs2 >= cs);
+		if (cs == cs2) // CompressedState::operator== does not compare subframe
 		{
-			output->write(lowest);
-			last = *lowest;
+			if (cs.subframe > cs2.subframe) // in case of duplicate frames, pick the one from the smallest frame
+				cs.subframe = cs2.subframe;
 		}
-
-		states[lowestIndex] = inputs[lowestIndex]->read();
+		else
+		{
+			output->write(&cs, true);
+			cs = cs2;
+		}
 	}
+	output->write(&cs, true);
 }
 
 void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
@@ -536,11 +529,19 @@ eof:
 
 size_t deduplicate(CompressedState* start, size_t records)
 {
+	if (records==0)
+		return 0;
 	CompressedState *read=start+1, *write=start+1;
 	CompressedState *end = start+records;
 	while (read < end)
 	{
-		if (*read != *(read-1))
+		debug_assert(*read >= *(read-1));
+		if (*read == *(write-1)) // CompressedState::operator== does not compare subframe
+		{
+			if ((write-1)->subframe > read->subframe)
+				(write-1)->subframe = read->subframe;
+		}
+		else
 		{
 			*write = *read;
             write++;
@@ -552,9 +553,11 @@ size_t deduplicate(CompressedState* start, size_t records)
 
 // ******************************************************************************************************
 
-BufferedOutputStream* queue[MAX_FRAMES];
+#define MAX_FRAME_GROUPS ((MAX_FRAMES+9)/10)
+
+BufferedOutputStream* queue[MAX_FRAME_GROUPS];
 #ifdef MULTITHREADING
-MUTEX queueMutex[MAX_FRAMES];
+MUTEX queueMutex[MAX_FRAME_GROUPS];
 #endif
 
 #ifdef MULTITHREADING
@@ -562,14 +565,16 @@ MUTEX queueMutex[MAX_FRAMES];
 MUTEX cacheMutex[PARTITIONS];
 #endif
 
-void queueState(const CompressedState* state, FRAME frame)
+void queueState(CompressedState* state, FRAME frame)
 {
+	FRAME_GROUP group = frame/10;
+	state->subframe = frame%10;
 #ifdef MULTITHREADING
-	SCOPED_LOCK lock(queueMutex[frame]);
+	SCOPED_LOCK lock(queueMutex[group]);
 #endif
-	if (!queue[frame])
-		queue[frame] = new BufferedOutputStream(format("open-%u-%u.bin", LEVEL, frame));
-	queue[frame]->write(state);
+	if (!queue[group])
+		queue[group] = new BufferedOutputStream(format("open-%u-%ux.bin", LEVEL, group));
+	queue[group]->write(state);
 }
 
 void addState(const State* state, FRAME frame)
@@ -625,15 +630,16 @@ void flushQueue()
 
 // ******************************************************************************************************
 
-FRAME maxFrames, currentFrame;
+FRAME_GROUP maxFrameGroups;
+FRAME_GROUP currentFrameGroup;
 
 void preprocessQueue()
 {
-	// Step 1: read chunks of BUFFER_SIZE nodes, sort them and write them to disk
+	// Step 1: read chunks of BUFFER_SIZE nodes, sort+dedup them in RAM and write them to disk
 	int chunks = 0;
 	printf("Sorting... "); fflush(stdout);
 	{
-		InputStream input(format("open-%u-%u.bin", LEVEL, currentFrame));
+		InputStream input(format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
 		uint64_t amount = input.size();
 		if (amount > BUFFER_SIZE)
 			amount = BUFFER_SIZE;
@@ -642,7 +648,7 @@ void preprocessQueue()
 		{
 			std::sort(buffer, buffer + records);
 			records = deduplicate(buffer, records);
-			OutputStream output(format("chunk-%u-%u-%d.bin", LEVEL, currentFrame, chunks));
+			OutputStream output(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, chunks));
 			output.write(buffer, records);
 			chunks++;
 		}
@@ -656,19 +662,19 @@ void preprocessQueue()
 	{
 		BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
 		for (int i=0; i<chunks; i++)
-			chunkInput[i] = new BufferedInputStream(format("chunk-%u-%u-%d.bin", LEVEL, currentFrame, i));
-		BufferedOutputStream* output = new BufferedOutputStream(format("merged-%u-%u.bin", LEVEL, currentFrame));
+			chunkInput[i] = new BufferedInputStream(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, i));
+		BufferedOutputStream* output = new BufferedOutputStream(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
 		mergeStreams(chunkInput, chunks, output);
 		for (int i=0; i<chunks; i++)
 			delete chunkInput[i];
 		delete[] chunkInput;
 		delete output;
 		for (int i=0; i<chunks; i++)
-			deleteFile(format("chunk-%u-%u-%d.bin", LEVEL, currentFrame, i));
+			deleteFile(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, i));
 	}
 	else
 	{
-		renameFile(format("chunk-%u-%u-%d.bin", LEVEL, currentFrame, 0), format("merged-%u-%u.bin", LEVEL, currentFrame));
+		renameFile(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, 0), format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
 	}
 
 	streamBufPtr = buffer;
@@ -678,15 +684,15 @@ void preprocessQueue()
 #ifdef USE_ALL
 	if (currentFrame==0)
 	{
-		copyFile(format("merged-%u-%u.bin", LEVEL, currentFrame), format("closing-%u-%u.bin", LEVEL, currentFrame));
-		renameFile(format("merged-%u-%u.bin", LEVEL, currentFrame), format("all-%u.bin", LEVEL));
+		copyFile(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup), format("closing-%u-%ux.bin", LEVEL, currentFrameGroup));
+		renameFile(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup), format("all-%u.bin", LEVEL));
 	}
 	else
 	{
-		BufferedInputStream* source = new BufferedInputStream(format("merged-%u-%u.bin", LEVEL, currentFrame));
+		BufferedInputStream* source = new BufferedInputStream(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
 		BufferedInputStream* all = new BufferedInputStream(format("all-%u.bin", LEVEL));
-		BufferedOutputStream* allnew = new BufferedOutputStream(format("allnew-%u.bin", LEVEL, currentFrame));
-		BufferedOutputStream* closed = new BufferedOutputStream(format("closed-%u-%u.bin", LEVEL, currentFrame));
+		BufferedOutputStream* allnew = new BufferedOutputStream(format("allnew-%u.bin", LEVEL));
+		BufferedOutputStream* closed = new BufferedOutputStream(format("closed-%u-%ux.bin", LEVEL, currentFrameGroup));
 		mergeTwoStreams(source, all, allnew, closed);
 		delete all;
 		delete source;
@@ -694,34 +700,34 @@ void preprocessQueue()
 		delete closed;
 		deleteFile(format("all-%u.bin", LEVEL));
 		renameFile(format("allnew-%u.bin", LEVEL), format("all-%u.bin", LEVEL));
-		deleteFile(format("merged-%u-%u.bin", LEVEL, currentFrame));
+		deleteFile(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
 	}
 #else
 	{
-		BufferedInputStream* source = new BufferedInputStream(format("merged-%u-%u.bin", LEVEL, currentFrame));
+		BufferedInputStream* source = new BufferedInputStream(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
 		BufferedInputStream* inputs[MAX_FRAMES];
 		int inputCount = 0;
-		for (FRAME f=0; f<currentFrame; f++)
-			if (fileExists(format("closed-%u-%u.bin", LEVEL, f)))
+		for (FRAME_GROUP g=0; g<currentFrameGroup; g++)
+			if (fileExists(format("closed-%u-%ux.bin", LEVEL, g)))
 			{
-				BufferedInputStream* input = new BufferedInputStream(format("closed-%u-%u.bin", LEVEL, f));
+				BufferedInputStream* input = new BufferedInputStream(format("closed-%u-%ux.bin", LEVEL, g));
 				if (input->size())
 					inputs[inputCount++] = input;
 				else
 					delete input;
 			}
-		BufferedOutputStream* output = new BufferedOutputStream(format("closing-%u-%u.bin", LEVEL, currentFrame));
+		BufferedOutputStream* output = new BufferedOutputStream(format("closing-%u-%ux.bin", LEVEL, currentFrameGroup));
 		filterStream(source, inputs, inputCount, output);
 		for (int i=0; i<inputCount; i++)
 			delete inputs[i];
 		delete source;
 		output->flush(); // force disk flush
 		delete output;
-		deleteFile(format("merged-%u-%u.bin", LEVEL, currentFrame));
+		deleteFile(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
 	}
 #endif
-	deleteFile(format("open-%u-%u.bin", LEVEL, currentFrame));
-	renameFile(format("closing-%u-%u.bin", LEVEL, currentFrame), format("closed-%u-%u.bin", LEVEL, currentFrame));
+	deleteFile(format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
+	renameFile(format("closing-%u-%ux.bin", LEVEL, currentFrameGroup), format("closed-%u-%ux.bin", LEVEL, currentFrameGroup));
 
 	streamBufPtr = NULL;
 }
@@ -762,6 +768,7 @@ INLINE void addStateStep(const State* state, Step step, FRAME frame)
 // ******************************************************************************************************
 
 bool exitFound;
+FRAME exitFrame;
 State exitState;
 
 void worker()
@@ -776,9 +783,11 @@ void worker()
 		s.compress(&test);
 		assert(test == cs, "Compression/decompression failed");
 #endif
+		FRAME currentFrame = currentFrameGroup*10 + cs.subframe;
 		if (s.playersLeft()==0)
 		{
 			exitFound = true;
+			exitFrame = currentFrame;
 			exitState = s;
 			return;
 		}
@@ -811,37 +820,42 @@ void traceExit()
 	Step steps[MAX_STEPS];
 	int stepNr = 0;
 	{
-		exitSearchState = exitState;
-		int frame = currentFrame;
-		while (frame >= 0)
+		exitSearchState      = exitState;
+		exitSearchStateFrame = exitFrame;
+		int frameGroup = currentFrameGroup;
+		while (frameGroup >= 0)
 		{
 	nextStep:
 			exitSearchStateFound = false;
-			exitSearchStateFrame = frame;
-			frame -= 9;
-			for (; frame >= 0; frame--)
-				if (fileExists(format("closed-%u-%d.bin", LEVEL, frame)))
+			frameGroup--;
+			if (fileExists(format("closed-%u-%dx.bin", LEVEL, frameGroup)))
+			{
+				printf("Frame group %dx... \r", frameGroup);
+				// TODO: parallelize?
+				InputStream input(format("closed-%u-%dx.bin", LEVEL, frameGroup));
+				CompressedState cs;
+				while (input.read(&cs, 1))
 				{
-					printf("Frame %d... \r", frame);
-					// TODO: parallelize
-					InputStream input(format("closed-%u-%d.bin", LEVEL, frame));
-					CompressedState cs;
-					while (input.read(&cs, 1))
+					State state = blankState;
+					state.decompress(&cs);
+					FRAME frame = frameGroup*10 + cs.subframe;
+					checkChildren(frame, &state);
+					if (exitSearchStateFound)
 					{
-						State state = blankState;
-						state.decompress(&cs);
-						checkChildren(frame, &state);
-						if (exitSearchStateFound)
-						{
-							printf("\nFound!\n");
-							steps[stepNr++] = exitSearchStateStep;
-							exitSearchState = state; 
-							goto nextStep;
-						}
+						printf("Found (at %d)!          \n", frame);
+						steps[stepNr++] = exitSearchStateStep;
+						exitSearchState      = state;
+						exitSearchStateFrame = frame;
+						if (frame == 0)
+							goto found;
+						goto nextStep;
 					}
 				}
+			}
 		}
 	}
+	error("Lost parent node!");
+found:
 
 	FILE* f = fopen(format("%u.txt", LEVEL), "wt");
 	steps[stepNr].action = NONE;
@@ -864,24 +878,24 @@ void traceExit()
 
 int search()
 {
-	FRAME startFrame = 0;
+	FRAME_GROUP startFrameGroup = 0;
 
-	for (FRAME f=MAX_FRAMES; f>0; f--)
-		if (fileExists(format("closed-%u-%u.bin", LEVEL, f)))
+	for (FRAME_GROUP g=MAX_FRAME_GROUPS; g>0; g--)
+		if (fileExists(format("closed-%u-%ux.bin", LEVEL, g)))
 		{
-			printf("Resuming from frame %u\n", f);
-			startFrame = f;
+			printf("Resuming from frame group %ux\n", g);
+			startFrameGroup = g;
 			break;
 	    }
 
-	for (FRAME f=startFrame; f<MAX_FRAMES; f++)
-		if (fileExists(format("open-%u-%u.bin", LEVEL, f)))
+	for (FRAME_GROUP g=startFrameGroup; g<MAX_FRAME_GROUPS; g++)
+		if (fileExists(format("open-%u-%ux.bin", LEVEL, g)))
 		{
-			printTime(); printf("Reopening queue for frame %u\n", f);
-			queue[f] = new BufferedOutputStream(format("open-%u-%u.bin", LEVEL, f), true);
+			printTime(); printf("Reopening queue for frame group %ux\n", g);
+			queue[g] = new BufferedOutputStream(format("open-%u-%ux.bin", LEVEL, g), true);
 		}
 
-	if (startFrame==0 && !queue[0])
+	if (startFrameGroup==0 && !queue[0])
 	{
 		CompressedState c;
 		initialState.compress(&c);
@@ -898,20 +912,20 @@ int search()
 		queueState(&c, 0);
 	}
 
-	for (currentFrame=startFrame; currentFrame<maxFrames; currentFrame++)
+	for (currentFrameGroup=startFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
 	{
-		if (fileExists(format("closed-%u-%u.bin", LEVEL, currentFrame)))
+		if (fileExists(format("closed-%u-%ux.bin", LEVEL, currentFrameGroup)))
 		{
-			printTime(); printf("Frame %u/%u: (loading closed nodes from disk)               ", currentFrame, maxFrames); fflush(stdout);
+			printTime(); printf("Frame group %ux/%ux: (loading closed nodes from disk)               ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 		}
 		else
 		{
-			if (!queue[currentFrame])
+			if (!queue[currentFrameGroup])
 				continue;
-			delete queue[currentFrame];
-			queue[currentFrame] = NULL;
+			delete queue[currentFrameGroup];
+			queue[currentFrameGroup] = NULL;
 
-			printTime(); printf("Frame %u/%u: ", currentFrame, maxFrames); fflush(stdout);
+			printTime(); printf("Frame group %ux/%ux: ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 
 			preprocessQueue();
 
@@ -919,7 +933,7 @@ int search()
 			memset(ram, 0, RAM_SIZE); // clear cache
 		}
 		
-		currentInput = new BufferedInputStream(format("closed-%u-%u.bin", LEVEL, currentFrame));
+		currentInput = new BufferedInputStream(format("closed-%u-%ux.bin", LEVEL, currentFrameGroup));
 		printf("Searching (%llu)... ", currentInput->size()); fflush(stdout);
 #ifdef MULTITHREADING
 		THREAD threads[THREADS];
@@ -945,7 +959,7 @@ int search()
 
 		if (exitFound)
 		{
-			printf("Exit found, tracing path...\n");
+			printf("Exit found (at frame %u), tracing path...\n", exitFrame);
 			traceExit();
 			return 0;
 		}
@@ -1050,6 +1064,68 @@ int countDups(const char* fn1, const char* fn2)
 
 // ******************************************************************************************************
 
+// This works only if the size of CompressedState is the same as the old version (without the subframe field).
+
+// HACK: the following code uses pointer arithmetics with BufferedInputStream objects to quickly determine the subframe from which a CompressedState came from.
+
+void convertMerge(BufferedInputStream* inputBase, BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
+{
+	InputHeap heap(inputs, inputCount);
+
+	CompressedState cs = *heap.getHead();
+	debug_assert(heap.getHeadInput() >= inputBase && heap.getHeadInput() < inputBase+10);
+	cs.subframe = heap.getHeadInput() - inputBase;
+	while (heap.next())
+	{
+		CompressedState cs2 = *heap.getHead();
+		debug_assert(heap.getHeadInput() >= inputBase && heap.getHeadInput() < inputBase+10);
+		cs2.subframe = heap.getHeadInput() - inputBase;
+		debug_assert(cs2 >= cs);
+		if (cs == cs2) // CompressedState::operator== does not compare subframe
+		{
+			if (cs.subframe > cs2.subframe) // in case of duplicate frames, pick the one from the smallest frame
+				cs.subframe = cs2.subframe;
+		}
+		else
+		{
+			output->write(&cs, true);
+			cs = cs2;
+		}
+	}
+	output->write(&cs, true);
+}
+
+int convert()
+{
+	for (FRAME g=0; g<(MAX_FRAMES+9)/10; g++)
+	{
+		bool haveClosed=false, haveOpen=false;
+		BufferedInputStream* inputs = (BufferedInputStream*) calloc(10, sizeof(BufferedInputStream));
+		BufferedInputStream* inputPtrs[10];
+		int inputCount = 0;
+		for (FRAME f=g*10; f<(g+1)*10; f++)
+			if (fileExists(format("closed-%u-%u.bin", LEVEL, f)))
+				inputPtrs[inputCount++] = new(&inputs[f%10]) BufferedInputStream(format("closed-%u-%u.bin", LEVEL, f)),
+				haveClosed = true;
+			else
+			if (fileExists(format("open-%u-%u.bin", LEVEL, f)))
+				inputPtrs[inputCount++] = new(&inputs[f%10]) BufferedInputStream(format("open-%u-%u.bin", LEVEL, f)),
+				haveOpen = true;
+		if (haveOpen || haveClosed)
+		{
+			printf("%d-%d...\n", g*10, g*10+9);
+			BufferedOutputStream output(format("%s-%u-%ux.bin", haveOpen ? "open" : "closed", LEVEL, g));
+			convertMerge(inputs, inputPtrs, inputCount, &output);
+		}
+		for (int i=0; i<inputCount; i++)
+			inputPtrs[i]->~BufferedInputStream();
+		free(inputs);
+	}
+	return 0;
+}
+
+// ******************************************************************************************************
+
 timeb startTime;
 
 void printExecutionTime()
@@ -1068,7 +1144,8 @@ enum RunMode
 	MODE_SEARCH,
 	MODE_PACKOPEN,
 	MODE_SAMPLE,
-	MODE_COUNTDUPS
+	MODE_COUNTDUPS,
+	MODE_CONVERT
 };
 
 int run(int argc, const char* argv[])
@@ -1111,6 +1188,9 @@ int run(int argc, const char* argv[])
 #endif
 	
 	printf("Compressed state is %u bits (%u bytes)\n", COMPRESSED_BITS, sizeof(CompressedState));
+	enforce(COMPRESSED_BITS <= (sizeof(CompressedState)-1)*8);
+	enforce(sizeof(CompressedState)%4 == 0);
+
 	enforce(ram, "RAM allocation failed");
 	printf("Using %lld bytes of RAM for %lld cache nodes and %lld buffer nodes\n", (long long)RAM_SIZE, (long long)CACHE_HASH_SIZE, (long long)BUFFER_SIZE);
 
@@ -1126,7 +1206,7 @@ int run(int argc, const char* argv[])
 	blankState = initialState;
 	blankState.blank();
 
-	maxFrames = MAX_FRAMES;
+	maxFrameGroups = MAX_FRAME_GROUPS;
 	RunMode runMode = MODE_SEARCH;
 	FRAME sampleFrame;
 
@@ -1151,7 +1231,17 @@ int run(int argc, const char* argv[])
 			enforce(argc==4, "Specify two files to compare");
 		}
 		else
-			maxFrames = strtol(argv[1], NULL, 10);
+		if (strcmp(argv[1], "convert")==0)
+		{
+			runMode = MODE_CONVERT;
+			enforce(argc==2, "Too many arguments");
+		}
+		else
+		{
+			int maxFrames = strtol(argv[1], NULL, 10);
+			enforce(maxFrames%10 == 0, "Number of frames must be divisible by 10");
+			maxFrameGroups = maxFrames / 10;
+		}
 	}
 
 	ftime(&startTime);
@@ -1171,6 +1261,9 @@ int run(int argc, const char* argv[])
 			break;
 		case MODE_COUNTDUPS:
 			result = countDups(argv[2], argv[3]);
+			break;
+		case MODE_CONVERT:
+			result = convert();
 			break;
 	}
 	return result;
