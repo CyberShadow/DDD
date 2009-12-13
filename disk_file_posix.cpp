@@ -1,5 +1,7 @@
 // POSIX files
 
+#warning "This file is seriously out of date. Update it using disk_file_windows.cpp as an example."
+
 class OutputStream
 {
 	int archive;

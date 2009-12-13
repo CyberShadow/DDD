@@ -155,15 +155,13 @@ public:
 			assert(buf[pos-1] > buf[pos-2], "Output is not sorted");
 #endif
 		if (pos == STREAM_BUFFER_SIZE)
-		{
 			flushBuffer();
-			pos = 0;
-		}
 	}
 
 	void flushBuffer()
 	{
 		s.write(buf, pos);
+		pos = 0;
 	}
 
 	void flush()
@@ -200,7 +198,7 @@ public:
 		}
 #ifdef DEBUG
 		if (pos > 0) 
-			assert(buf[pos-1] <= buf[pos], "Input is not sorted");
+			assert(buf[pos-1] < buf[pos], "Input is not sorted");
 #endif
 		return &buf[pos++];
 	}
@@ -276,6 +274,23 @@ public:
 	}
 
 	const CompressedState* getHead() const { return head->state; }
+	BufferedInputStream* getHeadInput() const { return head->input; }
+
+	bool next()
+	{
+		test();
+		if (size == 0)
+			return false;
+		head->state = head->input->read();
+		if (head->state == NULL)
+		{
+			*head = heap[size];
+			size--;
+		}
+		bubbleDown();
+		test();
+		return true;
+	}
 
 	bool scanTo(const CompressedState& target)
 	{
@@ -415,7 +430,7 @@ void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int
 	{
 		while (sourceState)
 		{
-			output->write(sourceState);
+			output->write(sourceState, true);
 			sourceState = source->read();
 		}
 		return;
@@ -429,7 +444,7 @@ void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int
 		if (!b) // EOF of heap sources
 		{
 			do {
-				output->write(sourceState);
+				output->write(sourceState, true);
 				sourceState = source->read();
 			} while (sourceState);
 			return;
@@ -438,7 +453,7 @@ void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int
 		assert(sourceState);
 		while (sourceState && *sourceState < *head)
 		{
-			output->write(sourceState);
+			output->write(sourceState, true);
 			sourceState = source->read();
 		}
 		while (sourceState && *sourceState == *head)
@@ -1158,7 +1173,6 @@ int run(int argc, const char* argv[])
 			result = countDups(argv[2], argv[3]);
 			break;
 	}
-	//dumpNodes();
 	return result;
 }
 

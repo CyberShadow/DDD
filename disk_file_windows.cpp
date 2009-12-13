@@ -13,7 +13,7 @@ public:
 			SetFilePointer(archive, 0, NULL, FILE_END);
 	}
 
-	void write(const Node* p, int n)
+	void write(const Node* p, size_t n)
 	{
 		size_t total = n * sizeof(Node);
 		size_t bytes = 0;
@@ -31,7 +31,7 @@ public:
 			bytes += r;
 		}
 	}
-	
+																
 	void flush()
 	{
 		FlushFileBuffers(archive);
@@ -54,7 +54,7 @@ public:
 			error("File open failure");
 	}
 
-	int read(Node* p, int n)
+	int read(Node* p, size_t n)
 	{
 		size_t total = n * sizeof(Node);
 		size_t bytes = 0;
