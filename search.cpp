@@ -261,6 +261,8 @@ public:
 		{
 			heap[i].input = inputs[i];
 			heap[i].state = inputs[i]->read();
+			if (heap[i].state==NULL)
+				i--, size--;
 		}
 		std::sort(heap, heap+size);
 		head = heap;
@@ -287,6 +289,8 @@ public:
 		{
 			*head = heap[size];
 			size--;
+			if (size==0)
+				return false;
 		}
 		bubbleDown();
 		test();
@@ -623,14 +627,14 @@ void addState(const State* state, FRAME frame)
 
 void flushQueue()
 {
-	for (FRAME f=0; f<MAX_FRAMES; f++)
-		if (queue[f])
-			queue[f]->flush();
+	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
+		if (queue[g])
+			queue[g]->flush();
 }
 
 // ******************************************************************************************************
 
-FRAME_GROUP maxFrameGroups;
+FRAME_GROUP firstFrameGroup, maxFrameGroups;
 FRAME_GROUP currentFrameGroup;
 
 void preprocessQueue()
@@ -878,24 +882,24 @@ found:
 
 int search()
 {
-	FRAME_GROUP startFrameGroup = 0;
+	firstFrameGroup = 0;
 
 	for (FRAME_GROUP g=MAX_FRAME_GROUPS; g>0; g--)
 		if (fileExists(format("closed-%u-%ux.bin", LEVEL, g)))
 		{
 			printf("Resuming from frame group %ux\n", g);
-			startFrameGroup = g;
+			firstFrameGroup = g;
 			break;
 	    }
 
-	for (FRAME_GROUP g=startFrameGroup; g<MAX_FRAME_GROUPS; g++)
+	for (FRAME_GROUP g=firstFrameGroup; g<MAX_FRAME_GROUPS; g++)
 		if (fileExists(format("open-%u-%ux.bin", LEVEL, g)))
 		{
 			printTime(); printf("Reopening queue for frame group %ux\n", g);
 			queue[g] = new BufferedOutputStream(format("open-%u-%ux.bin", LEVEL, g), true);
 		}
 
-	if (startFrameGroup==0 && !queue[0])
+	if (firstFrameGroup==0 && !queue[0])
 	{
 		CompressedState c;
 		initialState.compress(&c);
@@ -912,7 +916,7 @@ int search()
 		queueState(&c, 0);
 	}
 
-	for (currentFrameGroup=startFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
+	for (currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
 	{
 		if (fileExists(format("closed-%u-%ux.bin", LEVEL, currentFrameGroup)))
 		{
@@ -979,14 +983,14 @@ int search()
 
 int packOpen()
 {
-    for (FRAME f=0; f<MAX_FRAMES; f++)
-    	if (fileExists(format("open-%u-%u.bin", LEVEL, f)))
+    for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
+    	if (fileExists(format("open-%u-%ux.bin", LEVEL, g)))
     	{
-			printTime(); printf("Frame %u: ", f);
+			printTime(); printf("Frame group %ux: ", g);
 
 			{
-				InputStream input(format("open-%u-%u.bin", LEVEL, f));
-				OutputStream output(format("openpacked-%u-%u.bin", LEVEL, f));
+				InputStream input(format("open-%u-%ux.bin", LEVEL, g));
+				OutputStream output(format("openpacked-%u-%ux.bin", LEVEL, g));
 				uint64_t amount = input.size();
 				if (amount > BUFFER_SIZE)
 					amount = BUFFER_SIZE;
@@ -1007,27 +1011,29 @@ int packOpen()
 				else
 					printf("%llu -> %llu.\n", read, written);
 			}
-			deleteFile(format("open-%u-%u.bin", LEVEL, f));
-			renameFile(format("openpacked-%u-%u.bin", LEVEL, f), format("open-%u-%u.bin", LEVEL, f));
+			deleteFile(format("open-%u-%ux.bin", LEVEL, g));
+			renameFile(format("openpacked-%u-%ux.bin", LEVEL, g), format("open-%u-%ux.bin", LEVEL, g));
     	}
 	return 0;
 }
 
 // ******************************************************************************************************
 
-int sample(FRAME f)
+int sample(FRAME_GROUP g)
 {
-	const char* fn = format("closed-%u-%u.bin", LEVEL, f);
+	printf("Sampling frame group %ux:\n", g);
+	const char* fn = format("closed-%u-%ux.bin", LEVEL, g);
 	if (!fileExists(fn))
-		fn = format("open-%u-%u.bin", LEVEL, f);
+		fn = format("open-%u-%ux.bin", LEVEL, g);
 	if (!fileExists(fn))
-		error(format("Can't find neither open nor closed node file for frame %u", f));
+		error(format("Can't find neither open nor closed node file for frame group %ux", g));
 	
 	InputStream in(fn);
 	srand(time(NULL));
 	in.seek(rand() % in.size());
 	CompressedState cs;
 	in.read(&cs, 1);
+	printf("Frame %u:\n", g*10 + cs.subframe);
 	State s = blankState;
 	s.decompress(&cs);
 	puts(s.toString());
@@ -1080,7 +1086,8 @@ void convertMerge(BufferedInputStream* inputBase, BufferedInputStream** inputs, 
 		CompressedState cs2 = *heap.getHead();
 		debug_assert(heap.getHeadInput() >= inputBase && heap.getHeadInput() < inputBase+10);
 		cs2.subframe = heap.getHeadInput() - inputBase;
-		debug_assert(cs2 >= cs);
+		if (cs2 < cs) // work around flush bug in older versions
+			continue;
 		if (cs == cs2) // CompressedState::operator== does not compare subframe
 		{
 			if (cs.subframe > cs2.subframe) // in case of duplicate frames, pick the one from the smallest frame
@@ -1097,7 +1104,7 @@ void convertMerge(BufferedInputStream* inputBase, BufferedInputStream** inputs, 
 
 int convert()
 {
-	for (FRAME g=0; g<(MAX_FRAMES+9)/10; g++)
+	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
 	{
 		bool haveClosed=false, haveOpen=false;
 		BufferedInputStream* inputs = (BufferedInputStream*) calloc(10, sizeof(BufferedInputStream));
@@ -1113,9 +1120,12 @@ int convert()
 				haveOpen = true;
 		if (haveOpen || haveClosed)
 		{
-			printf("%d-%d...\n", g*10, g*10+9);
-			BufferedOutputStream output(format("%s-%u-%ux.bin", haveOpen ? "open" : "closed", LEVEL, g));
-			convertMerge(inputs, inputPtrs, inputCount, &output);
+			printf("%dx...\n", g);
+			{
+				BufferedOutputStream output(format("converting-%u-%ux.bin", LEVEL, g));
+				convertMerge(inputs, inputPtrs, inputCount, &output);
+			}
+			renameFile(format("converting-%u-%ux.bin", LEVEL, g), format("%s-%u-%ux.bin", haveOpen ? "open" : "closed", LEVEL, g));
 		}
 		for (int i=0; i<inputCount; i++)
 			inputPtrs[i]->~BufferedInputStream();
@@ -1147,6 +1157,31 @@ enum RunMode
 	MODE_COUNTDUPS,
 	MODE_CONVERT
 };
+
+int parseInt(const char* str)
+{
+	int result;
+	if (!sscanf(str, "%d", &result))
+		error("Conversion");
+	return result;
+}
+
+void parseFrameRange(int argc, const char* argv[])
+{
+	if (argc==0)
+		firstFrameGroup = 0, 
+		maxFrameGroups  = MAX_FRAME_GROUPS;
+	else
+	if (argc==1)
+		firstFrameGroup = parseInt(argv[0]),
+		maxFrameGroups  = firstFrameGroup+1;
+	else
+	if (argc==2)
+		firstFrameGroup = parseInt(argv[0]),
+		maxFrameGroups  = parseInt(argv[1]);
+	else
+		error("Too many arguments");
+}
 
 int run(int argc, const char* argv[])
 {
@@ -1222,7 +1257,7 @@ int run(int argc, const char* argv[])
 		{
 			runMode = MODE_SAMPLE;
 			enforce(argc==3, "Specify a frame number to sample");
-			sampleFrame = strtol(argv[2], NULL, 10);
+			sampleFrame = parseInt(argv[2]);
 		}
 		else
 		if (strcmp(argv[1], "count-dups")==0)
@@ -1234,11 +1269,11 @@ int run(int argc, const char* argv[])
 		if (strcmp(argv[1], "convert")==0)
 		{
 			runMode = MODE_CONVERT;
-			enforce(argc==2, "Too many arguments");
+			parseFrameRange(argc-2, argv+2);
 		}
 		else
 		{
-			int maxFrames = strtol(argv[1], NULL, 10);
+			int maxFrames = parseInt(argv[1]);
 			enforce(maxFrames%10 == 0, "Number of frames must be divisible by 10");
 			maxFrameGroups = maxFrames / 10;
 		}
