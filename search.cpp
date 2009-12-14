@@ -709,7 +709,7 @@ void preprocessQueue()
 #else
 	{
 		BufferedInputStream* source = new BufferedInputStream(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
-		BufferedInputStream* inputs[MAX_FRAMES];
+		BufferedInputStream* inputs[MAX_FRAME_GROUPS];
 		int inputCount = 0;
 		for (FRAME_GROUP g=0; g<currentFrameGroup; g++)
 			if (fileExists(format("closed-%u-%ux.bin", LEVEL, g)))
@@ -1136,6 +1136,60 @@ int convert()
 
 // ******************************************************************************************************
 
+int verify(const char* filename)
+{
+	BufferedInputStream input(filename);
+	CompressedState cs = *input.read();
+	bool equalFound=false, oooFound=false;
+	while (1)
+	{
+		const CompressedState* cs2 = input.read();
+		if (cs2==NULL)
+			return 0;
+		if (cs == *cs2)
+			if (!equalFound)
+			{
+				printf("Equal states found\n");
+				equalFound = true;
+			}
+		else
+		if (cs > *cs2)
+			if (!oooFound)
+			{
+				printf("Unordered states found\n");
+				oooFound = true;
+			}
+		if (cs2->subframe > 9)
+			error("Invalid subframe (corrupted data?)");
+		cs = *cs2;
+		if (equalFound && oooFound)
+			return 0;
+	}
+}
+
+// ******************************************************************************************************
+
+int count()
+{
+	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
+		if (fileExists(format("closed-%u-%ux.bin", LEVEL, g)))
+		{
+			printf("Frame group %ux:\n", g);
+			BufferedInputStream input(format("closed-%u-%ux.bin", LEVEL, g));
+			const CompressedState* cs;
+			uint64_t counts[10] = {0};
+			while (cs = input.read())
+				counts[cs->subframe]++;
+			for (int i=0; i<10; i++)
+				if (counts[i])
+					printf("Frame %u: %llu\n", g*10+i, counts[i]);
+			fflush(stdout);
+		}
+	return 0;
+}
+
+// ******************************************************************************************************
+
 timeb startTime;
 
 void printExecutionTime()
@@ -1155,7 +1209,9 @@ enum RunMode
 	MODE_PACKOPEN,
 	MODE_SAMPLE,
 	MODE_COUNTDUPS,
-	MODE_CONVERT
+	MODE_CONVERT,
+	MODE_VERIFY,
+	MODE_COUNT
 };
 
 int parseInt(const char* str)
@@ -1272,6 +1328,18 @@ int run(int argc, const char* argv[])
 			parseFrameRange(argc-2, argv+2);
 		}
 		else
+		if (strcmp(argv[1], "verify")==0)
+		{
+			runMode = MODE_VERIFY;
+			enforce(argc==3, "Specify a file to verify");
+		}
+		else
+		if (strcmp(argv[1], "count")==0)
+		{
+			runMode = MODE_COUNT;
+			parseFrameRange(argc-2, argv+2);
+		}
+		else
 		{
 			int maxFrames = parseInt(argv[1]);
 			enforce(maxFrames%10 == 0, "Number of frames must be divisible by 10");
@@ -1299,6 +1367,12 @@ int run(int argc, const char* argv[])
 			break;
 		case MODE_CONVERT:
 			result = convert();
+			break;
+		case MODE_VERIFY:
+			result = verify(argv[2]);
+			break;
+		case MODE_COUNT:
+			result = count();
 			break;
 	}
 	return result;

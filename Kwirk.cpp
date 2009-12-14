@@ -220,6 +220,7 @@ struct CompressedState
 	#include BOOST_PP_LOCAL_ITERATE()
 	#endif
 
+	// TODO: use zero-width fields for alignment?
 	#if (COMPRESSED_BITS % 8 != 0) // Align the next field to a byte boundary. This must be done in bitfield semantics, 
 	unsigned _align : 8 - (COMPRESSED_BITS % 8); // because the size of a bitfield seems to always be a multiple of 4 bytes.
 	#endif
@@ -229,9 +230,9 @@ struct CompressedState
 
 	unsigned subframe : 8; // Used in search (actually, only 3 bits are needed
 
-	#if (COMPRESSED_SLACK_BYTES != 1) // Align the structure size to dword boundary
-	unsigned _align3 : 8 * (COMPRESSED_SLACK_BYTES == 0 ? 3 : 1);
-	#endif
+	//#if (COMPRESSED_SLACK_BYTES != 1) // Align the structure size to dword boundary
+	//unsigned _align3 : 8 * (COMPRESSED_SLACK_BYTES == 0 ? 3 : 1);
+	//#endif
 };
 
 // It is very important that these comparison operators are as fast as possible.
