@@ -921,6 +921,7 @@ int search()
 		if (fileExists(format("closed-%u-%ux.bin", LEVEL, currentFrameGroup)))
 		{
 			printTime(); printf("Frame group %ux/%ux: (loading closed nodes from disk)               ", currentFrameGroup, maxFrameGroups); fflush(stdout);
+			//continue;
 		}
 		else
 		{
@@ -1077,6 +1078,9 @@ int countDups(const char* fn1, const char* fn2)
 void convertMerge(BufferedInputStream* inputBase, BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
 {
 	InputHeap heap(inputs, inputCount);
+	//uint64_t* positions = new uint64_t[inputCount];
+	//for (int i=0; i<inputCount; i++)
+	//	positions[i] = 0;
 
 	CompressedState cs = *heap.getHead();
 	debug_assert(heap.getHeadInput() >= inputBase && heap.getHeadInput() < inputBase+10);
@@ -1085,13 +1089,16 @@ void convertMerge(BufferedInputStream* inputBase, BufferedInputStream** inputs, 
 	{
 		CompressedState cs2 = *heap.getHead();
 		debug_assert(heap.getHeadInput() >= inputBase && heap.getHeadInput() < inputBase+10);
-		cs2.subframe = heap.getHeadInput() - inputBase;
+		uint8_t subframe = heap.getHeadInput() - inputBase;
+		//positions[subframe]++;
+		cs2.subframe = subframe;
 		if (cs2 < cs) // work around flush bug in older versions
 			continue;
 		if (cs == cs2) // CompressedState::operator== does not compare subframe
 		{
-			if (cs.subframe > cs2.subframe) // in case of duplicate frames, pick the one from the smallest frame
-				cs.subframe = cs2.subframe;
+			//printf("Duplicate states in inputs %d at %lld and %d at %lld\n", cs.subframe, positions[cs.subframe], subframe, positions[subframe]);
+			if (cs.subframe > subframe) // in case of duplicate frames, pick the one from the smallest frame
+				cs.subframe = subframe;
 		}
 		else
 		{
@@ -1141,22 +1148,23 @@ int verify(const char* filename)
 	BufferedInputStream input(filename);
 	CompressedState cs = *input.read();
 	bool equalFound=false, oooFound=false;
+	uint64_t pos = 0;
 	while (1)
 	{
 		const CompressedState* cs2 = input.read();
+		pos++;
 		if (cs2==NULL)
 			return 0;
 		if (cs == *cs2)
 			if (!equalFound)
 			{
-				printf("Equal states found\n");
+				printf("Equal states found: %lld\n", pos);
 				equalFound = true;
 			}
-		else
 		if (cs > *cs2)
 			if (!oooFound)
 			{
-				printf("Unordered states found\n");
+				printf("Unordered states found: %lld\n", pos);
 				oooFound = true;
 			}
 		if (cs2->subframe > 9)
@@ -1174,7 +1182,7 @@ int count()
 	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
 		if (fileExists(format("closed-%u-%ux.bin", LEVEL, g)))
 		{
-			printf("Frame group %ux:\n", g);
+			printTime(); printf("Frame group %ux:\n", g);
 			BufferedInputStream input(format("closed-%u-%ux.bin", LEVEL, g));
 			const CompressedState* cs;
 			uint64_t counts[10] = {0};
@@ -1184,6 +1192,34 @@ int count()
 				if (counts[i])
 					printf("Frame %u: %llu\n", g*10+i, counts[i]);
 			fflush(stdout);
+		}
+	return 0;
+}
+
+// ******************************************************************************************************
+
+// Unpack a closed node frame group file to individual frames.
+
+int unpack()
+{
+	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
+		if (fileExists(format("closed-%u-%ux.bin", LEVEL, g)))
+		{
+			printTime(); printf("Frame group %ux\n", g); fflush(stdout);
+			BufferedInputStream input(format("closed-%u-%ux.bin", LEVEL, g));
+			BufferedOutputStream** outputs = new BufferedOutputStream*[10];
+			for (int i=0; i<10; i++)
+				outputs[i] = new BufferedOutputStream(format("closed-%u-%u.bin", LEVEL, g*10+i));
+			const CompressedState* cs;
+			while (cs = input.read())
+			{
+				CompressedState cs2 = *cs;
+				cs2.subframe = 0;
+				outputs[cs->subframe]->write(&cs2);
+			}
+			for (int i=0; i<10; i++)
+				delete outputs[i];
+			delete[] outputs;
 		}
 	return 0;
 }
@@ -1202,17 +1238,6 @@ void printExecutionTime()
 }
 
 // ***********************************************************************************
-
-enum RunMode
-{
-	MODE_SEARCH,
-	MODE_PACKOPEN,
-	MODE_SAMPLE,
-	MODE_COUNTDUPS,
-	MODE_CONVERT,
-	MODE_VERIFY,
-	MODE_COUNT
-};
 
 int parseInt(const char* str)
 {
@@ -1298,83 +1323,63 @@ int run(int argc, const char* argv[])
 	blankState.blank();
 
 	maxFrameGroups = MAX_FRAME_GROUPS;
-	RunMode runMode = MODE_SEARCH;
-	FRAME sampleFrame;
 
-	if (argc>1)
+	ftime(&startTime);
+	atexit(&printExecutionTime);
+	int result;
+
+	if (argc>1 && strcmp(argv[1], "pack-open")==0)
 	{
-		if (strcmp(argv[1], "pack-open")==0)
-		{
-			runMode = MODE_PACKOPEN;
-			enforce(argc==2, "Too many arguments");
-		}
-		else
-		if (strcmp(argv[1], "sample")==0)
-		{
-			runMode = MODE_SAMPLE;
-			enforce(argc==3, "Specify a frame number to sample");
-			sampleFrame = parseInt(argv[2]);
-		}
-		else
-		if (strcmp(argv[1], "count-dups")==0)
-		{
-			runMode = MODE_COUNTDUPS;
-			enforce(argc==4, "Specify two files to compare");
-		}
-		else
-		if (strcmp(argv[1], "convert")==0)
-		{
-			runMode = MODE_CONVERT;
-			parseFrameRange(argc-2, argv+2);
-		}
-		else
-		if (strcmp(argv[1], "verify")==0)
-		{
-			runMode = MODE_VERIFY;
-			enforce(argc==3, "Specify a file to verify");
-		}
-		else
-		if (strcmp(argv[1], "count")==0)
-		{
-			runMode = MODE_COUNT;
-			parseFrameRange(argc-2, argv+2);
-		}
-		else
+		enforce(argc==2, "Too many arguments");
+		result = packOpen();
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "sample")==0)
+	{
+		enforce(argc==3, "Specify a frame number to sample");
+		result = sample(parseInt(argv[2]));
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "count-dups")==0)
+	{
+		enforce(argc==4, "Specify two files to compare");
+		result = countDups(argv[2], argv[3]);
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "convert")==0)
+	{
+		parseFrameRange(argc-2, argv+2);
+		result = convert();
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "verify")==0)
+	{
+		enforce(argc==3, "Specify a file to verify");
+		result = verify(argv[2]);
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "count")==0)
+	{
+		parseFrameRange(argc-2, argv+2);
+		result = count();
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "unpack")==0)
+	{
+		parseFrameRange(argc-2, argv+2);
+		result = unpack();
+	}
+	else
+	{
+		if (argc>1)
 		{
 			int maxFrames = parseInt(argv[1]);
 			enforce(maxFrames%10 == 0, "Number of frames must be divisible by 10");
 			maxFrameGroups = maxFrames / 10;
 		}
+		result = search();
 	}
 
-	ftime(&startTime);
-	atexit(&printExecutionTime);
-
-	int result;
-	switch (runMode)
-	{
-		case MODE_SEARCH:
-			result = search();
-			break;
-		case MODE_PACKOPEN:
-			result = packOpen();
-			break;
-		case MODE_SAMPLE:
-			result = sample(sampleFrame);
-			break;
-		case MODE_COUNTDUPS:
-			result = countDups(argv[2], argv[3]);
-			break;
-		case MODE_CONVERT:
-			result = convert();
-			break;
-		case MODE_VERIFY:
-			result = verify(argv[2]);
-			break;
-		case MODE_COUNT:
-			result = count();
-			break;
-	}
 	return result;
 }
 
