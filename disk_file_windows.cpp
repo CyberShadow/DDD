@@ -10,7 +10,13 @@ public:
 		if (archive == INVALID_HANDLE_VALUE)
 			error("File creation failure");
 		if (resume)
-			SetFilePointer(archive, 0, NULL, FILE_END);
+		{
+			LARGE_INTEGER li;
+			li.QuadPart = 0;
+			BOOL b = SetFilePointerEx(archive, li, NULL, FILE_END);
+			if (!b)
+				error("Append error");
+		}
 	}
 
 	void write(const Node* p, size_t n)

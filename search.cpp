@@ -1085,6 +1085,7 @@ void convertMerge(BufferedInputStream* inputBase, BufferedInputStream** inputs, 
 	CompressedState cs = *heap.getHead();
 	debug_assert(heap.getHeadInput() >= inputBase && heap.getHeadInput() < inputBase+10);
 	cs.subframe = heap.getHeadInput() - inputBase;
+	bool oooFound = false, equalFound = false;
 	while (heap.next())
 	{
 		CompressedState cs2 = *heap.getHead();
@@ -1093,10 +1094,22 @@ void convertMerge(BufferedInputStream* inputBase, BufferedInputStream** inputs, 
 		//positions[subframe]++;
 		cs2.subframe = subframe;
 		if (cs2 < cs) // work around flush bug in older versions
+		{
+			if (!oooFound)
+			{
+				printf("Unordered states found in subframe %d, skipping\n", subframe);
+				oooFound = true;
+			}
 			continue;
+		}
 		if (cs == cs2) // CompressedState::operator== does not compare subframe
 		{
-			//printf("Duplicate states in inputs %d at %lld and %d at %lld\n", cs.subframe, positions[cs.subframe], subframe, positions[subframe]);
+			if (!equalFound)
+			{
+				//printf("Duplicate states in subframes %d at %lld and %d at %lld\n", cs.subframe, positions[cs.subframe], subframe, positions[subframe]);
+				printf("Duplicate states found in subframes %d and %d\n", cs.subframe, subframe);
+				equalFound = true;
+			}
 			if (cs.subframe > subframe) // in case of duplicate frames, pick the one from the smallest frame
 				cs.subframe = subframe;
 		}
