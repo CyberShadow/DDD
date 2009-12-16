@@ -6,7 +6,7 @@
 
 // MULTITHREADING will enable threading and synchronization code.
 #define MULTITHREADING
-#define THREADS 4
+#define THREADS 7
 
 // THREAD_* defines how will threads be created.
 #define THREAD_BOOST

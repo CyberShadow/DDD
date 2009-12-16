@@ -696,32 +696,22 @@ CONDITION processQueueReadCondition, processQueueWriteCondition;
 void processFilteredState(const CompressedState* state)
 {
 	// queue state
-	int slot;
-	/* LOCK */
-	{
-		SCOPED_LOCK lock(processQueueMutex);
+	SCOPED_LOCK lock(processQueueMutex);
 
-		while (processQueueHead == processQueueTail+PROCESS_QUEUE_SIZE) // while full
-			CONDITION_WAIT(processQueueReadCondition, lock);
-		slot = processQueueHead++ % PROCESS_QUEUE_SIZE;
-		CONDITION_NOTIFY(processQueueWriteCondition, lock);
-	}
-	processQueue[slot] = *state;
+	while (processQueueHead == processQueueTail+PROCESS_QUEUE_SIZE) // while full
+		CONDITION_WAIT(processQueueReadCondition, lock);
+	processQueue[processQueueHead++ % PROCESS_QUEUE_SIZE] = *state;
+	CONDITION_NOTIFY(processQueueWriteCondition, lock);
 }
 
 void dequeueNode(CompressedState* state)
 {
-	int slot;
-	/* LOCK */
-	{
-		SCOPED_LOCK lock(processQueueMutex);
+	SCOPED_LOCK lock(processQueueMutex);
 		
-		while (processQueueHead == processQueueTail) // while empty
-			CONDITION_WAIT(processQueueWriteCondition, lock);
-		slot = processQueueTail++ % PROCESS_QUEUE_SIZE;
-		CONDITION_NOTIFY(processQueueReadCondition, lock);
-	}
-	*state = processQueue[slot];
+	while (processQueueHead == processQueueTail) // while empty
+		CONDITION_WAIT(processQueueWriteCondition, lock);
+	*state = processQueue[processQueueTail++ % PROCESS_QUEUE_SIZE];
+	CONDITION_NOTIFY(processQueueReadCondition, lock);
 }
 
 void worker()
@@ -869,7 +859,7 @@ int search()
 	}
 
 #ifdef MULTITHREADING
-	for (int i=0; i<THREADS; i++)
+	for (int i=0; i<THREADS-1; i++)
 		THREAD_CREATE(&worker);
 #endif
 
@@ -1056,7 +1046,7 @@ int sample(FRAME_GROUP g)
 	
 	InputStream in(fn);
 	srand(time(NULL));
-	in.seek(rand() % in.size());
+	in.seek(((uint64_t)rand() + ((uint64_t)rand()<<32)) % in.size());
 	CompressedState cs;
 	in.read(&cs, 1);
 	printf("Frame %u:\n", g*10 + cs.subframe);
