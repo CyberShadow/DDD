@@ -25,10 +25,12 @@ public:
 		lock.lock();
 		waiting--;
 	}
+	
 	void notify()
 	{
 		x = 1;
 	}
+	
 	void reset()
 	{
 #ifdef DEBUG
@@ -37,9 +39,10 @@ public:
 #endif
 		x = 0;
 	}
+	
 	void barrier()
 	{
-		while(waiting)
+		while (waiting)
 		{
 			SLEEP(1);
 		}
