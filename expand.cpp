@@ -1,4 +1,5 @@
 // Node-expanding function. Uses EXPAND_NAME and EXPAND_HANDLE_CHILD macros.
+// TODO: reimplement X-macro as template
 
 void EXPAND_NAME(FRAME frame, const State* state)
 {

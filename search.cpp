@@ -409,8 +409,7 @@ void mergeStreams(BufferedInputStream** inputs, int inputCount, BufferedOutputSt
 	output->write(&cs, true);
 }
 
-void processFilteredState(const CompressedState* state);
-
+template <class FILTERED_NODE_HANDLER>
 void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int inputCount, BufferedOutputStream* output)
 {
 	const CompressedState* sourceState = source->read();
@@ -419,7 +418,7 @@ void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int
 		while (sourceState)
 		{
 			output->write(sourceState, true);
-			processFilteredState(sourceState);
+			FILTERED_NODE_HANDLER::handle(sourceState);
 			sourceState = source->read();
 		}
 		return;
@@ -434,7 +433,7 @@ void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int
 		{
 			do {
 				output->write(sourceState, true);
-				processFilteredState(sourceState);
+				FILTERED_NODE_HANDLER::handle(sourceState);
 				sourceState = source->read();
 			} while (sourceState);
 			return;
@@ -444,7 +443,7 @@ void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int
 		while (sourceState && *sourceState < *head)
 		{
 			output->write(sourceState, true);
-			processFilteredState(sourceState);
+			FILTERED_NODE_HANDLER::handle(sourceState);
 			sourceState = source->read();
 		}
 		while (sourceState && *sourceState == *head)
@@ -452,6 +451,7 @@ void filterStream(BufferedInputStream* source, BufferedInputStream** inputs, int
 	}
 }
 
+template <class FILTERED_NODE_HANDLER>
 void mergeTwoStreams(BufferedInputStream* input1, BufferedInputStream* input2, BufferedOutputStream* output, BufferedOutputStream* output1)
 {
 	// output <= merged
@@ -489,7 +489,7 @@ void mergeTwoStreams(BufferedInputStream* input1, BufferedInputStream* input2, B
 			if (c==0)
 			{
 				output1->write(cc, true);
-				processFilteredState(cc);
+				FILTERED_NODE_HANDLER::handle(cc);
 			}
 			cc = ci->read();
 			if (cc==NULL)
@@ -525,7 +525,7 @@ eof:
 		if (c==0)
 		{
 			output1->write(cc, true);
-			processFilteredState(cc);
+			FILTERED_NODE_HANDLER::handle(cc);
 		}
 		cc = ci->read();
 	}
@@ -741,6 +741,15 @@ void processFilteredState(const CompressedState* state)
 
 #endif
 
+class ProcessStateHandler
+{
+public:
+	INLINE static void handle(const CompressedState* state)
+	{
+		processFilteredState(state);
+	}
+};
+
 // ******************************************************************************************************
 
 State exitSearchState;
@@ -872,48 +881,57 @@ int search()
 
 		printTime(); printf("Frame group %ux/%ux: ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 
-		// Step 1: read chunks of BUFFER_SIZE nodes, sort+dedup them in RAM and write them to disk
-		int chunks = 0;
-		printf("Sorting... "); fflush(stdout);
+		if (fileExists(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup)))
 		{
-			InputStream input(format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
-			uint64_t amount = input.size();
-			if (amount > BUFFER_SIZE)
-				amount = BUFFER_SIZE;
-			size_t records;
-			while (records = input.read(buffer, amount))
+			printf("(reopening merged)    ");
+		}
+		else
+		{
+			// Step 1: read chunks of BUFFER_SIZE nodes, sort+dedup them in RAM and write them to disk
+			int chunks = 0;
+			printf("Sorting... "); fflush(stdout);
 			{
-				std::sort(buffer, buffer + records);
-				records = deduplicate(buffer, records);
-				OutputStream output(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, chunks));
-				output.write(buffer, records);
-				chunks++;
+				InputStream input(format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
+				uint64_t amount = input.size();
+				if (amount > BUFFER_SIZE)
+					amount = BUFFER_SIZE;
+				size_t records;
+				while (records = input.read(buffer, amount))
+				{
+					std::sort(buffer, buffer + records);
+					records = deduplicate(buffer, records);
+					OutputStream output(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, chunks));
+					output.write(buffer, records);
+					chunks++;
+				}
+			}
+
+			// Step 2: merge + dedup chunks
+			printf("Merging... "); fflush(stdout);
+			if (chunks>1)
+			{
+				BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
+				for (int i=0; i<chunks; i++)
+					chunkInput[i] = new BufferedInputStream(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, i));
+				BufferedOutputStream* output = new BufferedOutputStream(format("merging-%u-%ux.bin", LEVEL, currentFrameGroup));
+				mergeStreams(chunkInput, chunks, output);
+				for (int i=0; i<chunks; i++)
+					delete chunkInput[i];
+				delete[] chunkInput;
+				output->flush();
+				delete output;
+				renameFile(format("merging-%u-%ux.bin", LEVEL, currentFrameGroup), format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+				for (int i=0; i<chunks; i++)
+					deleteFile(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, i));
+			}
+			else
+			{
+				renameFile(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, 0), format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
 			}
 		}
 
 		printf("Clearing... "); fflush(stdout);
 		memset(ram, 0, RAM_SIZE); // clear cache
-
-		// Step 2: merge + dedup chunks
-		printf("Merging... "); fflush(stdout);
-		if (chunks>1)
-		{
-			BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
-			for (int i=0; i<chunks; i++)
-				chunkInput[i] = new BufferedInputStream(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, i));
-			BufferedOutputStream* output = new BufferedOutputStream(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
-			mergeStreams(chunkInput, chunks, output);
-			for (int i=0; i<chunks; i++)
-				delete chunkInput[i];
-			delete[] chunkInput;
-			delete output;
-			for (int i=0; i<chunks; i++)
-				deleteFile(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, i));
-		}
-		else
-		{
-			renameFile(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, 0), format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
-		}
 
 		// Step 3: dedup against previous frames, while simultaneously processing filtered nodes
 		printf("Processing... "); fflush(stdout);
@@ -929,7 +947,7 @@ int search()
 			BufferedInputStream* all = new BufferedInputStream(format("all-%u.bin", LEVEL));
 			BufferedOutputStream* allnew = new BufferedOutputStream(format("allnew-%u.bin", LEVEL));
 			BufferedOutputStream* closed = new BufferedOutputStream(format("closed-%u-%ux.bin", LEVEL, currentFrameGroup));
-			mergeTwoStreams(source, all, allnew, closed);
+			mergeTwoStreams<ProcessStateHandler>(source, all, allnew, closed);
 			delete all;
 			delete source;
 			delete allnew;
@@ -953,7 +971,7 @@ int search()
 						delete input;
 				}
 			BufferedOutputStream* output = new BufferedOutputStream(format("closing-%u-%ux.bin", LEVEL, currentFrameGroup));
-			filterStream(source, inputs, inputCount, output);
+			filterStream<ProcessStateHandler>(source, inputs, inputCount, output);
 			for (int i=0; i<inputCount; i++)
 				delete inputs[i];
 			delete source;
@@ -1254,6 +1272,132 @@ int unpack()
 
 // ******************************************************************************************************
 
+// Filters open node lists without expanding nodes.
+
+int filterOpen()
+{
+	for (currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
+	{
+		if (!fileExists(format("open-%u-%ux.bin", LEVEL, currentFrameGroup)))
+			continue;
+
+		printTime(); printf("Frame group %ux/%ux: ", currentFrameGroup, maxFrameGroups); fflush(stdout);
+
+		uint64_t initialSize, finalSize;
+
+		if (fileExists(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup)))
+		{
+			printf("(reopening merged)    ");
+			InputStream s(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+			initialSize = s.size();
+		}
+		else
+		{
+			// Step 1: read chunks of BUFFER_SIZE nodes, sort+dedup them in RAM and write them to disk
+			int chunks = 0;
+			printf("Sorting... "); fflush(stdout);
+			{
+				InputStream input(format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
+				uint64_t amount = input.size();
+				initialSize = amount;
+				if (amount > BUFFER_SIZE)
+					amount = BUFFER_SIZE;
+				size_t records;
+				while (records = input.read(buffer, amount))
+				{
+					std::sort(buffer, buffer + records);
+					records = deduplicate(buffer, records);
+					OutputStream output(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, chunks));
+					output.write(buffer, records);
+					chunks++;
+				}
+			}
+
+			// Step 2: merge + dedup chunks
+			printf("Merging... "); fflush(stdout);
+			if (chunks>1)
+			{
+				BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
+				for (int i=0; i<chunks; i++)
+					chunkInput[i] = new BufferedInputStream(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, i));
+				BufferedOutputStream* output = new BufferedOutputStream(format("merging-%u-%ux.bin", LEVEL, currentFrameGroup));
+				mergeStreams(chunkInput, chunks, output);
+				for (int i=0; i<chunks; i++)
+					delete chunkInput[i];
+				delete[] chunkInput;
+				output->flush();
+				delete output;
+				renameFile(format("merging-%u-%ux.bin", LEVEL, currentFrameGroup), format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+				for (int i=0; i<chunks; i++)
+					deleteFile(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, i));
+			}
+			else
+			{
+				renameFile(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, 0), format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+			}
+		}
+
+		// Step 3: dedup against previous frames
+		printf("Filtering... "); fflush(stdout);
+#ifdef USE_ALL
+		#error "Not implemented"
+#else
+		{
+			class NullStateHandler
+			{
+			public:
+				INLINE static void handle(const CompressedState* state) {}
+			};
+
+			BufferedInputStream* source = new BufferedInputStream(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+			BufferedInputStream* inputs[MAX_FRAME_GROUPS];
+			int inputCount = 0;
+			for (FRAME_GROUP g=0; g<currentFrameGroup; g++)
+			{
+				const char* fn = format("closed-%u-%ux.bin", LEVEL, g);
+				if (!fileExists(fn))
+					fn = format("open-%u-%ux.bin", LEVEL, g);
+				if (fileExists(fn))
+				{
+					BufferedInputStream* input = new BufferedInputStream(fn);
+					if (input->size())
+						inputs[inputCount++] = input;
+					else
+						delete input;
+				}
+			}
+			BufferedOutputStream* output = new BufferedOutputStream(format("filtering-%u-%ux.bin", LEVEL, currentFrameGroup));
+			filterStream<NullStateHandler>(source, inputs, inputCount, output);
+			for (int i=0; i<inputCount; i++)
+				delete inputs[i];
+			delete source;
+			output->flush(); // force disk flush
+			delete output;
+			deleteFile(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+		}
+#endif
+
+		deleteFile(format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
+		renameFile(format("filtering-%u-%ux.bin", LEVEL, currentFrameGroup), format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
+
+		{
+			InputStream s(format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
+			finalSize = s.size();
+		}
+
+		printf("Done: %lld -> %lld.\n", initialSize, finalSize);
+
+		if (fileExists(format("stop-%u.txt", LEVEL)))
+		{
+			printf("Stop file found.\n");
+			return 3;
+		}
+	}
+	return 0;
+}
+
+// ******************************************************************************************************
+
 timeb startTime;
 
 void printExecutionTime()
@@ -1396,6 +1540,11 @@ int run(int argc, const char* argv[])
 	{
 		parseFrameRange(argc-2, argv+2);
 		result = unpack();
+	}
+	if (argc>1 && strcmp(argv[1], "filter-open")==0)
+	{
+		parseFrameRange(argc-2, argv+2);
+		result = filterOpen();
 	}
 	else
 	{
