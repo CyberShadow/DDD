@@ -557,6 +557,23 @@ size_t deduplicate(CompressedState* start, size_t records)
 
 // ******************************************************************************************************
 
+const char* formatFileName(const char* name)
+{
+	return format("%s-%u.bin", name, LEVEL);
+}
+
+const char* formatFileName(const char* name, FRAME_GROUP g)
+{
+	return format("%s-%u-%ux.bin", name, LEVEL, g);
+}
+
+const char* formatFileName(const char* name, FRAME_GROUP g, unsigned chunk)
+{
+	return format("%s-%u-%ux-%u.bin", name, LEVEL, g, chunk);
+}
+
+// ******************************************************************************************************
+
 #define MAX_FRAME_GROUPS ((MAX_FRAMES+9)/10)
 
 BufferedOutputStream* queue[MAX_FRAME_GROUPS];
@@ -577,7 +594,7 @@ void queueState(CompressedState* state, FRAME frame)
 	SCOPED_LOCK lock(queueMutex[group]);
 #endif
 	if (!queue[group])
-		queue[group] = new BufferedOutputStream(format("open-%u-%ux.bin", LEVEL, group));
+		queue[group] = new BufferedOutputStream(formatFileName("open", group));
 	queue[group]->write(state);
 }
 
@@ -783,11 +800,11 @@ void traceExit()
 	nextStep:
 			exitSearchStateFound = false;
 			frameGroup--;
-			if (fileExists(format("closed-%u-%dx.bin", LEVEL, frameGroup)))
+			if (fileExists(formatFileName("closed", frameGroup)))
 			{
 				printf("Frame group %dx... \r", frameGroup);
 				// TODO: parallelize?
-				InputStream input(format("closed-%u-%dx.bin", LEVEL, frameGroup));
+				InputStream input(formatFileName("closed", frameGroup));
 				CompressedState cs;
 				while (input.read(&cs, 1))
 				{
@@ -836,7 +853,7 @@ int search()
 	firstFrameGroup = 0;
 
 	for (FRAME_GROUP g=MAX_FRAME_GROUPS; g>0; g--)
-		if (fileExists(format("closed-%u-%ux.bin", LEVEL, g)))
+		if (fileExists(formatFileName("closed", g)))
 		{
 			printf("Resuming from frame group %ux\n", g+1);
 			firstFrameGroup = g+1;
@@ -844,10 +861,10 @@ int search()
 	    }
 
 	for (FRAME_GROUP g=firstFrameGroup; g<MAX_FRAME_GROUPS; g++)
-		if (fileExists(format("open-%u-%ux.bin", LEVEL, g)))
+		if (fileExists(formatFileName("open", g)))
 		{
 			printTime(); printf("Reopening queue for frame group %ux\n", g);
-			queue[g] = new BufferedOutputStream(format("open-%u-%ux.bin", LEVEL, g), true);
+			queue[g] = new BufferedOutputStream(formatFileName("open", g), true);
 		}
 
 	if (firstFrameGroup==0 && !queue[0])
@@ -881,7 +898,7 @@ int search()
 
 		printTime(); printf("Frame group %ux/%ux: ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 
-		if (fileExists(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup)))
+		if (fileExists(formatFileName("merged", currentFrameGroup)))
 		{
 			printf("(reopening merged)    ");
 		}
@@ -891,7 +908,7 @@ int search()
 			int chunks = 0;
 			printf("Sorting... "); fflush(stdout);
 			{
-				InputStream input(format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
+				InputStream input(formatFileName("open", currentFrameGroup));
 				uint64_t amount = input.size();
 				if (amount > BUFFER_SIZE)
 					amount = BUFFER_SIZE;
@@ -900,7 +917,7 @@ int search()
 				{
 					std::sort(buffer, buffer + records);
 					records = deduplicate(buffer, records);
-					OutputStream output(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, chunks));
+					OutputStream output(formatFileName("chunk", currentFrameGroup, chunks));
 					output.write(buffer, records);
 					chunks++;
 				}
@@ -912,21 +929,21 @@ int search()
 			{
 				BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
 				for (int i=0; i<chunks; i++)
-					chunkInput[i] = new BufferedInputStream(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, i));
-				BufferedOutputStream* output = new BufferedOutputStream(format("merging-%u-%ux.bin", LEVEL, currentFrameGroup));
+					chunkInput[i] = new BufferedInputStream(formatFileName("chunk", currentFrameGroup, i));
+				BufferedOutputStream* output = new BufferedOutputStream(formatFileName("merging", currentFrameGroup));
 				mergeStreams(chunkInput, chunks, output);
 				for (int i=0; i<chunks; i++)
 					delete chunkInput[i];
 				delete[] chunkInput;
 				output->flush();
 				delete output;
-				renameFile(format("merging-%u-%ux.bin", LEVEL, currentFrameGroup), format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+				renameFile(formatFileName("merging", currentFrameGroup), formatFileName("merged", currentFrameGroup));
 				for (int i=0; i<chunks; i++)
-					deleteFile(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, i));
+					deleteFile(formatFileName("chunk", currentFrameGroup, i));
 			}
 			else
 			{
-				renameFile(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, 0), format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+				renameFile(formatFileName("chunk", currentFrameGroup, 0), formatFileName("merged", currentFrameGroup));
 			}
 		}
 
@@ -938,46 +955,46 @@ int search()
 #ifdef USE_ALL
 		if (currentFrame==0)
 		{
-			copyFile(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup), format("closing-%u-%ux.bin", LEVEL, currentFrameGroup));
-			renameFile(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup), format("all-%u.bin", LEVEL));
+			copyFile(formatFileName("merged", currentFrameGroup), formatFileName("closing", currentFrameGroup));
+			renameFile(formatFileName("merged", currentFrameGroup), formatFileName("all"));
 		}
 		else
 		{
-			BufferedInputStream* source = new BufferedInputStream(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
-			BufferedInputStream* all = new BufferedInputStream(format("all-%u.bin", LEVEL));
-			BufferedOutputStream* allnew = new BufferedOutputStream(format("allnew-%u.bin", LEVEL));
-			BufferedOutputStream* closed = new BufferedOutputStream(format("closed-%u-%ux.bin", LEVEL, currentFrameGroup));
+			BufferedInputStream* source = new BufferedInputStream(formatFileName("merged", currentFrameGroup));
+			BufferedInputStream* all = new BufferedInputStream(formatFileName("all"));
+			BufferedOutputStream* allnew = new BufferedOutputStream(formatFileName("allnew"));
+			BufferedOutputStream* closed = new BufferedOutputStream(formatFileName("closed", currentFrameGroup));
 			mergeTwoStreams<ProcessStateHandler>(source, all, allnew, closed);
 			delete all;
 			delete source;
 			delete allnew;
 			delete closed;
-			deleteFile(format("all-%u.bin", LEVEL));
-			renameFile(format("allnew-%u.bin", LEVEL), format("all-%u.bin", LEVEL));
-			deleteFile(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+			deleteFile(formatFileName("all"));
+			renameFile(formatFileName("allnew"), formatFileName("all"));
+			deleteFile(formatFileName("merged", currentFrameGroup));
 		}
 #else
 		{
-			BufferedInputStream* source = new BufferedInputStream(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+			BufferedInputStream* source = new BufferedInputStream(formatFileName("merged", currentFrameGroup));
 			BufferedInputStream* inputs[MAX_FRAME_GROUPS];
 			int inputCount = 0;
 			for (FRAME_GROUP g=0; g<currentFrameGroup; g++)
-				if (fileExists(format("closed-%u-%ux.bin", LEVEL, g)))
+				if (fileExists(formatFileName("closed", g)))
 				{
-					BufferedInputStream* input = new BufferedInputStream(format("closed-%u-%ux.bin", LEVEL, g));
+					BufferedInputStream* input = new BufferedInputStream(formatFileName("closed", g));
 					if (input->size())
 						inputs[inputCount++] = input;
 					else
 						delete input;
 				}
-			BufferedOutputStream* output = new BufferedOutputStream(format("closing-%u-%ux.bin", LEVEL, currentFrameGroup));
+			BufferedOutputStream* output = new BufferedOutputStream(formatFileName("closing", currentFrameGroup));
 			filterStream<ProcessStateHandler>(source, inputs, inputCount, output);
 			for (int i=0; i<inputCount; i++)
 				delete inputs[i];
 			delete source;
 			output->flush(); // force disk flush
 			delete output;
-			deleteFile(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+			deleteFile(formatFileName("merged", currentFrameGroup));
 		}
 #endif
 
@@ -990,8 +1007,8 @@ int search()
 		flushQueue();
 #endif
 
-		deleteFile(format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
-		renameFile(format("closing-%u-%ux.bin", LEVEL, currentFrameGroup), format("closed-%u-%ux.bin", LEVEL, currentFrameGroup));
+		deleteFile(formatFileName("open", currentFrameGroup));
+		renameFile(formatFileName("closing", currentFrameGroup), formatFileName("closed", currentFrameGroup));
 		
 		printf("Done.\n");
 
@@ -1018,13 +1035,13 @@ int search()
 int packOpen()
 {
     for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
-    	if (fileExists(format("open-%u-%ux.bin", LEVEL, g)))
+    	if (fileExists(formatFileName("open", g)))
     	{
 			printTime(); printf("Frame group %ux: ", g);
 
 			{
-				InputStream input(format("open-%u-%ux.bin", LEVEL, g));
-				OutputStream output(format("openpacked-%u-%ux.bin", LEVEL, g));
+				InputStream input(formatFileName("open", g));
+				OutputStream output(formatFileName("openpacked", g));
 				uint64_t amount = input.size();
 				if (amount > BUFFER_SIZE)
 					amount = BUFFER_SIZE;
@@ -1045,8 +1062,8 @@ int packOpen()
 				else
 					printf("%llu -> %llu.\n", read, written);
 			}
-			deleteFile(format("open-%u-%ux.bin", LEVEL, g));
-			renameFile(format("openpacked-%u-%ux.bin", LEVEL, g), format("open-%u-%ux.bin", LEVEL, g));
+			deleteFile(formatFileName("open", g));
+			renameFile(formatFileName("openpacked", g), formatFileName("open", g));
     	}
 	return 0;
 }
@@ -1056,9 +1073,9 @@ int packOpen()
 int sample(FRAME_GROUP g)
 {
 	printf("Sampling frame group %ux:\n", g);
-	const char* fn = format("closed-%u-%ux.bin", LEVEL, g);
+	const char* fn = formatFileName("closed", g);
 	if (!fileExists(fn))
-		fn = format("open-%u-%ux.bin", LEVEL, g);
+		fn = formatFileName("open", g);
 	if (!fileExists(fn))
 		error(format("Can't find neither open nor closed node file for frame group %ux", g));
 	
@@ -1175,10 +1192,10 @@ int convert()
 		{
 			printf("%dx...\n", g);
 			{
-				BufferedOutputStream output(format("converting-%u-%ux.bin", LEVEL, g));
+				BufferedOutputStream output(formatFileName("converting", g));
 				convertMerge(inputs, inputPtrs, inputCount, &output);
 			}
-			renameFile(format("converting-%u-%ux.bin", LEVEL, g), format("%s-%u-%ux.bin", haveOpen ? "open" : "closed", LEVEL, g));
+			renameFile(formatFileName("converting", g), format("%s-%u-%ux.bin", haveOpen ? "open" : "closed", LEVEL, g));
 		}
 		for (int i=0; i<inputCount; i++)
 			inputPtrs[i]->~BufferedInputStream();
@@ -1226,10 +1243,10 @@ int verify(const char* filename)
 int count()
 {
 	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
-		if (fileExists(format("closed-%u-%ux.bin", LEVEL, g)))
+		if (fileExists(formatFileName("closed", g)))
 		{
 			printTime(); printf("Frame group %ux:\n", g);
-			BufferedInputStream input(format("closed-%u-%ux.bin", LEVEL, g));
+			BufferedInputStream input(formatFileName("closed", g));
 			const CompressedState* cs;
 			uint64_t counts[10] = {0};
 			while (cs = input.read())
@@ -1249,10 +1266,10 @@ int count()
 int unpack()
 {
 	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
-		if (fileExists(format("closed-%u-%ux.bin", LEVEL, g)))
+		if (fileExists(formatFileName("closed", g)))
 		{
 			printTime(); printf("Frame group %ux\n", g); fflush(stdout);
-			BufferedInputStream input(format("closed-%u-%ux.bin", LEVEL, g));
+			BufferedInputStream input(formatFileName("closed", g));
 			BufferedOutputStream** outputs = new BufferedOutputStream*[10];
 			for (int i=0; i<10; i++)
 				outputs[i] = new BufferedOutputStream(format("closed-%u-%u.bin", LEVEL, g*10+i));
@@ -1278,17 +1295,17 @@ int filterOpen()
 {
 	for (currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
 	{
-		if (!fileExists(format("open-%u-%ux.bin", LEVEL, currentFrameGroup)))
+		if (!fileExists(formatFileName("open", currentFrameGroup)))
 			continue;
 
 		printTime(); printf("Frame group %ux/%ux: ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 
 		uint64_t initialSize, finalSize;
 
-		if (fileExists(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup)))
+		if (fileExists(formatFileName("merged", currentFrameGroup)))
 		{
 			printf("(reopening merged)    ");
-			InputStream s(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+			InputStream s(formatFileName("merged", currentFrameGroup));
 			initialSize = s.size();
 		}
 		else
@@ -1297,7 +1314,7 @@ int filterOpen()
 			int chunks = 0;
 			printf("Sorting... "); fflush(stdout);
 			{
-				InputStream input(format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
+				InputStream input(formatFileName("open", currentFrameGroup));
 				uint64_t amount = input.size();
 				initialSize = amount;
 				if (amount > BUFFER_SIZE)
@@ -1307,7 +1324,7 @@ int filterOpen()
 				{
 					std::sort(buffer, buffer + records);
 					records = deduplicate(buffer, records);
-					OutputStream output(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, chunks));
+					OutputStream output(formatFileName("chunk", currentFrameGroup, chunks));
 					output.write(buffer, records);
 					chunks++;
 				}
@@ -1319,21 +1336,21 @@ int filterOpen()
 			{
 				BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
 				for (int i=0; i<chunks; i++)
-					chunkInput[i] = new BufferedInputStream(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, i));
-				BufferedOutputStream* output = new BufferedOutputStream(format("merging-%u-%ux.bin", LEVEL, currentFrameGroup));
+					chunkInput[i] = new BufferedInputStream(formatFileName("chunk", currentFrameGroup, i));
+				BufferedOutputStream* output = new BufferedOutputStream(formatFileName("merging", currentFrameGroup));
 				mergeStreams(chunkInput, chunks, output);
 				for (int i=0; i<chunks; i++)
 					delete chunkInput[i];
 				delete[] chunkInput;
 				output->flush();
 				delete output;
-				renameFile(format("merging-%u-%ux.bin", LEVEL, currentFrameGroup), format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+				renameFile(formatFileName("merging", currentFrameGroup), formatFileName("merged", currentFrameGroup));
 				for (int i=0; i<chunks; i++)
-					deleteFile(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, i));
+					deleteFile(formatFileName("chunk", currentFrameGroup, i));
 			}
 			else
 			{
-				renameFile(format("chunk-%u-%ux-%d.bin", LEVEL, currentFrameGroup, 0), format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+				renameFile(formatFileName("chunk", currentFrameGroup, 0), formatFileName("merged", currentFrameGroup));
 			}
 		}
 
@@ -1349,14 +1366,14 @@ int filterOpen()
 				INLINE static void handle(const CompressedState* state) {}
 			};
 
-			BufferedInputStream* source = new BufferedInputStream(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+			BufferedInputStream* source = new BufferedInputStream(formatFileName("merged", currentFrameGroup));
 			BufferedInputStream* inputs[MAX_FRAME_GROUPS];
 			int inputCount = 0;
 			for (FRAME_GROUP g=0; g<currentFrameGroup; g++)
 			{
-				const char* fn = format("closed-%u-%ux.bin", LEVEL, g);
+				const char* fn = formatFileName("closed", g);
 				if (!fileExists(fn))
-					fn = format("open-%u-%ux.bin", LEVEL, g);
+					fn = formatFileName("open", g);
 				if (fileExists(fn))
 				{
 					BufferedInputStream* input = new BufferedInputStream(fn);
@@ -1366,22 +1383,22 @@ int filterOpen()
 						delete input;
 				}
 			}
-			BufferedOutputStream* output = new BufferedOutputStream(format("filtering-%u-%ux.bin", LEVEL, currentFrameGroup));
+			BufferedOutputStream* output = new BufferedOutputStream(formatFileName("filtering", currentFrameGroup));
 			filterStream<NullStateHandler>(source, inputs, inputCount, output);
 			for (int i=0; i<inputCount; i++)
 				delete inputs[i];
 			delete source;
 			output->flush(); // force disk flush
 			delete output;
-			deleteFile(format("merged-%u-%ux.bin", LEVEL, currentFrameGroup));
+			deleteFile(formatFileName("merged", currentFrameGroup));
 		}
 #endif
 
-		deleteFile(format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
-		renameFile(format("filtering-%u-%ux.bin", LEVEL, currentFrameGroup), format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
+		deleteFile(formatFileName("open", currentFrameGroup));
+		renameFile(formatFileName("filtering", currentFrameGroup), formatFileName("open", currentFrameGroup));
 
 		{
-			InputStream s(format("open-%u-%ux.bin", LEVEL, currentFrameGroup));
+			InputStream s(formatFileName("open", currentFrameGroup));
 			finalSize = s.size();
 		}
 
