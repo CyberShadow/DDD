@@ -30,3 +30,6 @@
 
 // Keep a file with all nodes to filter against, instead of filtering against each individual frame. Uses less CPU but more I/O.
 //#define USE_ALL
+
+// When free disk space falls below this amount, try to free up space by filtering open node files. If not defined, free space is not checked.
+//#define FREE_SPACE_THRESHOLD (50LL*1024*1024*1024)

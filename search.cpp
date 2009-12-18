@@ -1024,6 +1024,19 @@ int search()
 			printf("Stop file found.\n");
 			return 3;
 		}
+
+#ifdef FREE_SPACE_THRESHOLD
+		if (getFreeSpace() < FREE_SPACE_THRESHOLD)
+		{
+			int doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups);
+			printf("Low disk space, filtering open nodes...\n");
+			doFilterOpen(0, MAX_FRAME_GROUPS);
+			if (getFreeSpace() < FREE_SPACE_THRESHOLD)
+				error("Open node filter failed to produce sufficient free space");
+			printf("Done, resuming search...\n");
+
+		}
+#endif
 	}
 	
 	printf("Exit not found.\n");
@@ -1291,9 +1304,10 @@ int unpack()
 
 // Filters open node lists without expanding nodes.
 
-int filterOpen()
+int doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups)
 {
-	for (currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
+	// override global *FrameGroup vars
+	for (FRAME_GROUP currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
 	{
 		if (!fileExists(formatFileName("open", currentFrameGroup)))
 			continue;
@@ -1411,6 +1425,11 @@ int filterOpen()
 		}
 	}
 	return 0;
+}
+
+int filterOpen()
+{
+	return doFilterOpen(firstFrameGroup, maxFrameGroups);
 }
 
 // ******************************************************************************************************

@@ -124,3 +124,13 @@ bool fileExists(const char* filename)
 {
 	return GetFileAttributes(filename) != INVALID_FILE_ATTRIBUTES;
 }
+
+uint64_t getFreeSpace()
+{
+	char dir[MAX_PATH];
+	GetCurrentDirectory(MAX_PATH, dir);
+	ULARGE_INTEGER li;
+	if (!GetDiskFreeSpaceEx(dir, &li, NULL, NULL))
+		error("GetDiskFreeSpaceEx error");
+	return li.QuadPart;
+}
