@@ -1526,6 +1526,13 @@ int run(int argc, const char* argv[])
 #error Disk plugin not set
 #endif
 
+#if defined(_WIN32)
+	SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN); // use background CPU and I/O priority
+#endif
+
+	if (fileExists(format("stop-%u.txt", LEVEL)))
+		printf("WARNING: stop file present.\n");
+
 	initialState.load();
 	blankState = initialState;
 	blankState.blank();
