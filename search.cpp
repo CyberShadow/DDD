@@ -1434,6 +1434,36 @@ int filterOpen()
 
 // ******************************************************************************************************
 
+// use background CPU and I/O priority when PC is not idle
+
+#if defined(_WIN32)
+#pragma comment(lib,"user32")
+DWORD WINAPI idleWatcher(__in LPVOID lpParameter)
+{
+    LASTINPUTINFO lii;
+    lii.cbSize = sizeof(LASTINPUTINFO);
+    while (true)
+    {
+		do
+		{
+			Sleep(1000);
+			GetLastInputInfo(&lii);
+		}
+		while (GetTickCount() - lii.dwTime > 60*1000);
+		SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN);
+		do
+		{
+			Sleep(1000);
+			GetLastInputInfo(&lii);
+		}
+		while (GetTickCount() - lii.dwTime < 60*1000);
+		SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_END);
+	}
+}
+#endif
+
+// ******************************************************************************************************
+
 timeb startTime;
 
 void printExecutionTime()
@@ -1526,12 +1556,12 @@ int run(int argc, const char* argv[])
 #error Disk plugin not set
 #endif
 
-#if defined(_WIN32)
-	SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN); // use background CPU and I/O priority
-#endif
-
 	if (fileExists(format("stop-%u.txt", LEVEL)))
 		printf("WARNING: stop file present.\n");
+
+#if defined(_WIN32)
+	CreateThread(NULL, 0, &idleWatcher, NULL, 0, NULL);
+#endif
 
 	initialState.load();
 	blankState = initialState;
