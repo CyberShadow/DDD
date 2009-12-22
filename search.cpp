@@ -1420,6 +1420,7 @@ int doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups)
 
 		if (fileExists(format("stop-%u.txt", LEVEL)))
 		{
+			deleteFile(format("stop-%u.txt", LEVEL));
 			printf("Stop file found.\n");
 			return 3;
 		}
@@ -1614,6 +1615,7 @@ int run(int argc, const char* argv[])
 		parseFrameRange(argc-2, argv+2);
 		result = unpack();
 	}
+	else
 	if (argc>1 && strcmp(argv[1], "filter-open")==0)
 	{
 		parseFrameRange(argc-2, argv+2);
