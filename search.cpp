@@ -46,7 +46,6 @@
 // ******************************************************************************************************
 
 #include "Kwirk.cpp"
-#include "hsiehhash.cpp"
 
 // ******************************************************************************************************
 
@@ -598,6 +597,38 @@ void queueState(CompressedState* state, FRAME frame)
 	queue[group]->write(state);
 }
 
+INLINE uint32_t hashState(const CompressedState* state)
+{
+	// Based on MurmurHash ( http://murmurhash.googlepages.com/MurmurHash2.cpp )
+	
+	const unsigned int m = 0x5bd1e995;
+	const int r = 24;
+
+	unsigned int h = sizeof(CompressedState);
+
+	const unsigned char* data = (const unsigned char *)state;
+
+	for (int i=0; i<sizeof(CompressedState)/4; i++) // should unroll
+	{
+		unsigned int k = *(unsigned int *)data;
+
+		k *= m; 
+		k ^= k >> r; 
+		k *= m; 
+		
+		h *= m; 
+		h ^= k;
+
+		data += 4;
+	}
+	
+	h ^= h >> 13;
+	h *= m;
+	h ^= h >> 15;
+
+	return h;
+}
+
 void addState(const State* state, FRAME frame)
 {
 	CompressedState cs;
@@ -612,7 +643,7 @@ void addState(const State* state, FRAME frame)
 		error("Compression/decompression failed");
 	}
 #endif
-	uint32_t hash = SuperFastHash((const char*)&cs, sizeof(cs)) % CACHE_HASH_SIZE;
+	uint32_t hash = hashState(&cs) % CACHE_HASH_SIZE;
 	
 	{
 #ifdef MULTITHREADING
@@ -1508,6 +1539,7 @@ int run(int argc, const char* argv[])
 	printf("Level %u: %ux%u, %u players\n", LEVEL, X, Y, PLAYERS);
 
 	enforce(sizeof(intptr_t)==sizeof(size_t), "Bad intptr_t!");
+	enforce(sizeof(int)==4, "Bad int!");
 	enforce(sizeof(long long)==8, "Bad long long!");
 
 #ifdef HAVE_VALIDATOR
@@ -1558,7 +1590,10 @@ int run(int argc, const char* argv[])
 #endif
 
 	if (fileExists(format("stop-%u.txt", LEVEL)))
-		printf("WARNING: stop file present.\n");
+	{
+		printf("Stop file present.\n");
+		return 3;
+	}
 
 #if defined(_WIN32)
 	CreateThread(NULL, 0, &idleWatcher, NULL, 0, NULL);
