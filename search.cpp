@@ -1497,14 +1497,26 @@ DWORD WINAPI idleWatcher(__in LPVOID lpParameter)
 			GetLastInputInfo(&lii);
 		}
 		while (GetTickCount() - lii.dwTime > 60*1000);
-		SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN);
+		
 		do
 		{
-			Sleep(1000);
+			FILE* f = fopen("idle.txt", "rt");
+			if (f)
+			{
+				int work, idle;
+				fscanf(f, "%d %d", &work, &idle);
+				fclose(f);
+				
+				Sleep(work);
+				SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN);
+				Sleep(idle);
+				SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_END);
+			}
+			else
+				Sleep(1000);
 			GetLastInputInfo(&lii);
 		}
 		while (GetTickCount() - lii.dwTime < 60*1000);
-		SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_END);
 	}
 }
 #endif
