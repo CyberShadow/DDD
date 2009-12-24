@@ -53,9 +53,9 @@ State initialState, blankState;
 
 // ******************************************************************************************************
 
-typedef uint32_t FRAME;
-typedef uint32_t FRAME_GROUP;
-typedef uint16_t PACKED_FRAME;
+typedef int32_t FRAME;
+typedef int32_t FRAME_GROUP;
+typedef int16_t PACKED_FRAME;
 
 //#pragma pack(1)
 struct Step
@@ -478,9 +478,7 @@ void mergeTwoStreams(BufferedInputStream* input1, BufferedInputStream* input2, B
 	{
 		const CompressedState* cc = states[c];
 		const CompressedState* co = states[c^1];
-#ifdef DEBUG
-		assert(*cc < *co);
-#endif
+		debug_assert(*cc < *co);
 		BufferedInputStream *ci = inputs[c];
 		do
 		{
@@ -530,6 +528,7 @@ eof:
 	}
 }
 
+// In-place deduplicate sorted nodes in memory. Return new number of nodes.
 size_t deduplicate(CompressedState* start, size_t records)
 {
 	if (records==0)
@@ -879,6 +878,64 @@ found:
 
 // ******************************************************************************************************
 
+void sortAndMerge(FRAME_GROUP g)
+{
+	// Step 1: read chunks of BUFFER_SIZE nodes, sort+dedup them in RAM and write them to disk
+	int chunks = 0;
+	printf("Sorting... "); fflush(stdout);
+	{
+		InputStream input(formatFileName("open", g));
+		uint64_t amount = input.size();
+		if (amount > BUFFER_SIZE)
+			amount = BUFFER_SIZE;
+		size_t records;
+		while (records = input.read(buffer, amount))
+		{
+			std::sort(buffer, buffer + records);
+			records = deduplicate(buffer, records);
+			OutputStream output(formatFileName("chunk", g, chunks));
+			output.write(buffer, records);
+			chunks++;
+		}
+	}
+
+	// Step 2: merge + dedup chunks
+	printf("Merging... "); fflush(stdout);
+	if (chunks>1)
+	{
+		BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
+		for (int i=0; i<chunks; i++)
+			chunkInput[i] = new BufferedInputStream(formatFileName("chunk", g, i));
+		BufferedOutputStream* output = new BufferedOutputStream(formatFileName("merging", g));
+		mergeStreams(chunkInput, chunks, output);
+		for (int i=0; i<chunks; i++)
+			delete chunkInput[i];
+		delete[] chunkInput;
+		output->flush();
+		delete output;
+		renameFile(formatFileName("merging", g), formatFileName("merged", g));
+		for (int i=0; i<chunks; i++)
+			deleteFile(formatFileName("chunk", g, i));
+	}
+	else
+	{
+		renameFile(formatFileName("chunk", g, 0), formatFileName("merged", g));
+	}
+}
+
+bool checkStop()
+{
+	if (fileExists(format("stop-%u.txt", LEVEL)))
+	{
+		deleteFile(format("stop-%u.txt", LEVEL));
+		printf("Stop file found.\n");
+		return true;
+	}
+	return false;
+}
+
+// ******************************************************************************************************
+
 int search()
 {
 	firstFrameGroup = 0;
@@ -935,47 +992,8 @@ int search()
 		}
 		else
 		{
-			// Step 1: read chunks of BUFFER_SIZE nodes, sort+dedup them in RAM and write them to disk
-			int chunks = 0;
-			printf("Sorting... "); fflush(stdout);
-			{
-				InputStream input(formatFileName("open", currentFrameGroup));
-				uint64_t amount = input.size();
-				if (amount > BUFFER_SIZE)
-					amount = BUFFER_SIZE;
-				size_t records;
-				while (records = input.read(buffer, amount))
-				{
-					std::sort(buffer, buffer + records);
-					records = deduplicate(buffer, records);
-					OutputStream output(formatFileName("chunk", currentFrameGroup, chunks));
-					output.write(buffer, records);
-					chunks++;
-				}
-			}
-
-			// Step 2: merge + dedup chunks
-			printf("Merging... "); fflush(stdout);
-			if (chunks>1)
-			{
-				BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
-				for (int i=0; i<chunks; i++)
-					chunkInput[i] = new BufferedInputStream(formatFileName("chunk", currentFrameGroup, i));
-				BufferedOutputStream* output = new BufferedOutputStream(formatFileName("merging", currentFrameGroup));
-				mergeStreams(chunkInput, chunks, output);
-				for (int i=0; i<chunks; i++)
-					delete chunkInput[i];
-				delete[] chunkInput;
-				output->flush();
-				delete output;
-				renameFile(formatFileName("merging", currentFrameGroup), formatFileName("merged", currentFrameGroup));
-				for (int i=0; i<chunks; i++)
-					deleteFile(formatFileName("chunk", currentFrameGroup, i));
-			}
-			else
-			{
-				renameFile(formatFileName("chunk", currentFrameGroup, 0), formatFileName("merged", currentFrameGroup));
-			}
+			// Step 1 & 2: sort and merge open nodes
+			sortAndMerge(currentFrameGroup);
 		}
 
 		printf("Clearing... "); fflush(stdout);
@@ -1050,18 +1068,15 @@ int search()
 			return 0;
 		}
 
-		if (fileExists(format("stop-%u.txt", LEVEL)))
-		{
-			printf("Stop file found.\n");
+		if (checkStop())
 			return 3;
-		}
 
 #ifdef FREE_SPACE_THRESHOLD
 		if (getFreeSpace() < FREE_SPACE_THRESHOLD)
 		{
-			int doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups);
+			int filterOpen();
 			printf("Low disk space, filtering open nodes...\n");
-			doFilterOpen(0, MAX_FRAME_GROUPS);
+			filterOpen();
 			if (getFreeSpace() < FREE_SPACE_THRESHOLD)
 				error("Open node filter failed to produce sufficient free space");
 			printf("Done, resuming search...\n");
@@ -1078,7 +1093,7 @@ int search()
 
 int packOpen()
 {
-    for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
+	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
     	if (fileExists(formatFileName("open", g)))
     	{
 			printTime(); printf("Frame group %ux: ", g);
@@ -1333,9 +1348,47 @@ int unpack()
 
 // ******************************************************************************************************
 
+int sortOpen()
+{
+	for (FRAME_GROUP currentFrameGroup=maxFrameGroups-1; currentFrameGroup>=firstFrameGroup; currentFrameGroup--)
+	{
+		if (!fileExists(formatFileName("open", currentFrameGroup)))
+			continue;
+		if (fileExists(formatFileName("merged", currentFrameGroup)))
+			continue;
+		uint64_t initialSize, finalSize;
+		{
+			InputStream s(formatFileName("open", currentFrameGroup));
+			initialSize = s.size();
+		}
+		if (initialSize==0)
+			continue;
+
+		printTime(); printf("Frame group %ux/%ux: ", currentFrameGroup, maxFrameGroups); fflush(stdout);
+
+		sortAndMerge(currentFrameGroup);
+		
+		deleteFile(formatFileName("open", currentFrameGroup));
+		renameFile(formatFileName("merged", currentFrameGroup), formatFileName("open", currentFrameGroup));
+
+		{
+			InputStream s(formatFileName("open", currentFrameGroup));
+			finalSize = s.size();
+		}
+
+		printf("Done: %lld -> %lld.\n", initialSize, finalSize);
+
+		if (checkStop())
+			return 3;
+	}
+	return 0;
+}
+
+// ******************************************************************************************************
+
 // Filters open node lists without expanding nodes.
 
-int doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups)
+int seqFilterOpen()
 {
 	// override global *FrameGroup vars
 	for (FRAME_GROUP currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
@@ -1350,53 +1403,16 @@ int doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups)
 		if (fileExists(formatFileName("merged", currentFrameGroup)))
 		{
 			printf("(reopening merged)    ");
-			InputStream s(formatFileName("merged", currentFrameGroup));
-			initialSize = s.size();
 		}
 		else
 		{
-			// Step 1: read chunks of BUFFER_SIZE nodes, sort+dedup them in RAM and write them to disk
-			int chunks = 0;
-			printf("Sorting... "); fflush(stdout);
 			{
-				InputStream input(formatFileName("open", currentFrameGroup));
-				uint64_t amount = input.size();
-				initialSize = amount;
-				if (amount > BUFFER_SIZE)
-					amount = BUFFER_SIZE;
-				size_t records;
-				while (records = input.read(buffer, amount))
-				{
-					std::sort(buffer, buffer + records);
-					records = deduplicate(buffer, records);
-					OutputStream output(formatFileName("chunk", currentFrameGroup, chunks));
-					output.write(buffer, records);
-					chunks++;
-				}
+				InputStream s(formatFileName("open", currentFrameGroup));
+				initialSize = s.size();
 			}
 
-			// Step 2: merge + dedup chunks
-			printf("Merging... "); fflush(stdout);
-			if (chunks>1)
-			{
-				BufferedInputStream** chunkInput = new BufferedInputStream*[chunks];
-				for (int i=0; i<chunks; i++)
-					chunkInput[i] = new BufferedInputStream(formatFileName("chunk", currentFrameGroup, i));
-				BufferedOutputStream* output = new BufferedOutputStream(formatFileName("merging", currentFrameGroup));
-				mergeStreams(chunkInput, chunks, output);
-				for (int i=0; i<chunks; i++)
-					delete chunkInput[i];
-				delete[] chunkInput;
-				output->flush();
-				delete output;
-				renameFile(formatFileName("merging", currentFrameGroup), formatFileName("merged", currentFrameGroup));
-				for (int i=0; i<chunks; i++)
-					deleteFile(formatFileName("chunk", currentFrameGroup, i));
-			}
-			else
-			{
-				renameFile(formatFileName("chunk", currentFrameGroup, 0), formatFileName("merged", currentFrameGroup));
-			}
+			// Step 1 & 2: sort and merge open nodes
+			sortAndMerge(currentFrameGroup);
 		}
 
 		// Step 3: dedup against previous frames
@@ -1449,19 +1465,18 @@ int doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups)
 
 		printf("Done: %lld -> %lld.\n", initialSize, finalSize);
 
-		if (fileExists(format("stop-%u.txt", LEVEL)))
-		{
-			deleteFile(format("stop-%u.txt", LEVEL));
-			printf("Stop file found.\n");
+		if (checkStop())
 			return 3;
-		}
 	}
 	return 0;
 }
 
+// ******************************************************************************************************
+
 int filterOpen()
 {
-	return doFilterOpen(firstFrameGroup, maxFrameGroups);
+	error("Not yet implemented");
+	return 1;
 }
 
 // ******************************************************************************************************
@@ -1513,7 +1528,7 @@ int parseInt(const char* str)
 {
 	int result;
 	if (!sscanf(str, "%d", &result))
-		error("Conversion");
+		error(format("'%s' is not a valid integer", str));
 	return result;
 }
 
@@ -1533,6 +1548,57 @@ void parseFrameRange(int argc, const char* argv[])
 	else
 		error("Too many arguments");
 }
+
+const char* usage = "\
+Kwirk C++ DDD solver\n\
+(c) 2009 Vladimir \"CyberShadow\" Panteleev\n\
+Usage:\n\
+	search <mode> <parameters>\n\
+where <mode> is one of:\n\
+	search [max-frame-group]\n\
+		Sorts, filters and expands open nodes. 	If no open node files\n\
+		are present, starts a new search from the initial state.\n\
+	sample <frame-group>\n\
+		Displays a random state from the specified frame-group, which\n\
+		can be either open or closed.\n\
+	count-dups <filename-1> <filename-2>\n\
+		Counts the number of duplicate nodes in two files. The nodes in\n\
+		the files must be sorted and deduplicated.\n\
+	convert [frame-group-range]\n\
+		Converts individual frame files to frame group files for the\n\
+		specified frame group range.\n\
+	unpack [frame-group-range]\n\
+		Converts frame group files back to individual frame files\n\
+		(reverses the \"convert\" operation).\n\
+	verify <filename>\n\
+		Verifies that the nodes in a file are correctly sorted and\n\
+		deduplicated, as well as a few additional integrity checks.\n\
+	count [frame-group-range]\n\
+		Counts the number of states in individual frames for the\n\
+		specified frame group files.\n\
+	pack-open [frame-group-range]\n\
+		Removes duplicates within each chunk for open node files in the\n\
+		specified range. Reads and writes open nodes only once.\n\
+	sort-open [frame-group-range]\n\
+		Sorts and removes duplicates for open node files in the\n\
+		specified range.\n\
+	filter-open\n\
+		Filters all open node files. Requires that all open node files\n\
+		be sorted and deduplicated (run sort-open before filter-open).\n\
+		Filtering is performed on all files simultaneously, so mind\n\
+		disk space requirements.\n\
+	seq-filter-open [frame-group-range]\n\
+		Sorts, deduplicates and filters open node files in the\n\
+		specified range, one by one. Specify the range cautiously,\n\
+		as this function requires that previous open node files be\n\
+		sorted and deduplicated (and filtered for best performance).\n\
+A [frame-group-range] is a space-delimited list of zero, one or two frame group\n\
+numbers. If zero numbers are specified, the range is assumed to be all frame\n\
+groups. If one number is specified, the range is set to only that frame group\n\
+number. If two numbers are specified, the range is set to start from the first\n\
+frame group number inclusively, and end at the second frame group number NON-\n\
+inclusively.\n\
+";
 
 int run(int argc, const char* argv[])
 {
@@ -1599,6 +1665,11 @@ int run(int argc, const char* argv[])
 	CreateThread(NULL, 0, &idleWatcher, NULL, 0, NULL);
 #endif
 
+	printf("Command-line:");
+	for (int i=0; i<argc; i++)
+		printf(" %s", argv[i]);
+	printf("\n");
+
 	initialState.load();
 	blankState = initialState;
 	blankState.blank();
@@ -1607,67 +1678,78 @@ int run(int argc, const char* argv[])
 
 	ftime(&startTime);
 	atexit(&printExecutionTime);
-	int result;
 
-	if (argc>1 && strcmp(argv[1], "pack-open")==0)
+	if (argc>1 && strcmp(argv[1], "search")==0)
 	{
-		enforce(argc==2, "Too many arguments");
-		result = packOpen();
+		if (argc>1)
+			maxFrameGroups = parseInt(argv[1]);
+		return search();
 	}
 	else
 	if (argc>1 && strcmp(argv[1], "sample")==0)
 	{
-		enforce(argc==3, "Specify a frame number to sample");
-		result = sample(parseInt(argv[2]));
+		enforce(argc==3, "Specify a frame group to sample");
+		return sample(parseInt(argv[2]));
 	}
 	else
 	if (argc>1 && strcmp(argv[1], "count-dups")==0)
 	{
 		enforce(argc==4, "Specify two files to compare");
-		result = countDups(argv[2], argv[3]);
+		return countDups(argv[2], argv[3]);
 	}
 	else
 	if (argc>1 && strcmp(argv[1], "convert")==0)
 	{
 		parseFrameRange(argc-2, argv+2);
-		result = convert();
-	}
-	else
-	if (argc>1 && strcmp(argv[1], "verify")==0)
-	{
-		enforce(argc==3, "Specify a file to verify");
-		result = verify(argv[2]);
-	}
-	else
-	if (argc>1 && strcmp(argv[1], "count")==0)
-	{
-		parseFrameRange(argc-2, argv+2);
-		result = count();
+		return convert();
 	}
 	else
 	if (argc>1 && strcmp(argv[1], "unpack")==0)
 	{
 		parseFrameRange(argc-2, argv+2);
-		result = unpack();
+		return unpack();
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "verify")==0)
+	{
+		enforce(argc==3, "Specify a file to verify");
+		return verify(argv[2]);
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "count")==0)
+	{
+		parseFrameRange(argc-2, argv+2);
+		return count();
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "pack-open")==0)
+	{
+		parseFrameRange(argc-2, argv+2);
+		return packOpen();
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "sort-open")==0)
+	{
+		parseFrameRange(argc-2, argv+2);
+		return sortOpen();
 	}
 	else
 	if (argc>1 && strcmp(argv[1], "filter-open")==0)
 	{
 		parseFrameRange(argc-2, argv+2);
-		result = filterOpen();
+		return filterOpen();
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "seq-filter-open")==0)
+	{
+		parseFrameRange(argc-2, argv+2);
+		return seqFilterOpen();
 	}
 	else
 	{
-		if (argc>1)
-		{
-			int maxFrames = parseInt(argv[1]);
-			enforce(maxFrames%10 == 0, "Number of frames must be divisible by 10");
-			maxFrameGroups = maxFrames / 10;
-		}
-		result = search();
+		printf("%s", usage);
+		return 0;
 	}
-
-	return result;
 }
 
 // ***********************************************************************************
