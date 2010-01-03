@@ -122,6 +122,9 @@ struct Player
 	INLINE void exit() { x=INVALID_X+1, y=INVALID_Y+1; }
 };
 
+#define GROUP_FRAMES
+#define FRAMES_PER_GROUP 10 // minimal distance between two states
+
 #define COMPRESSED_BITS ( \
 	(PLAYERS>2 ? 2 : (PLAYERS>1 ? 1 : 0)) + \
 	(XBITS_WITH_INVAL + YBITS_WITH_INVAL) * PLAYERS + \
@@ -248,6 +251,8 @@ bool holeMap[Y][X];
 
 struct State
 {
+	static State initial, blanked;
+
 	uint8_t map[Y][X];
 	Player players[PLAYERS];
 	
@@ -751,6 +756,7 @@ struct State
 
 	void decompress(const CompressedState* s)
 	{
+		*this = blanked;
 		#if (PLAYERS>1)
 		activePlayer = s->activePlayer;
 		#endif
@@ -898,6 +904,8 @@ INLINE bool operator==(const State& a, const State& b)
 	return memcmp(&a, &b, sizeof (State))==0;
 }
 
+State State::initial, State::blanked;
+
 // ******************************************************************************************************
 
 // Defines a move within the graph. x and y are the player's position after movement (used to collapse multiple movement steps that don't change the level layout)
@@ -1004,13 +1012,20 @@ void expandChildren(FRAME frame, const State* state)
 
 // ******************************************************************************************************
 
-void writeSolution(FILE* f, Step steps[], int stepNr)
+const char* formatProblemFileName(const char* name, const char* detail, const char* ext)
+{
+	return format("%s%s%u%s%s.%s", name ? name : "", name ? "-" : "", LEVEL, detail ? "-" : "", detail ? detail : "", ext);
+}
+
+// ******************************************************************************************************
+
+void writeSolution(FILE* f, const State* initialState, Step steps[], int stepNr)
 {
 	steps[stepNr].action = NONE;
-	steps[stepNr].x = initialState.players[0].x-1;
-	steps[stepNr].y = initialState.players[0].y-1;
+	steps[stepNr].x = initialState->players[0].x-1;
+	steps[stepNr].y = initialState->players[0].y-1;
 	unsigned int totalSteps = 0;
-	State state = initialState;
+	State state = *initialState;
 	FRAME frame = 0;
 	while (stepNr)
 	{
@@ -1025,6 +1040,9 @@ void writeSolution(FILE* f, Step steps[], int stepNr)
 
 // ******************************************************************************************************
 
+State* initialStates = &State::initial;
+int initialStateCount = 1;
+
 void initProblem()
 {
 	printf("Kwirk Level %u (%d-%d): %ux%u, %u players\n", LEVEL, LEVEL/10+1, LEVEL%10+1, X, Y, PLAYERS);
@@ -1032,4 +1050,8 @@ void initProblem()
 #ifdef HAVE_VALIDATOR
 	printf("Level state validator present\n");
 #endif
+
+	State::initial.load();
+	State::blanked = State::initial;
+	State::blanked.blank();
 }

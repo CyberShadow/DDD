@@ -108,11 +108,30 @@ typedef int16_t PACKED_FRAME;
 
 // ******************************************************************************************************
 
-State initialState, blankState;
+#ifdef GROUP_FRAMES
+
+#define GET_FRAME(frameGroup, cs) ((frameGroup) * FRAMES_PER_GROUP + (cs).subframe)
+#define SET_SUBFRAME(cs, frame) (cs).subframe = (frame) % FRAMES_PER_GROUP
+
+#define GROUP_STR "-group"
+#if (FRAMES_PER_GROUP == 10)
+#define GROUP_FORMAT "%ux"
+#else
+#define GROUP_FORMAT "g%u"
+#endif
+
+#else // GROUP_FRAMES
+
+#define FRAMES_PER_GROUP 1
+#define GET_FRAME(frameGroup, cs) (frameGroup)
+#define SET_SUBFRAME(cs, frame) void
+#define GROUP_STR ""
+#define GROUP_FORMAT "%u"
+
+#endif
 
 // ******************************************************************************************************
 
-// A "Node" is what we write to/read from disk
 typedef CompressedState Node;
 
 #if defined(DISK_WINFILES)
@@ -481,8 +500,10 @@ void mergeStreams(BufferedInputStream inputs[], int inputCount, BufferedOutputSt
 		debug_assert(cs2 >= cs);
 		if (cs == cs2) // CompressedState::operator== does not compare subframe
 		{
+#ifdef GROUP_FRAMES
 			if (cs.subframe > cs2.subframe) // in case of duplicate frames, pick the one from the smallest frame
 				cs.subframe = cs2.subframe;
+#endif
 		}
 		else
 		{
@@ -625,8 +646,10 @@ size_t deduplicate(CompressedState* start, size_t records)
 		debug_assert(*read >= *(read-1));
 		if (*read == *(write-1)) // CompressedState::operator== does not compare subframe
 		{
+#ifdef GROUP_FRAMES
 			if ((write-1)->subframe > read->subframe)
 				(write-1)->subframe = read->subframe;
+#endif
 		}
 		else
 		{
@@ -642,17 +665,17 @@ size_t deduplicate(CompressedState* start, size_t records)
 
 const char* formatFileName(const char* name)
 {
-	return format("%s-%u.bin", name, LEVEL);
+	return formatProblemFileName(name, NULL, "bin");
 }
 
 const char* formatFileName(const char* name, FRAME_GROUP g)
 {
-	return format("%s-%u-%ux.bin", name, LEVEL, g);
+	return formatProblemFileName(name, format(GROUP_FORMAT, g), "bin");
 }
 
 const char* formatFileName(const char* name, FRAME_GROUP g, unsigned chunk)
 {
-	return format("%s-%u-%ux-%u.bin", name, LEVEL, g, chunk);
+	return formatProblemFileName(name, format(GROUP_FORMAT "-%u", g, chunk), "bin");
 }
 
 // ******************************************************************************************************
@@ -672,10 +695,10 @@ MUTEX cacheMutex[PARTITIONS];
 
 void queueState(CompressedState* state, FRAME frame)
 {
-	FRAME_GROUP group = frame/10;
+	FRAME_GROUP group = frame/FRAMES_PER_GROUP;
 	if (noQueue[group])
 		return;
-	state->subframe = frame%10;
+	SET_SUBFRAME(*state, frame);
 #ifdef MULTITHREADING
 	SCOPED_LOCK lock(queueMutex[group]);
 #endif
@@ -721,7 +744,7 @@ void addState(const State* state, FRAME frame)
 	CompressedState cs;
 	state->compress(&cs);
 #ifdef DEBUG
-	State test = blankState;
+	State test;
 	test.decompress(&cs);
 	if (!(test == *state))
 	{
@@ -780,14 +803,14 @@ State exitState;
 
 void processState(const CompressedState* cs)
 {
-	State s = blankState;
+	State s;
 	s.decompress(cs);
 #ifdef DEBUG
 	CompressedState test;
 	s.compress(&test);
 	assert(test == *cs, "Compression/decompression failed");
 #endif
-	FRAME currentFrame = currentFrameGroup*10 + cs->subframe;
+	FRAME currentFrame = GET_FRAME(currentFrameGroup, *cs);
 	if (s.isFinish())
 	{
 		if (exitFound)
@@ -930,15 +953,15 @@ void traceExit()
 			frameGroup--;
 			if (fileExists(formatFileName("closed", frameGroup)))
 			{
-				printf("Frame group %dx... \r", frameGroup);
+				printf("Frame" GROUP_STR " " GROUP_FORMAT "... \r", frameGroup);
 				// TODO: parallelize?
 				InputStream input(formatFileName("closed", frameGroup));
 				CompressedState cs;
 				while (input.read(&cs, 1))
 				{
-					State state = blankState;
+					State state;
 					state.decompress(&cs);
-					FRAME frame = frameGroup*10 + cs.subframe;
+					FRAME frame = GET_FRAME(frameGroup, cs);
 					expandChildren<FinishCheckChildHandler>(frame, &state);
 					if (exitSearchStateFound)
 					{
@@ -957,8 +980,8 @@ void traceExit()
 	error("Lost parent node!");
 found:
 
-	FILE* f = fopen(format("%u.txt", LEVEL), "wt");
-	writeSolution(f, steps, stepNr);
+	FILE* f = fopen(formatProblemFileName(NULL, NULL, "txt"), "wt");
+	writeSolution(f, &exitSearchState, steps, stepNr);
 	fclose(f);
 }
 
@@ -1009,9 +1032,9 @@ void sortAndMerge(FRAME_GROUP g)
 
 bool checkStop()
 {
-	if (fileExists(format("stop-%u.txt", LEVEL)))
+	if (fileExists(formatProblemFileName("stop", NULL, "txt")))
 	{
-		deleteFile(format("stop-%u.txt", LEVEL));
+		deleteFile(formatProblemFileName("stop", NULL, "txt"));
 		printf("Stop file found.\n");
 		return true;
 	}
@@ -1027,7 +1050,7 @@ int search()
 	for (FRAME_GROUP g=MAX_FRAME_GROUPS; g>0; g--)
 		if (fileExists(formatFileName("closed", g)))
 		{
-			printf("Resuming from frame group %ux\n", g+1);
+			printf("Resuming from frame" GROUP_STR " " GROUP_FORMAT "\n", g+1);
 			firstFrameGroup = g+1;
 			break;
 	    }
@@ -1035,25 +1058,19 @@ int search()
 	for (FRAME_GROUP g=firstFrameGroup; g<MAX_FRAME_GROUPS; g++)
 		if (fileExists(formatFileName("open", g)))
 		{
-			printTime(); printf("Reopening queue for frame group %ux\n", g);
+			printTime(); printf("Reopening queue for frame" GROUP_STR " " GROUP_FORMAT "\n", g);
 			queue[g] = new BufferedOutputStream(formatFileName("open", g), true);
 		}
 
 	if (firstFrameGroup==0 && !queue[0])
 	{
-		CompressedState c;
-		initialState.compress(&c);
-#ifdef DEBUG
-		State test = blankState;
-		test.decompress(&c);
-		if (!(test == initialState))
+		for (int i=0; i<initialStateCount; i++)
 		{
-			printf("%s\n", initialState.toString());
-			printf("%s\n", test.toString());
-			error("Compression/decompression failed");
+			State s = initialStates[i];
+			CompressedState c;
+			s.compress(&c);
+			queueState(&c, 0);
 		}
-#endif
-		queueState(&c, 0);
 	}
 
 #ifdef MULTITHREADING
@@ -1068,7 +1085,7 @@ int search()
 		delete queue[currentFrameGroup];
 		queue[currentFrameGroup] = NULL;
 
-		printTime(); printf("Frame group %ux/%ux: ", currentFrameGroup, maxFrameGroups); fflush(stdout);
+		printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 
 		if (fileExists(formatFileName("merged", currentFrameGroup)))
 		{
@@ -1186,7 +1203,7 @@ int packOpen()
 	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
     	if (fileExists(formatFileName("open", g)))
     	{
-			printTime(); printf("Frame group %ux: ", g);
+			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT ": ", g);
 
 			{
 				InputStream input(formatFileName("open", g));
@@ -1221,20 +1238,20 @@ int packOpen()
 
 int sample(FRAME_GROUP g)
 {
-	printf("Sampling frame group %ux:\n", g);
+	printf("Sampling frame" GROUP_STR " " GROUP_FORMAT ":\n", g);
 	const char* fn = formatFileName("closed", g);
 	if (!fileExists(fn))
 		fn = formatFileName("open", g);
 	if (!fileExists(fn))
-		error(format("Can't find neither open nor closed node file for frame group %ux", g));
+		error(format("Can't find neither open nor closed node file for frame" GROUP_STR " " GROUP_FORMAT, g));
 	
 	InputStream in(fn);
 	srand((unsigned)time(NULL));
 	in.seek(((uint64_t)rand() + ((uint64_t)rand()<<32)) % in.size());
 	CompressedState cs;
 	in.read(&cs, 1);
-	printf("Frame %u:\n", g*10 + cs.subframe);
-	State s = blankState;
+	printf("Frame %u:\n", GET_FRAME(g, cs));
+	State s;
 	s.decompress(&cs);
 	puts(s.toString());
 	return 0;
@@ -1279,6 +1296,8 @@ int compare(const char* fn1, const char* fn2)
 
 // ******************************************************************************************************
 
+#ifdef GROUP_FRAMES
+
 // This works only if the size of CompressedState is the same as the old version (without the subframe field).
 
 // HACK: the following code uses pointer arithmetics with BufferedInputStream objects to quickly determine the subframe from which a CompressedState came from.
@@ -1291,13 +1310,13 @@ void convertMerge(BufferedInputStream inputs[], int inputCount, BufferedOutputSt
 	//	positions[i] = 0;
 
 	CompressedState cs = *heap.getHead();
-	debug_assert(heap.getHeadInput() >= inputs && heap.getHeadInput() < inputs+10);
+	debug_assert(heap.getHeadInput() >= inputs && heap.getHeadInput() < inputs+FRAMES_PER_GROUP);
 	cs.subframe = heap.getHeadInput() - inputs;
 	bool oooFound = false, equalFound = false;
 	while (heap.next())
 	{
 		CompressedState cs2 = *heap.getHead();
-		debug_assert(heap.getHeadInput() >= inputs && heap.getHeadInput() < inputs+10);
+		debug_assert(heap.getHeadInput() >= inputs && heap.getHeadInput() < inputs+FRAMES_PER_GROUP);
 		uint8_t subframe = heap.getHeadInput() - inputs;
 		//positions[subframe]++;
 		cs2.subframe = subframe;
@@ -1335,28 +1354,79 @@ int convert()
 	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
 	{
 		bool haveClosed=false, haveOpen=false;
-		BufferedInputStream inputs[10];
-		for (FRAME f=g*10; f<(g+1)*10; f++)
-			if (fileExists(format("closed-%u-%u.bin", LEVEL, f)))
-				inputs[f%10].open(format("closed-%u-%u.bin", LEVEL, f)),
+		BufferedInputStream inputs[FRAMES_PER_GROUP];
+		for (FRAME f=g*FRAMES_PER_GROUP; f<(g+1)*FRAMES_PER_GROUP; f++)
+			if (fileExists(formatProblemFileName("closed", format("%u", f), "bin")))
+				inputs[f%FRAMES_PER_GROUP].open(formatProblemFileName("closed", format("%u", f), "bin")),
 				haveClosed = true;
 			else
-			if (fileExists(format("open-%u-%u.bin", LEVEL, f)))
-				inputs[f%10].open(format("open-%u-%u.bin", LEVEL, f)),
+			if (fileExists(formatProblemFileName("open", format("%u", f), "bin")))
+				inputs[f%FRAMES_PER_GROUP].open(formatProblemFileName("open", format("%u", f), "bin")),
 				haveOpen = true;
 		if (haveOpen || haveClosed)
 		{
-			printf("%dx...\n", g);
+			printf(GROUP_FORMAT "...\n", g);
 			{
 				BufferedOutputStream output(formatFileName("converting", g));
-				convertMerge(inputs, 10, &output);
+				convertMerge(inputs, FRAMES_PER_GROUP, &output);
 			}
-			renameFile(formatFileName("converting", g), format("%s-%u-%ux.bin", haveOpen ? "open" : "closed", LEVEL, g));
+			renameFile(formatFileName("converting", g), formatFileName(haveOpen ? "open" : "closed", g));
 		}
 		free(inputs);
 	}
 	return 0;
 }
+
+// ******************************************************************************************************
+
+// Unpack a closed node frame group file to individual frames.
+
+int unpack()
+{
+	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
+		if (fileExists(formatFileName("closed", g)))
+		{
+			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "\n", g); fflush(stdout);
+			BufferedInputStream input(formatFileName("closed", g));
+			BufferedOutputStream** outputs = new BufferedOutputStream*[FRAMES_PER_GROUP];
+			for (int i=0; i<FRAMES_PER_GROUP; i++)
+				outputs[i] = new BufferedOutputStream(formatProblemFileName("closed", format("%u", g*FRAMES_PER_GROUP+i), "bin"));
+			const CompressedState* cs;
+			while (cs = input.read())
+			{
+				CompressedState cs2 = *cs;
+				cs2.subframe = 0;
+				outputs[cs->subframe]->write(&cs2);
+			}
+			for (int i=0; i<FRAMES_PER_GROUP; i++)
+				delete outputs[i];
+			delete[] outputs;
+		}
+	return 0;
+}
+
+// ******************************************************************************************************
+
+int count()
+{
+	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
+		if (fileExists(formatFileName("closed", g)))
+		{
+			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT ":\n", g);
+			BufferedInputStream input(formatFileName("closed", g));
+			const CompressedState* cs;
+			uint64_t counts[FRAMES_PER_GROUP] = {0};
+			while (cs = input.read())
+				counts[cs->subframe]++;
+			for (int i=0; i<10; i++)
+				if (counts[i])
+					printf("Frame %u: %llu\n", g*10+i, counts[i]);
+			fflush(stdout);
+		}
+	return 0;
+}
+
+#endif // GROUP_FRAMES
 
 // ******************************************************************************************************
 
@@ -1384,61 +1454,14 @@ int verify(const char* filename)
 				printf("Unordered states found: %lld\n", pos);
 				oooFound = true;
 			}
-		if (cs2->subframe > 9)
+#ifdef GROUP_FRAMES
+		if (cs2->subframe >= FRAMES_PER_GROUP)
 			error("Invalid subframe (corrupted data?)");
+#endif
 		cs = *cs2;
 		if (equalFound && oooFound)
 			return 0;
 	}
-}
-
-// ******************************************************************************************************
-
-int count()
-{
-	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
-		if (fileExists(formatFileName("closed", g)))
-		{
-			printTime(); printf("Frame group %ux:\n", g);
-			BufferedInputStream input(formatFileName("closed", g));
-			const CompressedState* cs;
-			uint64_t counts[10] = {0};
-			while (cs = input.read())
-				counts[cs->subframe]++;
-			for (int i=0; i<10; i++)
-				if (counts[i])
-					printf("Frame %u: %llu\n", g*10+i, counts[i]);
-			fflush(stdout);
-		}
-	return 0;
-}
-
-// ******************************************************************************************************
-
-// Unpack a closed node frame group file to individual frames.
-
-int unpack()
-{
-	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
-		if (fileExists(formatFileName("closed", g)))
-		{
-			printTime(); printf("Frame group %ux\n", g); fflush(stdout);
-			BufferedInputStream input(formatFileName("closed", g));
-			BufferedOutputStream** outputs = new BufferedOutputStream*[10];
-			for (int i=0; i<10; i++)
-				outputs[i] = new BufferedOutputStream(format("closed-%u-%u.bin", LEVEL, g*10+i));
-			const CompressedState* cs;
-			while (cs = input.read())
-			{
-				CompressedState cs2 = *cs;
-				cs2.subframe = 0;
-				outputs[cs->subframe]->write(&cs2);
-			}
-			for (int i=0; i<10; i++)
-				delete outputs[i];
-			delete[] outputs;
-		}
-	return 0;
 }
 
 // ******************************************************************************************************
@@ -1459,7 +1482,7 @@ int sortOpen()
 		if (initialSize==0)
 			continue;
 
-		printTime(); printf("Frame group %ux/%ux: ", currentFrameGroup, maxFrameGroups); fflush(stdout);
+		printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 
 		sortAndMerge(currentFrameGroup);
 		
@@ -1491,7 +1514,7 @@ int seqFilterOpen()
 		if (!fileExists(formatFileName("open", currentFrameGroup)))
 			continue;
 
-		printTime(); printf("Frame group %ux/%ux: ", currentFrameGroup, maxFrameGroups); fflush(stdout);
+		printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 
 		uint64_t initialSize, finalSize;
 
@@ -1578,7 +1601,7 @@ void filterStreams(BufferedInputStream closed[], int closedCount, BufferedRewrit
 		do
 		{
 			FRAME_GROUP group = openHeap.getHeadInput() - open;
-			FRAME frame = group*10 + openHeap.getHead()->subframe;
+			FRAME frame = GET_FRAME(group, *openHeap.getHead());
 			if (lowestFrame > frame)
 				lowestFrame = frame;
 			if (!openHeap.next())
@@ -1587,7 +1610,7 @@ void filterStreams(BufferedInputStream closed[], int closedCount, BufferedRewrit
 				break;
 			}
 			if (o > *openHeap.getHead())
-				error(format("Unsorted open node file for frame group %ux/%ux", group, openHeap.getHeadInput() - open));
+				error(format("Unsorted open node file for frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT, group, openHeap.getHeadInput() - open));
 		} while (o == *openHeap.getHead());
 		
 		if (closedHeap.scanTo(o))
@@ -1596,8 +1619,8 @@ void filterStreams(BufferedInputStream closed[], int closedCount, BufferedRewrit
 				closedHeap.next();
 				continue;
 			}
-		o.subframe = lowestFrame % 10;
-		open[lowestFrame/10].write(&o, true);
+		SET_SUBFRAME(o, lowestFrame);
+		open[lowestFrame/FRAMES_PER_GROUP].write(&o, true);
 	}
 }
 
@@ -1643,7 +1666,7 @@ int regenerateOpen()
 	for (currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
 		if (fileExists(formatFileName("closed", currentFrameGroup)))
 		{
-			printTime(); printf("Frame group %ux/%ux: ", currentFrameGroup, maxFrameGroups); fflush(stdout);
+			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 			
 			BufferedInputStream closed(formatFileName("closed", currentFrameGroup));
 			const CompressedState* cs;
@@ -1718,7 +1741,7 @@ void printExecutionTime()
 {
 	timeb endTime;
 	ftime(&endTime);
-	time_t ms = (endTime.time    - startTime.time)*1000
+	time_t ms = (endTime.time - startTime.time)*1000
 	       + (endTime.millitm - startTime.millitm);
 	printf("Time: %d.%03d seconds.\n", ms/1000, ms%1000);
 }
@@ -1756,31 +1779,33 @@ Generic C++ DDD solver\n\
 Usage:\n\
 	search <mode> <parameters>\n\
 where <mode> is one of:\n\
-	search [max-frame-group]\n\
+	search [max-frame"GROUP_STR"]\n\
 		Sorts, filters and expands open nodes. 	If no open node files\n\
 		are present, starts a new search from the initial state.\n\
-	sample <frame-group>\n\
-		Displays a random state from the specified frame-group, which\n\
+	sample <frame"GROUP_STR">\n\
+		Displays a random state from the specified frame"GROUP_STR", which\n\
 		can be either open or closed.\n\
 	compare <filename-1> <filename-2>\n\
 		Counts the number of duplicate nodes in two files. The nodes in\n\
-		the files must be sorted and deduplicated.\n\
-	convert [frame-group-range]\n\
-		Converts individual frame files to frame group files for the\n\
-		specified frame group range.\n\
-	unpack [frame-group-range]\n\
-		Converts frame group files back to individual frame files\n\
+		the files must be sorted and deduplicated.\n"
+#ifdef GROUP_FRAMES
+"	convert [frame"GROUP_STR"-range]\n\
+		Converts individual frame files to frame"GROUP_STR" files for the\n\
+		specified frame"GROUP_STR" range.\n\
+	unpack [frame"GROUP_STR"-range]\n\
+		Converts frame"GROUP_STR" files back to individual frame files\n\
 		(reverses the \"convert\" operation).\n\
-	verify <filename>\n\
+	count [frame"GROUP_STR"-range]\n\
+		Counts the number of nodes in individual frames for the\n\
+		specified frame"GROUP_STR" files.\n"
+#endif
+"	verify <filename>\n\
 		Verifies that the nodes in a file are correctly sorted and\n\
 		deduplicated, as well as a few additional integrity checks.\n\
-	count [frame-group-range]\n\
-		Counts the number of nodes in individual frames for the\n\
-		specified frame group files.\n\
-	pack-open [frame-group-range]\n\
+	pack-open [frame"GROUP_STR"-range]\n\
 		Removes duplicates within each chunk for open node files in the\n\
 		specified range. Reads and writes open nodes only once.\n\
-	sort-open [frame-group-range]\n\
+	sort-open [frame"GROUP_STR"-range]\n\
 		Sorts and removes duplicates for open node files in the\n\
 		specified range. File are processed in reverse order.\n\
 	filter-open\n\
@@ -1788,25 +1813,25 @@ where <mode> is one of:\n\
 		be sorted and deduplicated (run sort-open before filter-open).\n\
 		Filtering is performed in-place. An aborted run shouldn't cause\n\
 		data loss, but will require re-sorting.\n\
-	seq-filter-open [frame-group-range]\n\
+	seq-filter-open [frame"GROUP_STR"-range]\n\
 		Sorts, deduplicates and filters open node files in the\n\
 		specified range, one by one. Specify the range cautiously,\n\
 		as this function requires that previous open node files be\n\
 		sorted and deduplicated (and filtered for best performance).\n\
-	regenerate-open [frame-group-range]\n\
-		Re-expands closed nodes in the specified frame group range.\n\
-		New (open) nodes are saved only for frame groups that don't\n\
+	regenerate-open [frame"GROUP_STR"-range]\n\
+		Re-expands closed nodes in the specified frame"GROUP_STR" range.\n\
+		New (open) nodes are saved only for frame"GROUP_STR"s that don't\n\
 		already have an open or closed node file. Use this when an open\n\
 		node file has been accidentally deleted or corrupted. To\n\
 		regenerate all open nodes, delete all open node files before\n\
 		running regenerate-open (this is still faster than restarting\n\
 		the search).\n\
-A [frame-group-range] is a space-delimited list of zero, one or two frame group\n\
-numbers. If zero numbers are specified, the range is assumed to be all frame\n\
-groups. If one number is specified, the range is set to only that frame group\n\
-number. If two numbers are specified, the range is set to start from the first\n\
-frame group number inclusively, and end at the second frame group number NON-\n\
-inclusively.\n\
+A [frame"GROUP_STR"-range] is a space-delimited list of zero, one or two frame"GROUP_STR"\n\
+numbers. If zero numbers are specified, the range is assumed to be all\n\
+frame"GROUP_STR"s. If one number is specified, the range is set to only that\n\
+frame"GROUP_STR" number. If two numbers are specified, the range is set to start\n\
+from the first frame"GROUP_STR" number inclusively, and end at the second\n\
+frame"GROUP_STR" number NON-inclusively.\n\
 ";
 
 int run(int argc, const char* argv[])
@@ -1860,7 +1885,7 @@ int run(int argc, const char* argv[])
 #error Disk plugin not set
 #endif
 
-	if (fileExists(format("stop-%u.txt", LEVEL)))
+	if (fileExists(formatProblemFileName("stop", NULL, "txt")))
 	{
 		printf("Stop file present.\n");
 		return 3;
@@ -1874,10 +1899,6 @@ int run(int argc, const char* argv[])
 	for (int i=0; i<argc; i++)
 		printf(" %s", argv[i]);
 	printf("\n");
-
-	initialState.load();
-	blankState = initialState;
-	blankState.blank();
 
 	maxFrameGroups = MAX_FRAME_GROUPS;
 
@@ -1893,7 +1914,7 @@ int run(int argc, const char* argv[])
 	else
 	if (argc>1 && strcmp(argv[1], "sample")==0)
 	{
-		enforce(argc==3, "Specify a frame group to sample");
+		enforce(argc==3, "Specify a frame"GROUP_STR" to sample");
 		return sample(parseInt(argv[2]));
 	}
 	else
@@ -1903,6 +1924,7 @@ int run(int argc, const char* argv[])
 		return compare(argv[2], argv[3]);
 	}
 	else
+#ifdef GROUP_FRAMES
 	if (argc>1 && strcmp(argv[1], "convert")==0)
 	{
 		parseFrameRange(argc-2, argv+2);
@@ -1915,16 +1937,17 @@ int run(int argc, const char* argv[])
 		return unpack();
 	}
 	else
-	if (argc>1 && strcmp(argv[1], "verify")==0)
-	{
-		enforce(argc==3, "Specify a file to verify");
-		return verify(argv[2]);
-	}
-	else
 	if (argc>1 && strcmp(argv[1], "count")==0)
 	{
 		parseFrameRange(argc-2, argv+2);
 		return count();
+	}
+	else
+#endif
+	if (argc>1 && strcmp(argv[1], "verify")==0)
+	{
+		enforce(argc==3, "Specify a file to verify");
+		return verify(argv[2]);
 	}
 	else
 	if (argc>1 && strcmp(argv[1], "pack-open")==0)
