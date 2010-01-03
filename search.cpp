@@ -680,7 +680,7 @@ const char* formatFileName(const char* name, FRAME_GROUP g, unsigned chunk)
 
 // ******************************************************************************************************
 
-#define MAX_FRAME_GROUPS ((MAX_FRAMES+9)/10)
+#define MAX_FRAME_GROUPS ((MAX_FRAMES+(FRAMES_PER_GROUP-1))/FRAMES_PER_GROUP)
 
 BufferedOutputStream* queue[MAX_FRAME_GROUPS];
 bool noQueue[MAX_FRAME_GROUPS];
@@ -1236,6 +1236,31 @@ int packOpen()
 
 // ******************************************************************************************************
 
+int dump(FRAME_GROUP g)
+{
+	printf("Dumping frame" GROUP_STR " " GROUP_FORMAT ":\n", g);
+	const char* fn = formatFileName("closed", g);
+	if (!fileExists(fn))
+		fn = formatFileName("open", g);
+	if (!fileExists(fn))
+		error(format("Can't find neither open nor closed node file for frame" GROUP_STR " " GROUP_FORMAT, g));
+	
+	BufferedInputStream in(fn);
+	const CompressedState* cs;
+	while (cs = in.read())
+	{
+#ifdef GROUP_FRAMES
+		printf("Frame %u:\n", GET_FRAME(g, cs));
+#endif
+		State s;
+		s.decompress(cs);
+		puts(s.toString());
+	}
+	return 0;
+}
+
+// ******************************************************************************************************
+
 int sample(FRAME_GROUP g)
 {
 	printf("Sampling frame" GROUP_STR " " GROUP_FORMAT ":\n", g);
@@ -1250,7 +1275,9 @@ int sample(FRAME_GROUP g)
 	in.seek(((uint64_t)rand() + ((uint64_t)rand()<<32)) % in.size());
 	CompressedState cs;
 	in.read(&cs, 1);
+#ifdef GROUP_FRAMES
 	printf("Frame %u:\n", GET_FRAME(g, cs));
+#endif
 	State s;
 	s.decompress(&cs);
 	puts(s.toString());
@@ -1418,9 +1445,9 @@ int count()
 			uint64_t counts[FRAMES_PER_GROUP] = {0};
 			while (cs = input.read())
 				counts[cs->subframe]++;
-			for (int i=0; i<10; i++)
+			for (int i=0; i<FRAMES_PER_GROUP; i++)
 				if (counts[i])
-					printf("Frame %u: %llu\n", g*10+i, counts[i]);
+					printf("Frame %u: %llu\n", g*FRAMES_PER_GROUP+i, counts[i]);
 			fflush(stdout);
 		}
 	return 0;
@@ -1782,6 +1809,9 @@ where <mode> is one of:\n\
 	search [max-frame"GROUP_STR"]\n\
 		Sorts, filters and expands open nodes. 	If no open node files\n\
 		are present, starts a new search from the initial state.\n\
+	dump <frame"GROUP_STR">\n\
+		Dumps all states from the specified frame"GROUP_STR", which\n\
+		can be either open or closed.\n\
 	sample <frame"GROUP_STR">\n\
 		Displays a random state from the specified frame"GROUP_STR", which\n\
 		can be either open or closed.\n\
@@ -1870,8 +1900,12 @@ int run(int argc, const char* argv[])
 #error Sync plugin not set
 #endif
 	
+#ifdef COMPRESSED_BITS
 	printf("Compressed state is %u bits (%u bytes)\n", COMPRESSED_BITS, sizeof(CompressedState));
 	enforce(COMPRESSED_BITS <= (sizeof(CompressedState)-1)*8);
+#else
+	printf("Compressed state is %u bytes\n", sizeof(CompressedState));
+#endif
 	enforce(sizeof(CompressedState)%4 == 0);
 
 	enforce(ram, "RAM allocation failed");
@@ -1910,6 +1944,12 @@ int run(int argc, const char* argv[])
 		if (argc>2)
 			maxFrameGroups = parseInt(argv[2]);
 		return search();
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "dump")==0)
+	{
+		enforce(argc==3, "Specify a frame"GROUP_STR" to dump");
+		return dump(parseInt(argv[2]));
 	}
 	else
 	if (argc>1 && strcmp(argv[1], "sample")==0)
