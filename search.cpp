@@ -1146,18 +1146,23 @@ int search()
 		{
 			copyFile(formatFileName("merged", currentFrameGroup), formatFileName("closing", currentFrameGroup));
 			renameFile(formatFileName("merged", currentFrameGroup), formatFileName("all"));
+			
+			BufferedInputStream input(formatFileName("closing", currentFrameGroup));
+			const CompressedState* cs;
+			while (cs = input.read())
+				processFilteredState(cs);
 		}
 		else
 		{
 			BufferedInputStream* source = new BufferedInputStream(formatFileName("merged", currentFrameGroup));
 			BufferedInputStream* all = new BufferedInputStream(formatFileName("all"));
 			BufferedOutputStream* allnew = new BufferedOutputStream(formatFileName("allnew"));
-			BufferedOutputStream* closed = new BufferedOutputStream(formatFileName("closed", currentFrameGroup));
-			mergeTwoStreams<ProcessStateHandler>(source, all, allnew, closed);
+			BufferedOutputStream* closing = new BufferedOutputStream(formatFileName("closing", currentFrameGroup));
+			mergeTwoStreams<ProcessStateHandler>(source, all, allnew, closing);
 			delete all;
 			delete source;
 			delete allnew;
-			delete closed;
+			delete closing;
 			deleteFile(formatFileName("all"));
 			renameFile(formatFileName("allnew"), formatFileName("all"));
 			deleteFile(formatFileName("merged", currentFrameGroup));
