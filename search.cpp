@@ -162,6 +162,11 @@ public:
 			flushBuffer();
 	}
 
+	uint64_t size()
+	{
+		return s.size() + pos;
+	}
+
 	void flushBuffer()
 	{
 		if (pos)
@@ -627,6 +632,7 @@ const char* formatFileName(const char* name, FRAME_GROUP g, unsigned chunk)
 #define MAX_FRAME_GROUPS ((MAX_FRAMES+9)/10)
 
 BufferedOutputStream* queue[MAX_FRAME_GROUPS];
+bool noQueue[MAX_FRAME_GROUPS];
 #ifdef MULTITHREADING
 MUTEX queueMutex[MAX_FRAME_GROUPS];
 #endif
@@ -639,6 +645,8 @@ MUTEX cacheMutex[PARTITIONS];
 void queueState(CompressedState* state, FRAME frame)
 {
 	FRAME_GROUP group = frame/10;
+	if (noQueue[group])
+		return;
 	state->subframe = frame%10;
 #ifdef MULTITHREADING
 	SCOPED_LOCK lock(queueMutex[group]);
@@ -874,7 +882,7 @@ void processFilteredState(const CompressedState* state)
 	CONDITION_NOTIFY(processQueueWriteCondition, lock);
 }
 
-void dequeueNode(CompressedState* state)
+void dequeueState(CompressedState* state)
 {
 	SCOPED_LOCK lock(processQueueMutex);
 		
@@ -889,17 +897,28 @@ void worker()
 	CompressedState cs;
 	while (true)
 	{
-		dequeueNode(&cs);
+		dequeueState(&cs);
 		processState(&cs);
 	}
 }
 
 void flushProcessQueue()
 {
+	/*
 	SCOPED_LOCK lock(processQueueMutex);
 
 	while (processQueueHead != processQueueTail) // while not empty
 		CONDITION_WAIT(processQueueReadCondition, lock);
+    /*/
+    while (true)
+    {
+    	{
+	    	SCOPED_LOCK lock(processQueueMutex);
+    		if (processQueueHead == processQueueTail)
+    			return;
+    	}
+    	SLEEP(1);
+    }//*/
 }
 
 #else
@@ -1658,6 +1677,51 @@ int filterOpen()
 
 // ******************************************************************************************************
 
+int regenerateOpen()
+{
+	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
+		if (fileExists(formatFileName("closed", g)) || fileExists(formatFileName("open", g)))
+			noQueue[g] = true;
+	
+#ifdef MULTITHREADING
+	for (int i=0; i<THREADS-1; i++)
+		THREAD_CREATE(&worker);
+#endif
+
+	while (maxFrameGroups>0 && !fileExists(formatFileName("closed", maxFrameGroups-1)))
+		maxFrameGroups--;
+
+	uint64_t oldSize = 0;
+	for (currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
+		if (fileExists(formatFileName("closed", currentFrameGroup)))
+		{
+			printTime(); printf("Frame group %ux/%ux: ", currentFrameGroup, maxFrameGroups); fflush(stdout);
+			
+			BufferedInputStream closed(formatFileName("closed", currentFrameGroup));
+			const CompressedState* cs;
+			while (cs = closed.read())
+				processFilteredState(cs);
+			
+			flushProcessQueue();
+			
+			uint64_t size = 0;
+			for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
+				if (queue[g])
+					size += queue[g]->size();
+
+			printf("Done (%lld).\n", size - oldSize);
+			oldSize = size;
+#ifdef MULTITHREADING
+			flushProcessQueue();
+			//printf("%d/%d\n", processQueueHead, processQueueTail);
+#endif
+		}
+	
+	return 0;
+}
+
+// ******************************************************************************************************
+
 // use background CPU and I/O priority when PC is not idle
 
 #if defined(_WIN32)
@@ -1763,7 +1827,7 @@ where <mode> is one of:\n\
 		Verifies that the nodes in a file are correctly sorted and\n\
 		deduplicated, as well as a few additional integrity checks.\n\
 	count [frame-group-range]\n\
-		Counts the number of states in individual frames for the\n\
+		Counts the number of nodes in individual frames for the\n\
 		specified frame group files.\n\
 	pack-open [frame-group-range]\n\
 		Removes duplicates within each chunk for open node files in the\n\
@@ -1781,6 +1845,14 @@ where <mode> is one of:\n\
 		specified range, one by one. Specify the range cautiously,\n\
 		as this function requires that previous open node files be\n\
 		sorted and deduplicated (and filtered for best performance).\n\
+	regenerate-open [frame-group-range]\n\
+		Re-expands closed nodes in the specified frame group range.\n\
+		New (open) nodes are saved only for frame groups that don't\n\
+		already have an open or closed node file. Use this when an open\n\
+		node file has been accidentally deleted or corrupted. To\n\
+		regenerate all open nodes, delete all open node files before\n\
+		running regenerate-open (this is still faster than restarting\n\
+		the search).\n\
 A [frame-group-range] is a space-delimited list of zero, one or two frame group\n\
 numbers. If zero numbers are specified, the range is assumed to be all frame\n\
 groups. If one number is specified, the range is set to only that frame group\n\
@@ -1932,6 +2004,12 @@ int run(int argc, const char* argv[])
 	{
 		parseFrameRange(argc-2, argv+2);
 		return seqFilterOpen();
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "regenerate-open")==0)
+	{
+		parseFrameRange(argc-2, argv+2);
+		return regenerateOpen();
 	}
 	else
 	{
