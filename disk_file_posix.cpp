@@ -1,6 +1,6 @@
 // POSIX files
 
-#warning "This file is seriously out of date. Update it using disk_file_windows.cpp as an example."
+#warning "This file is hopelessly out of date. Update it using disk_file_windows.cpp as reference."
 
 class OutputStream
 {

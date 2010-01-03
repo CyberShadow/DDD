@@ -272,6 +272,14 @@ INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { ret
 INLINE bool operator> (const CompressedState& a, const CompressedState& b) { return b< a; }
 INLINE bool operator>=(const CompressedState& a, const CompressedState& b) { return b<=a; }
 
+const char* dumpCompressedState(const CompressedState* cs)
+{
+	static char s[sizeof(CompressedState)*3+1];
+	for (int i=0; i<sizeof(CompressedState); i++)
+		sprintf(s + i*3, "%02X ", ((const uint8_t*)cs)[i]);
+	return s;
+}
+
 #if (BLOCKS > 0)
 struct { BYTE x, y; } blockSize[BLOCKS];
 int blockSizeIndex[BLOCKY][BLOCKX];

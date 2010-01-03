@@ -1,10 +1,67 @@
 // Windows files
 
-class OutputStream
+class Stream
 {
+protected:
 	HANDLE archive;
+
 public:
+	Stream() : archive(0) {}
+
+	bool isOpen() const { return archive != 0; }
+
+	uint64_t size()
+	{
+		ULARGE_INTEGER li;
+		li.LowPart = GetFileSize(archive, &li.HighPart);
+		return li.QuadPart / sizeof(Node);
+	}
+
+	uint64_t position()
+	{
+		LARGE_INTEGER n, o;
+		n.QuadPart = 0;
+		BOOL b = SetFilePointerEx(archive, n, &o, FILE_CURRENT);
+		if (!b)
+			error("Seek error");
+		return o.QuadPart / sizeof(Node);
+	}
+
+	void seek(uint64_t pos)
+	{
+		LARGE_INTEGER li;
+		li.QuadPart = pos * sizeof(Node);
+		BOOL b = SetFilePointerEx(archive, li, NULL, FILE_BEGIN);
+		if (!b)
+			error("Seek error");
+	}
+
+	void close()
+	{
+		if (archive)
+		{
+			CloseHandle(archive);
+			archive = 0;
+		}
+	}
+
+	~Stream()
+	{
+		close();
+	}
+};
+
+class OutputStream : virtual public Stream
+{
+public:
+	OutputStream(){}
+
 	OutputStream(const char* filename, bool resume=false)
+	{
+		open(filename, resume);
+	}
+
+	void open(const char* filename, bool resume=false)
 	{
 		archive = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
@@ -21,6 +78,7 @@ public:
 
 	void write(const Node* p, size_t n)
 	{
+		assert(archive, "File not open");
 		size_t total = n * sizeof(Node);
 		size_t bytes = 0;
 		const char* data = (const char*)p;
@@ -42,26 +100,28 @@ public:
 	{
 		FlushFileBuffers(archive);
 	}
-
-	~OutputStream()
-	{
-		CloseHandle(archive);
-	}
 };
 
-class InputStream
+class InputStream : virtual public Stream
 {
-	HANDLE archive;
 public:
+	InputStream(){}
+
 	InputStream(const char* filename)
+	{
+		open(filename);
+	}
+
+	void open(const char* filename)
 	{
 		archive = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
 			error("File open failure");
 	}
 
-	int read(Node* p, size_t n)
+	size_t read(Node* p, size_t n)
 	{
+		assert(archive, "File not open");
 		size_t total = n * sizeof(Node);
 		size_t bytes = 0;
 		char* data = (char*)p;
@@ -82,26 +142,48 @@ public:
 		}
 		return n;
 	}
+};
 
-	uint64_t size()
+// For in-place filtering. Written nodes must be <= read nodes.
+class RewriteStream : public InputStream, public OutputStream
+{
+	uint64_t readpos, writepos;
+public:
+	RewriteStream(){}
+
+	RewriteStream(const char* filename)
 	{
-		ULARGE_INTEGER li;
-		li.LowPart = GetFileSize(archive, &li.HighPart);
-		return li.QuadPart / sizeof(Node);
+		open(filename);
+	}
+	
+	void open(const char* filename)
+	{
+		archive = CreateFile(filename, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (archive == INVALID_HANDLE_VALUE)
+			error("File creation failure");
+		readpos = writepos = 0;
 	}
 
-	void seek(uint64_t pos)
+	size_t read(Node* p, size_t n)
 	{
-		LARGE_INTEGER li;
-		li.QuadPart = pos * sizeof(Node);
-		BOOL b = SetFilePointerEx(archive, li, NULL, FILE_BEGIN);
-		if (!b)
-			error("Seek error");
+		assert(readpos >= writepos, "Write position overwritten");
+		seek(readpos);
+		size_t r = InputStream::read(p, n);
+		readpos += r;
+		return r;
 	}
 
-	~InputStream()
+	void write(const Node* p, size_t n)
 	{
-		CloseHandle(archive);
+		seek(writepos);
+		OutputStream::write(p, n);
+		writepos += n;
+	}
+
+	void truncate()
+	{
+		seek(writepos);
+		SetEndOfFile(archive);
 	}
 };
 
