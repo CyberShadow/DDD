@@ -228,7 +228,7 @@ struct CompressedState
 	unsigned _align2 : 8;
 	#endif
 
-	unsigned subframe : 8; // Used in search (actually, only 3 bits are needed
+	unsigned subframe : 8; // Used in search (actually, only 3 bits are needed)
 
 	//#if (COMPRESSED_SLACK_BYTES != 1) // Align the structure size to dword boundary
 	//unsigned _align3 : 8 * (COMPRESSED_SLACK_BYTES == 0 ? 3 : 1);

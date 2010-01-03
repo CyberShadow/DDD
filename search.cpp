@@ -1142,7 +1142,7 @@ int search()
 		// Step 3: dedup against previous frames, while simultaneously processing filtered nodes
 		printf("Processing... "); fflush(stdout);
 #ifdef USE_ALL
-		if (currentFrame==0)
+		if (currentFrameGroup==0)
 		{
 			copyFile(formatFileName("merged", currentFrameGroup), formatFileName("closing", currentFrameGroup));
 			renameFile(formatFileName("merged", currentFrameGroup), formatFileName("all"));
@@ -1564,8 +1564,8 @@ int seqFilterOpen()
 		// Step 3: dedup against previous frames
 		printf("Filtering... "); fflush(stdout);
 #ifdef USE_ALL
-		#error "Not implemented"
-#else
+		#pragma message("Performance warning: using closed node files with USE_ALL") // TODO
+#endif
 		{
 			class NullStateHandler
 			{
@@ -1597,7 +1597,6 @@ int seqFilterOpen()
 			delete output;
 			deleteFile(formatFileName("merged", currentFrameGroup));
 		}
-#endif
 
 		deleteFile(formatFileName("open", currentFrameGroup));
 		renameFile(formatFileName("filtering", currentFrameGroup), formatFileName("open", currentFrameGroup));
@@ -1702,7 +1701,11 @@ int regenerateOpen()
 			while (cs = closed.read())
 				processFilteredState(cs);
 			
+#ifdef MULTITHREADING
 			flushProcessQueue();
+			//printf("%d/%d\n", processQueueHead, processQueueTail);
+#endif
+			flushQueue();
 			
 			uint64_t size = 0;
 			for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
@@ -1711,10 +1714,6 @@ int regenerateOpen()
 
 			printf("Done (%lld).\n", size - oldSize);
 			oldSize = size;
-#ifdef MULTITHREADING
-			flushProcessQueue();
-			//printf("%d/%d\n", processQueueHead, processQueueTail);
-#endif
 		}
 	
 	return 0;
