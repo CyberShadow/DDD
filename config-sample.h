@@ -1,8 +1,11 @@
 // DEBUG enables asserts and some other debug checks.
 //#define DEBUG
 
-// Specify the level to solve here.
-#define LEVEL 11
+// Which problem to solve?
+#define PROBLEM SampleMaze
+
+// Add problem settings (such as level to solve) here.
+//#define POWER_LEVEL 9001
 
 // MULTITHREADING will enable threading and synchronization code.
 #define MULTITHREADING

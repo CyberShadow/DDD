@@ -45,11 +45,56 @@
 
 // ******************************************************************************************************
 
-#include "Kwirk.cpp"
+void error(const char* message = NULL)
+{
+	if (message)
+		throw message;
+	else
+		throw "Unspecified error";
+}
 
-// ******************************************************************************************************
+const char* format(const char *fmt, ...)
+{    
+	va_list argptr;
+	va_start(argptr,fmt);
+	//static char buf[1024];
+	//char* buf = (char*)malloc(1024);
+	static char buffers[16][1024];
+	static int bufIndex = 0;
+	char* buf = buffers[bufIndex++ % 16];
+	vsprintf(buf, fmt, argptr);
+	va_end(argptr);
+	return buf;
+}
 
-State initialState, blankState;
+const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; }
+
+// enforce - check condition in both DEBUG/RELEASE, error() on fail
+// assert - check condition in DEBUG builds, try to instruct compiler to assume the condition is true in RELEASE builds
+// debug_assert - check condition in DEBUG builds, do nothing in RELEASE builds (classic ASSERT)
+
+#define enforce(expr,...) while(!(expr)){error(defaultstr(format("Check failed at %s:%d", __FILE__,  __LINE__), __VA_ARGS__));throw "Unreachable";}
+
+#undef assert
+#ifdef DEBUG
+#define assert enforce
+#define debug_assert enforce
+#define INLINE
+#else
+#if defined(_MSC_VER)
+#define assert(expr,...) __assume((expr)!=0)
+#define INLINE __forceinline
+#elif defined(__GNUC__)
+#define assert(expr,...) __builtin_expect(!(expr),0)
+#define INLINE inline
+#else
+#error Unknown compiler
+#endif
+#define debug_assert(...) do{}while(0)
+#endif
+
+#define DO_STRINGIZE(x) #x
+#define STRINGIZE(x) DO_STRINGIZE(x)
 
 // ******************************************************************************************************
 
@@ -57,30 +102,13 @@ typedef int32_t FRAME;
 typedef int32_t FRAME_GROUP;
 typedef int16_t PACKED_FRAME;
 
-// Defines a move within the graph. x and y are the player's position after movement (used to collapse multiple movement steps that don't change the level layout)
-//#pragma pack(1)
-struct Step
-{
-	Action action;
-	uint8_t x;
-	uint8_t y;
-	uint8_t extraSteps;
-};
+// ******************************************************************************************************
 
-INLINE int replayStep(State* state, FRAME* frame, Step step)
-{
-	Player* p = &state->players[state->activePlayer];
-	int nx = step.x+1;
-	int ny = step.y+1;
-	int steps = abs((int)p->x - nx) + abs((int)p->y - ny) + step.extraSteps;
-	p->x = nx;
-	p->y = ny;
-	assert(state->map[ny][nx]==0, "Bad coordinates");
-	int res = state->perform((Action)step.action);
-	assert(res>0, "Replay failed");
-	*frame += steps * DELAY_MOVE + res;
-	return steps; // not counting actual action
-}
+#include STRINGIZE(PROBLEM.cpp)
+
+// ******************************************************************************************************
+
+State initialState, blankState;
 
 // ******************************************************************************************************
 
@@ -746,78 +774,6 @@ FRAME_GROUP currentFrameGroup;
 
 // ******************************************************************************************************
 
-template <class CHILD_HANDLER>
-void expandChildren(FRAME frame, const State* state)
-{
-	struct Coord { BYTE x, y; };
-	const int QUEUELENGTH = X+Y;
-	Coord queue[QUEUELENGTH];
-	BYTE distance[Y-2][X-2];
-	uint32_t queueStart=0, queueEnd=1;
-	memset(distance, 0xFF, sizeof(distance));
-	
-	BYTE x0 = state->players[state->activePlayer].x;
-	BYTE y0 = state->players[state->activePlayer].y;
-	queue[0].x = x0;
-	queue[0].y = y0;
-	distance[y0-1][x0-1] = 0;
-
-	State newState = *state;
-	Player* np = &newState.players[newState.activePlayer];
-	while(queueStart != queueEnd)
-	{
-		Coord c = queue[queueStart];
-		queueStart = (queueStart+1) % QUEUELENGTH;
-		BYTE dist = distance[c.y-1][c.x-1];
-		Step step;
-		step.x = c.x-1;
-		step.y = c.y-1;
-		step.extraSteps = dist - (abs((int)c.x - (int)x0) + abs((int)c.y - (int)y0));
-
-		#if (PLAYERS>1)
-			np->x = c.x;
-			np->y = c.y;
-			int res = newState.perform(SWITCH);
-			assert(res == DELAY_SWITCH);
-			step.action = (unsigned)SWITCH;
-			CHILD_HANDLER::handleChild(&newState, step, frame + dist * DELAY_MOVE + DELAY_SWITCH);
-			newState = *state;
-		#endif
-
-		for (Action action = ACTION_FIRST; action < SWITCH; action++)
-		{
-			BYTE nx = c.x + DX[action];
-			BYTE ny = c.y + DY[action];
-			BYTE m = newState.map[ny][nx];
-			if (m & OBJ_MASK)
-			{
-				np->x = c.x;
-				np->y = c.y;
-				int res = newState.perform(action);
-				if (res > 0)
-				{
-					step.action = /*(unsigned)*/action;
-					CHILD_HANDLER::handleChild(&newState, step, frame + dist * DELAY_MOVE + res);
-				}
-				if (res >= 0)
-					newState = *state;
-			}
-			else
-			if ((m & CELL_MASK) == 0)
-				if (distance[ny-1][nx-1] == 0xFF)
-				{
-					distance[ny-1][nx-1] = dist+1;
-					queue[queueEnd].x = nx;
-					queue[queueEnd].y = ny;
-					queueEnd = (queueEnd+1) % QUEUELENGTH;
-					assert(queueEnd != queueStart, "Queue overflow");
-				}
-		}
-	}
-}
-
-// ******************************************************************************************************
-
 bool exitFound;
 FRAME exitFrame;
 State exitState;
@@ -832,7 +788,7 @@ void processState(const CompressedState* cs)
 	assert(test == *cs, "Compression/decompression failed");
 #endif
 	FRAME currentFrame = currentFrameGroup*10 + cs->subframe;
-	if (s.playersLeft()==0)
+	if (s.isFinish())
 	{
 		if (exitFound)
 		{
@@ -1002,20 +958,8 @@ void traceExit()
 found:
 
 	FILE* f = fopen(format("%u.txt", LEVEL), "wt");
-	steps[stepNr].action = NONE;
-	steps[stepNr].x = initialState.players[0].x-1;
-	steps[stepNr].y = initialState.players[0].y-1;
-	unsigned int totalSteps = 0;
-	State state = initialState;
-	FRAME frame = 0;
-	while (stepNr)
-	{
-		fprintf(f, "@%u,%u: %s\n%s", steps[stepNr].x+1, steps[stepNr].y+1, actionNames[steps[stepNr].action], state.toString());
-		totalSteps += (steps[stepNr].action<SWITCH ? 1 : 0) + replayStep(&state, &frame, steps[--stepNr]);
-	}
-	// last one
-	fprintf(f, "@%u,%u: %s\n%s", steps[0].x+1, steps[0].y+1, actionNames[steps[0].action], state.toString());
-	fprintf(f, "Total steps: %u", totalSteps);
+	writeSolution(f, steps, stepNr);
+	fclose(f);
 }
 
 // ******************************************************************************************************
@@ -1807,7 +1751,7 @@ void parseFrameRange(int argc, const char* argv[])
 }
 
 const char* usage = "\
-Kwirk C++ DDD solver\n\
+Generic C++ DDD solver\n\
 (c) 2009-2010 Vladimir \"CyberShadow\" Panteleev\n\
 Usage:\n\
 	search <mode> <parameters>\n\
@@ -1867,15 +1811,11 @@ inclusively.\n\
 
 int run(int argc, const char* argv[])
 {
-	printf("Level %u: %ux%u, %u players\n", LEVEL, X, Y, PLAYERS);
-
 	enforce(sizeof(intptr_t)==sizeof(size_t), "Bad intptr_t!");
 	enforce(sizeof(int)==4, "Bad int!");
 	enforce(sizeof(long long)==8, "Bad long long!");
 
-#ifdef HAVE_VALIDATOR
-	printf("Level state validator present\n");
-#endif
+	initProblem();
 
 #ifdef DEBUG
 	printf("Debug version\n");

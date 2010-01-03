@@ -1,3 +1,8 @@
+// Kwirk DDD module
+// Configuration:
+// LEVEL - sets the level to solve, from 0 (1-1) to 29 (3-10)
+
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,55 +13,6 @@
 #include <boost/preprocessor/stringize.hpp>
 
 #include BOOST_PP_STRINGIZE(Levels/LEVEL.h)
-
-void error(const char* message = NULL)
-{
-	if (message)
-		throw message;
-	else
-		throw "Unspecified error";
-}
-
-const char* format(const char *fmt, ...)
-{    
-	va_list argptr;
-	va_start(argptr,fmt);
-	//static char buf[1024];
-	//char* buf = (char*)malloc(1024);
-	static char buffers[16][1024];
-	static int bufIndex = 0;
-	char* buf = buffers[bufIndex++ % 16];
-	vsprintf(buf, fmt, argptr);
-	va_end(argptr);
-	return buf;
-}
-
-const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; }
-
-// enforce - check condition in both DEBUG/RELEASE, error() on fail
-// assert - check condition in DEBUG builds, try to instruct compiler to assume the condition is true in RELEASE builds
-// debug_assert - check condition in DEBUG builds, do nothing in RELEASE builds (classic ASSERT)
-
-#define enforce(expr,...) while(!(expr)){error(defaultstr(format("Check failed at %s:%d", __FILE__,  __LINE__), __VA_ARGS__));throw "Unreachable";}
-
-#undef assert
-#ifdef DEBUG
-#define assert enforce
-#define debug_assert enforce
-#define INLINE
-#else
-#if defined(_MSC_VER)
-#define assert(expr,...) __assume((expr)!=0)
-#define INLINE __forceinline
-#elif defined(__GNUC__)
-#define assert(expr,...) __builtin_expect(!(expr),0)
-#define INLINE inline
-#else
-#error Unknown compiler
-#endif
-#define debug_assert(...) do{}while(0)
-#endif
-
 
 #if (X-2<=4)
 #define XBITS 2
@@ -124,11 +80,9 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 
 #define OBJ_EXIT          0x20
 
-typedef unsigned char BYTE;
-
 enum Action
 #ifndef __GNUC__
- : BYTE
+ : uint8_t
 #endif
 {
 	UP,
@@ -161,7 +115,7 @@ const char DR[4+1] = "^>`<";
 
 struct Player
 {
-	BYTE x, y;
+	uint8_t x, y;
 	
 	INLINE void set(int x, int y) { this->x = x; this->y = y; }
 	INLINE bool exited() const { return x==INVALID_X+1; }
@@ -281,26 +235,26 @@ const char* dumpCompressedState(const CompressedState* cs)
 }
 
 #if (BLOCKS > 0)
-struct { BYTE x, y; } blockSize[BLOCKS];
+struct { uint8_t x, y; } blockSize[BLOCKS];
 int blockSizeIndex[BLOCKY][BLOCKX];
 #endif
 #if (ROTATORS > 0)
-struct { BYTE x, y; } rotators[ROTATORS];
+struct { uint8_t x, y; } rotators[ROTATORS];
 #endif
 #if (HOLES > 0)
-struct { BYTE x, y; } holes[HOLES];
+struct { uint8_t x, y; } holes[HOLES];
 #endif
 bool holeMap[Y][X];
 
 struct State
 {
-	BYTE map[Y][X];
+	uint8_t map[Y][X];
 	Player players[PLAYERS];
 	
 #if (PLAYERS==1)
 	enum { activePlayer = 0 };
 #else
-	BYTE activePlayer;
+	uint8_t activePlayer;
 #endif
 	
 	/// Returns frame delay, 0 if move is invalid and the state was altered, -1 if move is invalid and the state was not altered
@@ -324,8 +278,8 @@ struct State
 		Player n, p = players[activePlayer];
 		n.x = p.x + DX[action];
 		n.y = p.y + DY[action];
-		BYTE dmap = map[n.y][n.x];
-		BYTE dobj = dmap & OBJ_MASK;
+		uint8_t dmap = map[n.y][n.x];
+		uint8_t dobj = dmap & OBJ_MASK;
 		if (dobj == OBJ_EXIT)
 		{
 			players[activePlayer] = n;
@@ -349,7 +303,7 @@ struct State
 		if (dobj <= OBJ_BLOCKMAX)
 		{
 			// find block bounds
-			BYTE x1=n.x, y1=n.y, x2=n.x, y2=n.y;
+			uint8_t x1=n.x, y1=n.y, x2=n.x, y2=n.y;
 			while (!(map[n.y][x1] & OBJ_BLOCKLEFT )) x1--;
 			while (!(map[n.y][x2] & OBJ_BLOCKRIGHT)) x2++;
 			while (!(map[y1][n.x] & OBJ_BLOCKUP   )) y1--;
@@ -426,24 +380,24 @@ struct State
 			char dd = (char)action - rd; // rotation direction: 1=clockwise, -1=CCW
 			if (dd<0) dd+=4;
 			char rd2 = (rd+2)%4;
-			BYTE rx = n.x+DX[rd2]; // rotator center coords
-			BYTE ry = n.y+DY[rd2];
+			uint8_t rx = n.x+DX[rd2]; // rotator center coords
+			uint8_t ry = n.y+DY[rd2];
 			// check for obstacles
 			bool oldFlippers[4], newFlippers[4];
 			for (char d=0;d<4;d++)
 			{
-				BYTE d2 = (d+dd)%4; // rotated direction
+				uint8_t d2 = (d+dd)%4; // rotated direction
 				if ((map[ry+DY[d]][rx+DX[d]] & OBJ_MASK) == OBJ_ROTATORUP + d)
 				{
 					oldFlippers[d ] =
 					newFlippers[d2] = true;
 					if (map[ry+DY[d]+DY[d2]][rx+DX[d]+DX[d2]] & (CELL_WALL | OBJ_MASK))                   // no object/wall in corner
 						return -1;
-					BYTE d2m = 
+					uint8_t d2m = 
 					    map[ry+      DY[d2]][rx+      DX[d2]];
 					if (d2m & CELL_WALL)
 						return -1;
-					BYTE d2obj = d2m & OBJ_MASK;
+					uint8_t d2obj = d2m & OBJ_MASK;
 					if (d2obj                                   != OBJ_ROTATORUP + d2 &&       // no object in destination (other than part of the rotator)
 					    d2obj                                   != OBJ_NONE)
 					    return -1;
@@ -456,7 +410,7 @@ struct State
 			for (char d=0;d<4;d++)
 				if (!oldFlippers[d] && newFlippers[d])
 				{
-					BYTE* m = &map[ry+DY[d]][rx+DX[d]];
+					uint8_t* m = &map[ry+DY[d]][rx+DX[d]];
 					*m = (*m & CELL_MASK) | (OBJ_ROTATORUP + d);
 				}
 				else
@@ -490,19 +444,24 @@ struct State
 #endif
 	}
 
-	INLINE BYTE playersLeft() const
+	INLINE uint8_t playersLeft() const
 	{
-		return (BYTE)!players[0].exited()
+		return (uint8_t)!players[0].exited()
 #if (PLAYERS>1)
-			+  (BYTE)!players[1].exited()
+			+  (uint8_t)!players[1].exited()
 #endif
 #if (PLAYERS>2)
-			+  (BYTE)!players[2].exited()
+			+  (uint8_t)!players[2].exited()
 #endif
 #if (PLAYERS>3)
-			+  (BYTE)!players[3].exited()
+			+  (uint8_t)!players[3].exited()
 #endif
 			;
+	}
+
+	INLINE bool isFinish() const
+	{
+		return playersLeft()==0;
 	}
 
 	#ifdef HAVE_VALIDATOR
@@ -619,10 +578,10 @@ struct State
 						break;
 					case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I': case 'J': case 'K': case 'L': case 'M': case 'N':           case 'P': case 'Q': case 'R': case 'S': case 'T': case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
 					{
-						BYTE neighbors[4];
-						BYTE neighborCount = 0;
+						uint8_t neighbors[4];
+						uint8_t neighborCount = 0;
 						bool isCenter = false;
-						for (BYTE d=0;d<4;d++)
+						for (uint8_t d=0;d<4;d++)
 						{
 							char c2 = level[y+DY[d]][x+DX[d]];
 							if (c2==DR[d])
@@ -649,7 +608,7 @@ struct State
 			for (int x=0;x<X;x++)
 				if (map[y][x] >= OBJ_ROTATORUP && map[y][x] <= OBJ_ROTATORLEFT)
 				{
-					BYTE d = (map[y][x]-OBJ_ROTATORUP+2)%4;
+					uint8_t d = (map[y][x]-OBJ_ROTATORUP+2)%4;
 					enforce(map[y+DY[d]][x+DX[d]] == OBJ_ROTATORCENTER, "Invalid rotator configuration");
 				}
 				else
@@ -702,7 +661,7 @@ struct State
 		
 		#if (BLOCKS > 0)
 		int seenBlocks = 0;
-		struct { BYTE x, y; } blocks[BLOCKS];
+		struct { uint8_t x, y; } blocks[BLOCKS];
 		int blockSizeCount[BLOCKY][BLOCKX];
 		
 		memset(blocks, 0xFF, sizeof blocks);
@@ -720,7 +679,7 @@ struct State
 		for (int y=1;y<Y-1;y++)
 			for (int x=1;x<X-1;x++)
 			{
-				BYTE m = map[y][x];
+				uint8_t m = map[y][x];
 
 				#if (BLOCKS > 0)
 				if ((m & (OBJ_BLOCKUP | OBJ_BLOCKLEFT)) == (OBJ_BLOCKUP | OBJ_BLOCKLEFT))
@@ -813,18 +772,18 @@ struct State
 		#define BOOST_PP_LOCAL_LIMITS (0, BLOCKS-1)
 		#define BOOST_PP_LOCAL_MACRO(n) \
 		{ \
-			BYTE x1 = s->BOOST_PP_CAT(block, BOOST_PP_CAT(n, x)); \
-			BYTE y1 = s->BOOST_PP_CAT(block, BOOST_PP_CAT(n, y)); \
+			uint8_t x1 = s->BOOST_PP_CAT(block, BOOST_PP_CAT(n, x)); \
+			uint8_t y1 = s->BOOST_PP_CAT(block, BOOST_PP_CAT(n, y)); \
 			if (x1 != INVALID_X || y1 != INVALID_Y) \
 			{ \
 				/* Hack: increment x and y after decrementing */ \
 				x1++; y1++; \
-				BYTE x2 = x1 + blockSize[n].x; \
-				BYTE y2 = y1 + blockSize[n].y; \
-				for (BYTE x=x1; x<=x2; x++) \
+				uint8_t x2 = x1 + blockSize[n].x; \
+				uint8_t y2 = y1 + blockSize[n].y; \
+				for (uint8_t x=x1; x<=x2; x++) \
 					map[y1][x] |= OBJ_BLOCKUP, \
 					map[y2][x] |= OBJ_BLOCKDOWN; \
-				for (BYTE y=y1; y<=y2; y++) \
+				for (uint8_t y=y1; y<=y2; y++) \
 					map[y][x1] |= OBJ_BLOCKLEFT, \
 					map[y][x2] |= OBJ_BLOCKRIGHT; \
 			} \
@@ -836,8 +795,8 @@ struct State
 		#define BOOST_PP_LOCAL_LIMITS (0, ROTATORS-1)
 		#define BOOST_PP_LOCAL_MACRO(n) \
 		{ \
-			BYTE x = rotators[n].x; \
-			BYTE y = rotators[n].y; \
+			uint8_t x = rotators[n].x; \
+			uint8_t y = rotators[n].y; \
 			map[y][x] |= OBJ_ROTATORCENTER; \
 			if (s->BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, u))) map[y-1][x  ] |= OBJ_ROTATORUP;    \
 			if (s->BOOST_PP_CAT(rotator, BOOST_PP_CAT(n, r))) map[y  ][x+1] |= OBJ_ROTATORRIGHT; \
@@ -937,4 +896,140 @@ struct State
 INLINE bool operator==(const State& a, const State& b)
 {
 	return memcmp(&a, &b, sizeof (State))==0;
+}
+
+// ******************************************************************************************************
+
+// Defines a move within the graph. x and y are the player's position after movement (used to collapse multiple movement steps that don't change the level layout)
+//#pragma pack(1)
+struct Step
+{
+	Action action;
+	uint8_t x;
+	uint8_t y;
+	uint8_t extraSteps;
+
+	const char* toString()
+	{
+		return format("@%u,%u: %s", x+1, y+1, actionNames[action]);
+	}
+};
+
+INLINE int replayStep(State* state, FRAME* frame, Step step)
+{
+	Player* p = &state->players[state->activePlayer];
+	int nx = step.x+1;
+	int ny = step.y+1;
+	int steps = abs((int)p->x - nx) + abs((int)p->y - ny) + step.extraSteps;
+	p->x = nx;
+	p->y = ny;
+	assert(state->map[ny][nx]==0, "Bad coordinates");
+	int res = state->perform((Action)step.action);
+	assert(res>0, "Replay failed");
+	*frame += steps * DELAY_MOVE + res;
+	return steps; // not counting actual action
+}
+
+// ******************************************************************************************************
+
+template <class CHILD_HANDLER>
+void expandChildren(FRAME frame, const State* state)
+{
+	struct Coord { uint8_t x, y; };
+	const int QUEUELENGTH = X+Y;
+	Coord queue[QUEUELENGTH];
+	uint8_t distance[Y-2][X-2];
+	uint32_t queueStart=0, queueEnd=1;
+	memset(distance, 0xFF, sizeof(distance));
+	
+	uint8_t x0 = state->players[state->activePlayer].x;
+	uint8_t y0 = state->players[state->activePlayer].y;
+	queue[0].x = x0;
+	queue[0].y = y0;
+	distance[y0-1][x0-1] = 0;
+
+	State newState = *state;
+	Player* np = &newState.players[newState.activePlayer];
+	while(queueStart != queueEnd)
+	{
+		Coord c = queue[queueStart];
+		queueStart = (queueStart+1) % QUEUELENGTH;
+		uint8_t dist = distance[c.y-1][c.x-1];
+		Step step;
+		step.x = c.x-1;
+		step.y = c.y-1;
+		step.extraSteps = dist - (abs((int)c.x - (int)x0) + abs((int)c.y - (int)y0));
+
+		#if (PLAYERS>1)
+			np->x = c.x;
+			np->y = c.y;
+			int res = newState.perform(SWITCH);
+			assert(res == DELAY_SWITCH);
+			step.action = (unsigned)SWITCH;
+			CHILD_HANDLER::handleChild(&newState, step, frame + dist * DELAY_MOVE + DELAY_SWITCH);
+			newState = *state;
+		#endif
+
+		for (Action action = ACTION_FIRST; action < SWITCH; action++)
+		{
+			uint8_t nx = c.x + DX[action];
+			uint8_t ny = c.y + DY[action];
+			uint8_t m = newState.map[ny][nx];
+			if (m & OBJ_MASK)
+			{
+				np->x = c.x;
+				np->y = c.y;
+				int res = newState.perform(action);
+				if (res > 0)
+				{
+					step.action = /*(unsigned)*/action;
+					CHILD_HANDLER::handleChild(&newState, step, frame + dist * DELAY_MOVE + res);
+				}
+				if (res >= 0)
+					newState = *state;
+			}
+			else
+			if ((m & CELL_MASK) == 0)
+				if (distance[ny-1][nx-1] == 0xFF)
+				{
+					distance[ny-1][nx-1] = dist+1;
+					queue[queueEnd].x = nx;
+					queue[queueEnd].y = ny;
+					queueEnd = (queueEnd+1) % QUEUELENGTH;
+					assert(queueEnd != queueStart, "Queue overflow");
+				}
+		}
+	}
+}
+
+// ******************************************************************************************************
+
+void writeSolution(FILE* f, Step steps[], int stepNr)
+{
+	steps[stepNr].action = NONE;
+	steps[stepNr].x = initialState.players[0].x-1;
+	steps[stepNr].y = initialState.players[0].y-1;
+	unsigned int totalSteps = 0;
+	State state = initialState;
+	FRAME frame = 0;
+	while (stepNr)
+	{
+		fprintf(f, "%s\n", steps[stepNr].toString());
+		fprintf(f, "%s", state.toString());
+		totalSteps += (steps[stepNr].action<SWITCH ? 1 : 0) + replayStep(&state, &frame, steps[--stepNr]);
+	}
+	// last one
+	fprintf(f, "%s\n%s", steps[0].toString(), state.toString());
+	fprintf(f, "Total steps: %u", totalSteps);
+}
+
+// ******************************************************************************************************
+
+void initProblem()
+{
+	printf("Kwirk Level %u (%d-%d): %ux%u, %u players\n", LEVEL, LEVEL/10+1, LEVEL%10+1, X, Y, PLAYERS);
+
+#ifdef HAVE_VALIDATOR
+	printf("Level state validator present\n");
+#endif
 }
