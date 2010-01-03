@@ -738,14 +738,75 @@ FRAME_GROUP currentFrameGroup;
 
 // ******************************************************************************************************
 
-INLINE void addStateStep(const State* state, Step step, FRAME frame)
+template <class CHILD_HANDLER>
+void expandChildren(FRAME frame, const State* state)
 {
-	addState(state, frame);
-}
+	struct Coord { BYTE x, y; };
+	const int QUEUELENGTH = X+Y;
+	Coord queue[QUEUELENGTH];
+	BYTE distance[Y-2][X-2];
+	uint32_t queueStart=0, queueEnd=1;
+	memset(distance, 0xFF, sizeof(distance));
+	
+	BYTE x0 = state->players[state->activePlayer].x;
+	BYTE y0 = state->players[state->activePlayer].y;
+	queue[0].x = x0;
+	queue[0].y = y0;
+	distance[y0-1][x0-1] = 0;
 
-#define EXPAND_NAME addChildren
-#define EXPAND_HANDLE_CHILD addStateStep
-#include "expand.cpp"
+	State newState = *state;
+	Player* np = &newState.players[newState.activePlayer];
+	while(queueStart != queueEnd)
+	{
+		Coord c = queue[queueStart];
+		queueStart = (queueStart+1) % QUEUELENGTH;
+		BYTE dist = distance[c.y-1][c.x-1];
+		Step step;
+		step.x = c.x-1;
+		step.y = c.y-1;
+		step.extraSteps = dist - (abs((int)c.x - (int)x0) + abs((int)c.y - (int)y0));
+
+		#if (PLAYERS>1)
+			np->x = c.x;
+			np->y = c.y;
+			int res = newState.perform(SWITCH);
+			assert(res == DELAY_SWITCH);
+			step.action = (unsigned)SWITCH;
+			CHILD_HANDLER::handleChild(&newState, step, frame + dist * DELAY_MOVE + DELAY_SWITCH);
+			newState = *state;
+		#endif
+
+		for (Action action = ACTION_FIRST; action < SWITCH; action++)
+		{
+			BYTE nx = c.x + DX[action];
+			BYTE ny = c.y + DY[action];
+			BYTE m = newState.map[ny][nx];
+			if (m & OBJ_MASK)
+			{
+				np->x = c.x;
+				np->y = c.y;
+				int res = newState.perform(action);
+				if (res > 0)
+				{
+					step.action = /*(unsigned)*/action;
+					CHILD_HANDLER::handleChild(&newState, step, frame + dist * DELAY_MOVE + res);
+				}
+				if (res >= 0)
+					newState = *state;
+			}
+			else
+			if ((m & CELL_MASK) == 0)
+				if (distance[ny-1][nx-1] == 0xFF)
+				{
+					distance[ny-1][nx-1] = dist+1;
+					queue[queueEnd].x = nx;
+					queue[queueEnd].y = ny;
+					queueEnd = (queueEnd+1) % QUEUELENGTH;
+					assert(queueEnd != queueStart, "Queue overflow");
+				}
+		}
+	}
+}
 
 // ******************************************************************************************************
 
@@ -781,7 +842,17 @@ void processState(const CompressedState* cs)
 		}
 		return;
 	}
-	addChildren(currentFrame, &s);
+
+	class AddStateChildHandler
+	{
+	public:
+		static INLINE void handleChild(const State* state, Step step, FRAME frame)
+		{
+			addState(state, frame);
+		}
+	};
+
+	expandChildren<AddStateChildHandler>(currentFrame, &s);
 }
 
 #ifdef MULTITHREADING
@@ -856,18 +927,18 @@ FRAME exitSearchStateFrame;
 Step exitSearchStateStep;
 bool exitSearchStateFound = false;
 
-INLINE void checkState(const State* state, Step step, FRAME frame)
+class FinishCheckChildHandler
 {
-	if (*state==exitSearchState && frame==exitSearchStateFrame)
+public:
+	static INLINE void handleChild(const State* state, Step step, FRAME frame)
 	{
-		exitSearchStateFound = true;
-		exitSearchStateStep = step;
+		if (*state==exitSearchState && frame==exitSearchStateFrame)
+		{
+			exitSearchStateFound = true;
+			exitSearchStateStep = step;
+		}
 	}
-}
-
-#define EXPAND_NAME checkChildren
-#define EXPAND_HANDLE_CHILD checkState
-#include "expand.cpp"
+};
 
 void traceExit()
 {
@@ -893,7 +964,7 @@ void traceExit()
 					State state = blankState;
 					state.decompress(&cs);
 					FRAME frame = frameGroup*10 + cs.subframe;
-					checkChildren(frame, &state);
+					expandChildren<FinishCheckChildHandler>(frame, &state);
 					if (exitSearchStateFound)
 					{
 						printf("Found (at %d)!          \n", frame);
