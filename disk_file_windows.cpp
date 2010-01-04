@@ -85,7 +85,7 @@ public:
 		while (bytes < total) // write in 1GB chunks
 		{
 			size_t left = total-bytes;
-			DWORD chunk = left > 0x40000000 ? 0x40000000 : left;
+			DWORD chunk = left > 0x40000000 ? 0x40000000 : (DWORD)left;
 			DWORD r;
 			BOOL b = WriteFile(archive, data + bytes, chunk, &r, NULL);
 			if (!b)
@@ -128,7 +128,7 @@ public:
 		while (bytes < total) // read in 1GB chunks
 		{
 			size_t left = total-bytes;
-			DWORD chunk = left > 0x40000000 ? 0x40000000 : left;
+			DWORD chunk = left > 0x40000000 ? 0x40000000 : (DWORD)left;
 			DWORD r = 0;
 			BOOL b = ReadFile(archive, data + bytes, chunk, &r, NULL);
 			if ((!b && GetLastError() == ERROR_HANDLE_EOF) || (b && r==0))

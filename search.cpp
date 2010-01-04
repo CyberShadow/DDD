@@ -93,6 +93,16 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 #define debug_assert(...) do{}while(0)
 #endif
 
+const char* hexDump(const void* data, size_t size)
+{
+	static char buf[1024];
+	enforce(size*3+1 < 1024);
+	const uint8_t* s = (const uint8_t*)data;
+	for (size_t x=0; x<size; x++)
+		sprintf(buf+x*3, "%02X ", s[x]);
+	return buf;
+}
+
 #define DO_STRINGIZE(x) #x
 #define STRINGIZE(x) DO_STRINGIZE(x)
 
@@ -100,7 +110,11 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 
 typedef int32_t FRAME;
 typedef int32_t FRAME_GROUP;
+#if (MAX_FRAMES<65536)
 typedef int16_t PACKED_FRAME;
+#else
+typedef int32_t PACKED_FRAME;
+#endif
 
 // ******************************************************************************************************
 
@@ -168,7 +182,7 @@ INLINE bool operator>=(const CompressedState& a, const CompressedState& b) { ret
 
 #define FRAMES_PER_GROUP 1
 #define GET_FRAME(frameGroup, cs) (frameGroup)
-#define SET_SUBFRAME(cs, frame) void
+#define SET_SUBFRAME(cs, frame)
 #define GROUP_STR ""
 #define GROUP_FORMAT "%u"
 
@@ -215,9 +229,14 @@ protected:
 	Node* buf;
 	int pos;
 
-	Buffer() : pos(0)
+	Buffer() : pos(0), buf(NULL)
 	{
-		buf = new Node[STREAM_BUFFER_SIZE];
+	}
+
+	void allocate()
+	{
+		if (!buf)
+			buf = new Node[STREAM_BUFFER_SIZE];
 	}
 
 	~Buffer()
@@ -239,7 +258,7 @@ public:
 };
 
 template<class STREAM>
-class WriteBuffer : Buffer, virtual public BufferedStreamBase<STREAM>
+class WriteBuffer : protected Buffer, virtual public BufferedStreamBase<STREAM>
 {
 public:
 	void write(const Node* p, bool verify=false)
@@ -286,7 +305,7 @@ public:
 };
 
 template<class STREAM>
-class ReadBuffer : Buffer, virtual public BufferedStreamBase<STREAM>
+class ReadBuffer : protected Buffer, virtual public BufferedStreamBase<STREAM>
 {
 	int end;
 public:
@@ -311,7 +330,7 @@ public:
 	{
 		pos = 0;
 		uint64_t left = s.size() - s.position();
-		end = s.read(buf, (size_t)(left < STREAM_BUFFER_SIZE ? left : STREAM_BUFFER_SIZE));
+		end = (int)s.read(buf, (size_t)(left < STREAM_BUFFER_SIZE ? left : STREAM_BUFFER_SIZE));
 	}
 };
 
@@ -320,7 +339,7 @@ class BufferedInputStream : public ReadBuffer<InputStream>
 public:
 	BufferedInputStream() {}
 	BufferedInputStream(const char* filename) { open(filename); }
-	void open(const char* filename) { s.open(filename); }
+	void open(const char* filename) { s.open(filename); allocate(); }
 };
 
 class BufferedOutputStream : public WriteBuffer<OutputStream>
@@ -328,7 +347,7 @@ class BufferedOutputStream : public WriteBuffer<OutputStream>
 public:
 	BufferedOutputStream() {}
 	BufferedOutputStream(const char* filename, bool resume=false) { open(filename, resume); }
-	void open(const char* filename, bool resume=false) { s.open(filename, resume); }
+	void open(const char* filename, bool resume=false) { s.open(filename, resume); allocate(); }
 };
 
 class BufferedRewriteStream : public ReadBuffer<RewriteStream>, public WriteBuffer<RewriteStream>
@@ -336,7 +355,7 @@ class BufferedRewriteStream : public ReadBuffer<RewriteStream>, public WriteBuff
 public:
 	BufferedRewriteStream() {}
 	BufferedRewriteStream(const char* filename) { open(filename); }
-	void open(const char* filename) { s.open(filename); }
+	void open(const char* filename) { s.open(filename); ReadBuffer<RewriteStream>::allocate(); WriteBuffer<RewriteStream>::allocate(); }
 	void truncate() { s.truncate(); }
 };
 
@@ -740,6 +759,8 @@ MUTEX cacheMutex[PARTITIONS];
 void queueState(CompressedState* state, FRAME frame)
 {
 	FRAME_GROUP group = frame/FRAMES_PER_GROUP;
+	if (group >= MAX_FRAME_GROUPS)
+		return;
 	if (noQueue[group])
 		return;
 	SET_SUBFRAME(*state, frame);
@@ -792,8 +813,12 @@ void addState(const State* state, FRAME frame)
 	test.decompress(&cs);
 	if (!(test == *state))
 	{
-		printf("%s\n", state->toString());
-		printf("%s\n", test.toString());
+		puts("");
+		puts(hexDump(state, sizeof(State)));
+		puts(state->toString());
+		puts(hexDump(&cs, sizeof(CompressedState)));
+		puts(hexDump(&test, sizeof(State)));
+		puts(test.toString());
 		error("Compression/decompression failed");
 	}
 #endif
@@ -1024,9 +1049,7 @@ void traceExit()
 	error("Lost parent node!");
 found:
 
-	FILE* f = fopen(formatProblemFileName(NULL, NULL, "txt"), "wt");
-	writeSolution(f, &exitSearchState, steps, stepNr);
-	fclose(f);
+	writeSolution(&exitSearchState, steps, stepNr);
 }
 
 // ******************************************************************************************************
@@ -1175,7 +1198,7 @@ int search()
 #else
 		{
 			BufferedInputStream* source = new BufferedInputStream(formatFileName("merged", currentFrameGroup));
-			BufferedInputStream inputs[MAX_FRAME_GROUPS];
+			BufferedInputStream* inputs = new BufferedInputStream[MAX_FRAME_GROUPS];
 			int inputCount = 0;
 			for (FRAME_GROUP g=0; g<currentFrameGroup; g++)
 				if (fileExists(formatFileName("closed", g)))
@@ -1186,11 +1209,17 @@ int search()
 					else
 						inputs[inputCount].close();
 				}
+			if (fileExists(formatFileName("closing", currentFrameGroup)))
+			{
+				//printf("Overwriting %s\n", formatFileName("closing", currentFrameGroup));
+				deleteFile(formatFileName("closing", currentFrameGroup));
+			}
 			BufferedOutputStream* output = new BufferedOutputStream(formatFileName("closing", currentFrameGroup));
 			filterStream<ProcessStateHandler>(source, inputs, inputCount, output);
 			delete source;
 			output->flush(); // force disk flush
 			delete output;
+			delete[] inputs;
 			deleteFile(formatFileName("merged", currentFrameGroup));
 		}
 #endif
@@ -1617,7 +1646,7 @@ int seqFilterOpen()
 			};
 
 			BufferedInputStream* source = new BufferedInputStream(formatFileName("merged", currentFrameGroup));
-			BufferedInputStream inputs[MAX_FRAME_GROUPS];
+			BufferedInputStream* inputs = new BufferedInputStream[MAX_FRAME_GROUPS];
 			int inputCount = 0;
 			for (FRAME_GROUP g=0; g<currentFrameGroup; g++)
 			{
@@ -1638,6 +1667,7 @@ int seqFilterOpen()
 			delete source;
 			output->flush(); // force disk flush
 			delete output;
+			delete[] inputs;
 			deleteFile(formatFileName("merged", currentFrameGroup));
 		}
 
@@ -1671,7 +1701,7 @@ void filterStreams(BufferedInputStream closed[], int closedCount, BufferedRewrit
 		FRAME lowestFrame = MAX_FRAMES;
 		do
 		{
-			FRAME_GROUP group = openHeap.getHeadInput() - open;
+			FRAME_GROUP group = (FRAME_GROUP)(openHeap.getHeadInput() - open);
 			FRAME frame = GET_FRAME(group, *openHeap.getHead());
 			if (lowestFrame > frame)
 				lowestFrame = frame;
@@ -1697,8 +1727,8 @@ void filterStreams(BufferedInputStream closed[], int closedCount, BufferedRewrit
 
 int filterOpen()
 {
-	BufferedInputStream closed[MAX_FRAME_GROUPS];
-	BufferedRewriteStream open[MAX_FRAME_GROUPS];
+	BufferedInputStream* closed = new BufferedInputStream[MAX_FRAME_GROUPS];
+	BufferedRewriteStream* open = new BufferedRewriteStream[MAX_FRAME_GROUPS];
 	
 	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
 	{
@@ -1714,6 +1744,9 @@ int filterOpen()
 	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++) // on success, truncate open nodes manually
 		if (open[g].isOpen())
 			open[g].truncate();
+	
+	delete[] open;
+	delete[] closed;
 	return 0;
 }
 

@@ -127,7 +127,7 @@ struct Step
 };
 
 /// Private function.
-INLINE void replayStep(State* state, FRAME* frame, Step step)
+void replayStep(State* state, FRAME* frame, Step step)
 {
 	int res = state->perform((Action)step.action);
 	assert(res>0, "Replay failed");
@@ -166,9 +166,10 @@ const char* formatProblemFileName(const char* name, const char* detail, const ch
 
 // ******************************************************************************************************
 
-/// Apply series of steps to initialState, write each intermediate step. Used for writing the final solution.
-void writeSolution(FILE* f, const State* initialState, Step steps[], int stepNr)
+/// Called with the initial state and following steps that lead from it until a finish state. Use to save the solution.
+void writeSolution(const State* initialState, Step steps[], int stepNr)
 {
+	FILE* f = fopen(formatProblemFileName("solution", NULL, "txt"), "wt");
 	steps[stepNr].action = NONE;
 	State state = *initialState;
 	FRAME frame = 0;
@@ -180,6 +181,7 @@ void writeSolution(FILE* f, const State* initialState, Step steps[], int stepNr)
 	}
 	// last one
 	fprintf(f, "%s\n%s", steps[0].toString(), state.toString());
+	fclose(f);
 }
 
 // ******************************************************************************************************
