@@ -1026,13 +1026,13 @@ void traceExit()
 			{
 				printf("Frame" GROUP_STR " " GROUP_FORMAT "... \r", frameGroup);
 				// TODO: parallelize?
-				InputStream input(formatFileName("closed", frameGroup));
-				CompressedState cs;
-				while (input.read(&cs, 1))
+				BufferedInputStream input(formatFileName("closed", frameGroup));
+				const CompressedState *cs;
+				while (cs = input.read())
 				{
 					State state;
-					state.decompress(&cs);
-					FRAME frame = GET_FRAME(frameGroup, cs);
+					state.decompress(cs);
+					FRAME frame = GET_FRAME(frameGroup, *cs);
 					expandChildren<FinishCheckChildHandler>(frame, &state);
 					if (exitSearchStateFound)
 					{
@@ -1109,7 +1109,7 @@ bool checkStop()
 	if (fileExists(formatProblemFileName("stop", NULL, "txt")))
 	{
 		deleteFile(formatProblemFileName("stop", NULL, "txt"));
-		printf("Stop file found.\n");
+		printTime(); printf("Stop file found.\n");
 		return true;
 	}
 	return false;
