@@ -856,7 +856,11 @@ void flushQueue()
 {
 	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
 		if (queue[g])
+#if defined(PROFILE) || defined(DEBUG)
+			queue[g]->flushBuffer();
+#else
 			queue[g]->flush();
+#endif
 }
 
 // ******************************************************************************************************
@@ -1054,10 +1058,13 @@ found:
 
 // ******************************************************************************************************
 
+size_t ramUsed;
+
 void sortAndMerge(FRAME_GROUP g)
 {
 	// Step 1: read chunks of BUFFER_SIZE nodes, sort+dedup them in RAM and write them to disk
 	int chunks = 0;
+	ramUsed = 0;
 	printf("Sorting... "); fflush(stdout);
 	{
 		InputStream input(formatFileName("open", g));
@@ -1067,6 +1074,8 @@ void sortAndMerge(FRAME_GROUP g)
 		size_t records;
 		while (records = input.read(buffer, (size_t)amount))
 		{
+			if (ramUsed < records * sizeof(Node))
+				ramUsed = records * sizeof(Node);
 			std::sort(buffer, buffer + records);
 			records = deduplicate(buffer, records);
 			OutputStream output(formatFileName("chunk", g, chunks));
@@ -1165,7 +1174,7 @@ int search()
 		}
 
 		printf("Clearing... "); fflush(stdout);
-		memset(ram, 0, RAM_SIZE); // clear cache
+		memset(ram, 0, ramUsed); // clear cache
 
 		// Step 3: dedup against previous frames, while simultaneously processing filtered nodes
 		printf("Processing... "); fflush(stdout);
@@ -1228,10 +1237,8 @@ int search()
 		flushProcessQueue();
 #endif
 
-#if !defined(PROFILE) && !defined(DEBUG)
 		printf("Flushing... "); fflush(stdout);
 		flushQueue();
-#endif
 
 		deleteFile(formatFileName("open", currentFrameGroup));
 		renameFile(formatFileName("closing", currentFrameGroup), formatFileName("closed", currentFrameGroup));
@@ -1488,9 +1495,9 @@ int unpack()
 		{
 			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "\n", g); fflush(stdout);
 			BufferedInputStream input(formatFileName("closed", g));
-			BufferedOutputStream** outputs = new BufferedOutputStream*[FRAMES_PER_GROUP];
+			BufferedOutputStream outputs[FRAMES_PER_GROUP];
 			for (int i=0; i<FRAMES_PER_GROUP; i++)
-				outputs[i] = new BufferedOutputStream(formatProblemFileName("closed", format("%u", g*FRAMES_PER_GROUP+i), "bin"));
+				outputs[i].open(formatProblemFileName("closed", format("%u", g*FRAMES_PER_GROUP+i), "bin"));
 			const CompressedState* cs;
 			while (cs = input.read())
 			{
@@ -1498,9 +1505,6 @@ int unpack()
 				cs2.subframe = 0;
 				outputs[cs->subframe]->write(&cs2);
 			}
-			for (int i=0; i<FRAMES_PER_GROUP; i++)
-				delete outputs[i];
-			delete[] outputs;
 		}
 	return 0;
 }
@@ -1790,6 +1794,9 @@ int regenerateOpen()
 
 			printf("Done (%lld).\n", size - oldSize);
 			oldSize = size;
+
+			if (checkStop())
+				return 3;
 		}
 	
 	return 0;
