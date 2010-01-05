@@ -1196,6 +1196,8 @@ int search()
 			BufferedOutputStream* allnew = new BufferedOutputStream(formatFileName("allnew"));
 			BufferedOutputStream* closing = new BufferedOutputStream(formatFileName("closing", currentFrameGroup));
 			mergeTwoStreams<ProcessStateHandler>(source, all, allnew, closing);
+			allnew->flush();
+			closing->flush();
 			delete all;
 			delete source;
 			delete allnew;
@@ -1503,7 +1505,7 @@ int unpack()
 			{
 				CompressedState cs2 = *cs;
 				cs2.subframe = 0;
-				outputs[cs->subframe]->write(&cs2);
+				outputs[cs->subframe].write(&cs2);
 			}
 		}
 	return 0;
@@ -1639,9 +1641,6 @@ int seqFilterOpen()
 
 		// Step 3: dedup against previous frames
 		printf("Filtering... "); fflush(stdout);
-#ifdef USE_ALL
-		#pragma message("Performance warning: using closed node files with USE_ALL") // TODO
-#endif
 		{
 			class NullStateHandler
 			{
@@ -1650,13 +1649,15 @@ int seqFilterOpen()
 			};
 
 			BufferedInputStream* source = new BufferedInputStream(formatFileName("merged", currentFrameGroup));
-			BufferedInputStream* inputs = new BufferedInputStream[MAX_FRAME_GROUPS];
+			BufferedInputStream* inputs = new BufferedInputStream[MAX_FRAME_GROUPS+1];
 			int inputCount = 0;
 			for (FRAME_GROUP g=0; g<currentFrameGroup; g++)
 			{
-				const char* fn = formatFileName("closed", g);
+				const char* fn = formatFileName("open", g);
+#ifndef USE_ALL
 				if (!fileExists(fn))
-					fn = formatFileName("open", g);
+					fn = formatFileName("closed", g);
+#endif
 				if (fileExists(fn))
 				{
 					inputs[inputCount].open(fn);
@@ -1666,6 +1667,9 @@ int seqFilterOpen()
 						inputs[inputCount].close();
 				}
 			}
+#ifdef USE_ALL
+			inputs[inputCount++].open(formatFileName("all"));
+#endif
 			BufferedOutputStream* output = new BufferedOutputStream(formatFileName("filtering", currentFrameGroup));
 			filterStream<NullStateHandler>(source, inputs, inputCount, output);
 			delete source;
@@ -1731,26 +1735,33 @@ void filterStreams(BufferedInputStream closed[], int closedCount, BufferedRewrit
 
 int filterOpen()
 {
-	BufferedInputStream* closed = new BufferedInputStream[MAX_FRAME_GROUPS];
 	BufferedRewriteStream* open = new BufferedRewriteStream[MAX_FRAME_GROUPS];
-	
 	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
-	{
+		if (fileExists(formatFileName("open", g)))
+		{
+			enforce(!fileExists(formatFileName("closed", g)), format("Open and closed node files present for the same frame" GROUP_STR " " GROUP_FORMAT, g));
+			open[g].open(formatFileName("open", g));
+	    }
+
+#ifndef USE_ALL
+	BufferedInputStream* closed = new BufferedInputStream[MAX_FRAME_GROUPS];
+	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
 		if (fileExists(formatFileName("closed", g)))
 			closed[g].open(formatFileName("closed", g));
-		else
-		if (fileExists(formatFileName("open", g)))
-			open[g].open(formatFileName("open", g));
-	}
-	
+
 	filterStreams(closed, MAX_FRAME_GROUPS, open, MAX_FRAME_GROUPS);
+
+	delete[] closed;
+#else
+	BufferedInputStream all(formatFileName("all"));
+	filterStreams(&all, 1, open, MAX_FRAME_GROUPS);
+#endif
 	
 	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++) // on success, truncate open nodes manually
 		if (open[g].isOpen())
 			open[g].truncate();
 	
 	delete[] open;
-	delete[] closed;
 	return 0;
 }
 
@@ -1799,6 +1810,24 @@ int regenerateOpen()
 				return 3;
 		}
 	
+	return 0;
+}
+
+// ******************************************************************************************************
+
+int createAll()
+{
+	BufferedInputStream* closed = new BufferedInputStream[MAX_FRAME_GROUPS];
+	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
+		if (fileExists(formatFileName("closed", g)))
+			closed[g].open(formatFileName("closed", g));
+
+	{
+		BufferedOutputStream all(formatFileName("allnew"));
+		mergeStreams(closed, MAX_FRAME_GROUPS, &all);
+	}
+
+	renameFile(formatFileName("allnew"), formatFileName("all"));
 	return 0;
 }
 
@@ -1940,6 +1969,9 @@ where <mode> is one of:\n\
 		regenerate all open nodes, delete all open node files before\n\
 		running regenerate-open (this is still faster than restarting\n\
 		the search).\n\
+	create-all\n\
+		Creates the \"all\" file from closed node files. Use when\n\
+		turning on USE_ALL, or when the \"all\" file was corrupted.\n\
 A [frame"GROUP_STR"-range] is a space-delimited list of zero, one or two frame"GROUP_STR"\n\
 numbers. If zero numbers are specified, the range is assumed to be all\n\
 frame"GROUP_STR"s. If one number is specified, the range is set to only that\n\
@@ -2102,6 +2134,10 @@ int run(int argc, const char* argv[])
 	{
 		parseFrameRange(argc-2, argv+2);
 		return regenerateOpen();
+	}
+	if (argc>1 && strcmp(argv[1], "create-all")==0)
+	{
+		return createAll();
 	}
 	else
 	{

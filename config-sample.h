@@ -31,7 +31,9 @@
 #define DISK_WINFILES
 //#define DISK_POSIX
 
-// Keep a file with all nodes to filter against, instead of filtering against each individual frame. Uses less CPU but more I/O.
+// Keep a file with all nodes to filter against, instead of filtering against each individual frame. 
+// The "all" file contains the sorted contents of all "closed" nodes. 
+// Uses less RAM/CPU but more I/O (the "all" file needs to be rewritten every frame/frame-group).
 //#define USE_ALL
 
 // When free disk space falls below this amount, try to free up space by filtering open node files. If not defined, free space is not checked.
