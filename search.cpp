@@ -289,7 +289,9 @@ public:
 	void flush()
 	{
 		flushBuffer();
+#ifndef NO_DISK_FLUSH
 		s.flush();
+#endif
 	}
 
 	void close()
@@ -856,11 +858,7 @@ void flushQueue()
 {
 	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
 		if (queue[g])
-#if defined(PROFILE) || defined(DEBUG)
-			queue[g]->flushBuffer();
-#else
 			queue[g]->flush();
-#endif
 }
 
 // ******************************************************************************************************

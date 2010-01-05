@@ -31,6 +31,12 @@
 #define DISK_WINFILES
 //#define DISK_POSIX
 
+// This option disables flushing files to disk (fflush/FlushFileBuffers).
+// Turning this on will speed up search, but will likely cause data loss in case of system crash or power failure.
+#ifdef DEBUG
+#define NO_DISK_FLUSH
+#endif
+
 // Keep a file with all nodes to filter against, instead of filtering against each individual frame. 
 // The "all" file contains the sorted contents of all "closed" nodes. 
 // Uses less RAM/CPU but more I/O (the "all" file needs to be rewritten every frame/frame-group).
