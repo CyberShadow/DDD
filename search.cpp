@@ -53,15 +53,29 @@ void error(const char* message = NULL)
 		throw "Unspecified error";
 }
 
+char* getTempString()
+{
+	static char buffers[64][1024];
+	static int bufIndex = 0;
+	int index;
+	{
+#ifdef MULTITHREADING
+		static MUTEX mutex;
+		SCOPED_LOCK lock(mutex);
+#endif
+		index = bufIndex++ % 64;
+	}
+		
+	return buffers[index];
+}
+
 const char* format(const char *fmt, ...)
 {    
 	va_list argptr;
 	va_start(argptr,fmt);
 	//static char buf[1024];
 	//char* buf = (char*)malloc(1024);
-	static char buffers[16][1024];
-	static int bufIndex = 0;
-	char* buf = buffers[bufIndex++ % 16];
+	char* buf = getTempString();
 	vsprintf(buf, fmt, argptr);
 	va_end(argptr);
 	return buf;
@@ -95,7 +109,7 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 
 const char* hexDump(const void* data, size_t size)
 {
-	static char buf[1024];
+	char* buf = getTempString();
 	enforce(size*3+1 < 1024);
 	const uint8_t* s = (const uint8_t*)data;
 	for (size_t x=0; x<size; x++)
@@ -123,30 +137,37 @@ typedef int32_t PACKED_FRAME;
 // ******************************************************************************************************
 
 #ifndef COMPRESSED_BYTES
-#define COMPRESSED_BYTES ((COMPRESSED_BITS + 7) / 8)
+#define COMPRESSED_BYTES (((COMPRESSED_BITS) + 7) / 8)
 #endif
 
 // It is very important that these comparison operators are as fast as possible.
 // TODO: relax ranges for !GROUP_FRAMES
 
-#if   (COMPRESSED_BITS >  24 && COMPRESSED_BITS <=  32) // 4 bytes
+#if   (!defined(USE_MEMCMP) && COMPRESSED_BITS >  24 && COMPRESSED_BITS <=  32) // 4 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] == ((const uint32_t*)&b)[0]; }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] != ((const uint32_t*)&b)[0]; }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] <  ((const uint32_t*)&b)[0]; }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] <= ((const uint32_t*)&b)[0]; }
-#elif (COMPRESSED_BITS >  56 && COMPRESSED_BITS <=  64) // 8 bytes
+#elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  56 && COMPRESSED_BITS <=  64) // 8 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0]; }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] != ((const uint64_t*)&b)[0]; }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0]; }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <= ((const uint64_t*)&b)[0]; }
-#elif (COMPRESSED_BITS >  96 && COMPRESSED_BITS <= 112) // 13-14 bytes
+#elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  64 && COMPRESSED_BITS <=  80) // 9-10 bytes
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint16_t*)&a)[4] == ((const uint16_t*)&b)[4]; }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] != ((const uint64_t*)&b)[0] || ((const uint16_t*)&a)[4] != ((const uint16_t*)&b)[4]; }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0] || 
+                                                                                   (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint16_t*)&a)[4] <  ((const uint16_t*)&b)[4]); }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0] || 
+                                                                                   (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint16_t*)&a)[4] <= ((const uint16_t*)&b)[4]); }
+#elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  96 && COMPRESSED_BITS <= 112) // 13-14 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && (((const uint64_t*)&a)[1]&0x0000FFFFFFFFFFFFLL) == (((const uint64_t*)&b)[1]&0x0000FFFFFFFFFFFFLL); }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] != ((const uint64_t*)&b)[0] || (((const uint64_t*)&a)[1]&0x0000FFFFFFFFFFFFLL) != (((const uint64_t*)&b)[1]&0x0000FFFFFFFFFFFFLL); }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0] || 
                                                                                    (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && (((const uint64_t*)&a)[1]&0x0000FFFFFFFFFFFFLL) <  (((const uint64_t*)&b)[1]&0x0000FFFFFFFFFFFFLL)); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0] || 
                                                                                    (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && (((const uint64_t*)&a)[1]&0x0000FFFFFFFFFFFFLL) <= (((const uint64_t*)&b)[1]&0x0000FFFFFFFFFFFFLL)); }
-#elif (COMPRESSED_BITS > 120 && COMPRESSED_BITS <= 128) // 16 bytes
+#elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 120 && COMPRESSED_BITS <= 128) // 16 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint64_t*)&a)[1] == ((const uint64_t*)&b)[1]; }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] != ((const uint64_t*)&b)[0] || ((const uint64_t*)&a)[1] != ((const uint64_t*)&b)[1]; }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] <  ((const uint64_t*)&b)[0] || 
@@ -155,6 +176,7 @@ INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { ret
                                                                                    (((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0] && ((const uint64_t*)&a)[1] <= ((const uint64_t*)&b)[1]); }
 #else
 #pragma message("Performance warning: using memcmp for CompressedState comparison")
+#define SLOW_COMPARE
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, COMPRESSED_BYTES)==0; }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, COMPRESSED_BYTES)!=0; }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return memcmp(&a, &b, COMPRESSED_BYTES)< 0; }
@@ -871,6 +893,35 @@ FRAME_GROUP currentFrameGroup;
 bool exitFound;
 FRAME exitFrame;
 State exitState;
+#ifdef MULTITHREADING
+MUTEX finishMutex;
+#endif
+
+INLINE bool finishCheck(const State* s, FRAME frame)
+{
+	if (s->isFinish())
+	{
+#ifdef MULTITHREADING
+		SCOPED_LOCK lock(finishMutex);
+#endif
+		if (exitFound)
+		{
+			if (exitFrame > frame)
+			{
+				exitFrame = frame;
+				exitState = *s;
+			}
+		}
+		else
+		{
+			exitFound = true;
+			exitFrame = frame;
+			exitState = *s;
+		}
+		return true;
+	}
+	return false;
+}
 
 void processState(const CompressedState* cs)
 {
@@ -882,24 +933,8 @@ void processState(const CompressedState* cs)
 	assert(test == *cs, "Compression/decompression failed");
 #endif
 	FRAME currentFrame = GET_FRAME(currentFrameGroup, *cs);
-	if (s.isFinish())
-	{
-		if (exitFound)
-		{
-			if (exitFrame > currentFrame)
-			{
-				exitFrame = currentFrame;
-				exitState = s;
-			}
-		}
-		else
-		{
-			exitFound = true;
-			exitFrame = currentFrame;
-			exitState = s;
-		}
+	if (finishCheck(&s, currentFrame))
 		return;
-	}
 
 	class AddStateChildHandler
 	{
@@ -1036,7 +1071,7 @@ void traceExit()
 					expandChildren<FinishCheckChildHandler>(frame, &state);
 					if (exitSearchStateFound)
 					{
-						printf("Found (at %d)!          \n", frame);
+						printTime(); printf("Found (at %d)!          \n", frame);
 						steps[stepNr++] = exitSearchStateStep;
 						exitSearchState      = state;
 						exitSearchStateFrame = frame;
@@ -1886,6 +1921,49 @@ void printExecutionTime()
 
 // ***********************************************************************************
 
+// Test the CompressedState comparison operators.
+void testCompressedState()
+{
+	enforce(sizeof(CompressedState)%4 == 0);
+#ifdef GROUP_FRAMES
+	enforce(COMPRESSED_BITS <= (sizeof(CompressedState)-1)*8);
+#else
+	enforce(COMPRESSED_BITS <= sizeof(CompressedState)*8);
+	enforce((COMPRESSED_BITS+31)/8 >= sizeof(CompressedState));
+#endif
+
+	CompressedState c1, c2;
+	uint8_t *p1 = (uint8_t*)&c1, *p2 = (uint8_t*)&c2;
+	memset(p1, 0, sizeof(CompressedState));
+	memset(p2, 0, sizeof(CompressedState));
+	
+#ifdef GROUP_FRAMES
+	int subframe;
+
+	switch (COMPRESSED_BYTES % 4)
+	{
+		case 0: subframe = sizeof(CompressedState)-4; break;
+		case 1: // align to word - fall through
+		case 2: subframe = sizeof(CompressedState)-2; break;
+		case 3: subframe = sizeof(CompressedState)-1; break;
+	}
+
+	p1[subframe] = 0xFF;
+	enforce(c1.subframe == 0xFF, format("Misaligned subframe!\n%s", hexDump(p1, sizeof(CompressedState))));
+	enforce(c1 == c2, "Different subframe causes inequality");
+#endif
+	
+	for (int i=0; i<COMPRESSED_BITS; i++)
+	{
+		p1[i/8] |= (1<<(i%8));
+		enforce(c1 != c2, format("Inequality expected!\n%s\n%s", hexDump(p1, sizeof(CompressedState)), hexDump(p2, sizeof(CompressedState))));
+		p2[i/8] |= (1<<(i%8));
+		enforce(c1 == c2, format(  "Equality expected!\n%s\n%s", hexDump(p1, sizeof(CompressedState)), hexDump(p2, sizeof(CompressedState))));
+	}
+}
+
+// ***********************************************************************************
+
 int parseInt(const char* str)
 {
 	int result;
@@ -2000,7 +2078,6 @@ int run(int argc, const char* argv[])
 #else
 #error Thread plugin not set
 #endif
-#endif
 
 #if defined(SYNC_BOOST)
 	printf("with Boost sync\n");
@@ -2013,15 +2090,13 @@ int run(int argc, const char* argv[])
 #else
 #error Sync plugin not set
 #endif
+#endif // MULTITHREADING
 	
-	printf("Compressed state is %u bits (%u bytes)\n", COMPRESSED_BITS, sizeof(CompressedState));
-#ifdef GROUP_FRAMES
-	enforce(COMPRESSED_BITS <= (sizeof(CompressedState)-1)*8);
-#else
-	enforce(COMPRESSED_BITS <= sizeof(CompressedState)*8);
-	enforce((COMPRESSED_BITS+31)/8 >= sizeof(CompressedState));
+	printf("Compressed state is %u bits (%u bytes data, %u bytes total)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(CompressedState));
+#ifdef SLOW_COMPARE
+	printf("Using memcmp for CompressedState comparison\n");
 #endif
-	enforce(sizeof(CompressedState)%4 == 0);
+	testCompressedState();
 
 	enforce(ram, "RAM allocation failed");
 	printf("Using %lld bytes of RAM for %lld cache nodes and %lld buffer nodes\n", (long long)RAM_SIZE, (long long)CACHE_HASH_SIZE, (long long)BUFFER_SIZE);
