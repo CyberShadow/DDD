@@ -1459,7 +1459,7 @@ void convertMerge(BufferedInputStream inputs[], int inputCount, BufferedOutputSt
 	{
 		CompressedState cs2 = *heap.getHead();
 		debug_assert(heap.getHeadInput() >= inputs && heap.getHeadInput() < inputs+FRAMES_PER_GROUP);
-		uint8_t subframe = heap.getHeadInput() - inputs;
+		uint8_t subframe = (uint8_t)(heap.getHeadInput() - inputs);
 		//positions[subframe]++;
 		cs2.subframe = subframe;
 		if (cs2 < cs) // work around flush bug in older versions
