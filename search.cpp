@@ -1467,7 +1467,7 @@ void convertMerge(BufferedInputStream inputs[], int inputCount, BufferedOutputSt
 	{
 		CompressedState cs2 = *heap.getHead();
 		debug_assert(heap.getHeadInput() >= inputs && heap.getHeadInput() < inputs+FRAMES_PER_GROUP);
-		uint8_t subframe = heap.getHeadInput() - inputs;
+		uint8_t subframe = (uint8_t)(heap.getHeadInput() - inputs);
 		//positions[subframe]++;
 		cs2.subframe = subframe;
 		if (cs2 < cs) // work around flush bug in older versions
@@ -2229,5 +2229,9 @@ int run(int argc, const char* argv[])
 
 // ***********************************************************************************
 
+#ifdef PROBLEM_RELATED
+#include BOOST_PP_STRINGIZE(PROBLEM/PROBLEM_RELATED.cpp)
+int main(int argc, const char* argv[]) { try { return run_related(argc, argv); } catch(const char* s) { printf("\n%s\n", s); return 1; } }
+#else
 int main(int argc, const char* argv[]) { try { return run(argc, argv); } catch(const char* s) { printf("\n%s\n", s); return 1; } }
-//#include "test_body.cpp"
+#endif
