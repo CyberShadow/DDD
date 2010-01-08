@@ -1,5 +1,25 @@
 // Windows files
 
+void windowsError(const char* where = NULL)
+{
+	LPVOID lpMsgBuf;
+	FormatMessage( 
+		FORMAT_MESSAGE_ALLOCATE_BUFFER | 
+		FORMAT_MESSAGE_FROM_SYSTEM | 
+		FORMAT_MESSAGE_IGNORE_INSERTS,
+		NULL,
+		GetLastError(),
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
+		(LPTSTR) &lpMsgBuf,
+		0,
+		NULL 
+	);
+	if (where)
+		error(format("%s: %s", where, lpMsgBuf));
+	else
+		error((LPCSTR)lpMsgBuf);
+}
+
 class Stream
 {
 protected:
@@ -23,7 +43,7 @@ public:
 		n.QuadPart = 0;
 		BOOL b = SetFilePointerEx(archive, n, &o, FILE_CURRENT);
 		if (!b)
-			error("Seek error");
+			windowsError("Seek error");
 		return o.QuadPart / sizeof(Node);
 	}
 
@@ -33,7 +53,7 @@ public:
 		li.QuadPart = pos * sizeof(Node);
 		BOOL b = SetFilePointerEx(archive, li, NULL, FILE_BEGIN);
 		if (!b)
-			error("Seek error");
+			windowsError("Seek error");
 	}
 
 	void close()
@@ -65,14 +85,14 @@ public:
 	{
 		archive = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
-			error("File creation failure");
+			windowsError(format("File creation failure (%s)", filename));
 		if (resume)
 		{
 			LARGE_INTEGER li;
 			li.QuadPart = 0;
 			BOOL b = SetFilePointerEx(archive, li, NULL, FILE_END);
 			if (!b)
-				error("Append error");
+				windowsError("Append error");
 		}
 	}
 
@@ -89,9 +109,9 @@ public:
 			DWORD r;
 			BOOL b = WriteFile(archive, data + bytes, chunk, &r, NULL);
 			if (!b)
-				error("Write error");
+				windowsError("Write error");
 			if (r == 0)
-				error("Out of disk space?");
+				windowsError("Out of disk space?");
 			bytes += r;
 		}
 	}
@@ -116,7 +136,7 @@ public:
 	{
 		archive = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
-			error("File open failure");
+			windowsError(format("File open failure (%s)", filename));
 	}
 
 	size_t read(Node* p, size_t n)
@@ -137,7 +157,7 @@ public:
 				return bytes / sizeof(Node);
 			}
 			if (!b || r==0)
-				error(format("Read error %d", GetLastError()));
+				windowsError(format("Read error %d", GetLastError()));
 			bytes += r;
 		}
 		return n;
@@ -160,7 +180,7 @@ public:
 	{
 		archive = CreateFile(filename, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
-			error("File creation failure");
+			windowsError("File creation failure");
 		readpos = writepos = 0;
 	}
 
@@ -191,7 +211,7 @@ void deleteFile(const char* filename)
 {
 	BOOL b = DeleteFile(filename);
 	if (!b)
-		error("Error deleting file");
+		windowsError("Error deleting file");
 }
 
 void renameFile(const char* from, const char* to)
@@ -199,7 +219,7 @@ void renameFile(const char* from, const char* to)
 	DeleteFile(to); // ignore error
 	BOOL b = MoveFile(from, to);
 	if (!b)
-		error("Error moving file");
+		windowsError("Error moving file");
 }
 
 bool fileExists(const char* filename)
@@ -213,6 +233,6 @@ uint64_t getFreeSpace()
 	GetCurrentDirectory(MAX_PATH, dir);
 	ULARGE_INTEGER li;
 	if (!GetDiskFreeSpaceEx(dir, &li, NULL, NULL))
-		error("GetDiskFreeSpaceEx error");
+		windowsError("GetDiskFreeSpaceEx error");
 	return li.QuadPart;
 }

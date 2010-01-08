@@ -1,11 +1,3 @@
-#ifdef _WIN32
-#include <windows.h>
-#define SLEEP(x) Sleep(x)
-#else
-#include <unistd.h>
-#define SLEEP(x) usleep((x)*1000)
-#endif
-
 class Condition
 {
 private:

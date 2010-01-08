@@ -49,6 +49,12 @@ struct CompressedState
 {
 	uint16_t x;
 	uint16_t y;
+
+	/// Used for debugging...
+	const char* toString() const
+	{
+		return format("%2d,%2d", x, y);
+	}
 };
 
 /// Number of bits of data in CompressedState, *excluding* subframe. This is used for efficient comparison operators.

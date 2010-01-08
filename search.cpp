@@ -20,6 +20,13 @@
 
 // ******************************************************************************************************
 
+#ifdef _WIN32
+#define SLEEP(x) Sleep(x)
+#else
+#include <unistd.h>
+#define SLEEP(x) usleep((x)*1000)
+#endif
+
 #ifdef MULTITHREADING
 #if defined(THREAD_BOOST)
 #include "thread_boost.cpp"
@@ -841,6 +848,7 @@ void addState(const State* state, FRAME frame)
 		puts(hexDump(state, sizeof(State)));
 		puts(state->toString());
 		puts(hexDump(&cs, sizeof(CompressedState)));
+		puts(cs.toString());
 		puts(hexDump(&test, sizeof(State)));
 		puts(test.toString());
 		error("Compression/decompression failed");
