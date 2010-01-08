@@ -15,15 +15,19 @@ public:
         while (InterlockedExchange(&x, 1));
     }
 
+#ifdef DEBUG
+    void leave()
+    {
+        int old = InterlockedExchange(&x, 0);
+		if (old==0)
+			throw "CriticalSection wasn't locked";
+    }
+#else
     inline void leave()
     {
-        /*int old = InterlockedExchange(&x, 0);
-#ifdef DEBUG
-		if (old==0) throw "CriticalSection wasn't locked";
-#endif
-		*/
 		x = 0;
     }
+#endif
 };
 
 #define MUTEX CriticalSection

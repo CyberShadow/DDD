@@ -7,7 +7,5 @@
 #define SCOPED_LOCK boost::mutex::scoped_lock
 
 #define CONDITION boost::condition
-#define CONDITION_RESET(condition)
 #define CONDITION_WAIT(condition, lock) (condition).wait(lock)
 #define CONDITION_NOTIFY(condition, lock) (condition).notify_all()
-#define CONDITION_BARRIER(condition)

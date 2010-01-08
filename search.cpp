@@ -954,15 +954,18 @@ void processState(const CompressedState* cs)
 	};
 
 	expandChildren<AddStateChildHandler>(currentFrame, &s);
+	assert(currentFrame/FRAMES_PER_GROUP == currentFrameGroup, format("Run-away currentFrameGroup: currentFrame=%d, currentFrameGroup=%d", currentFrame, currentFrameGroup));
 }
 
 #ifdef MULTITHREADING
 
+#define WORKERS (THREADS-1)
 #define PROCESS_QUEUE_SIZE 0x100000
 CompressedState processQueue[PROCESS_QUEUE_SIZE]; // circular buffer
 size_t processQueueHead=0, processQueueTail=0;
 MUTEX processQueueMutex; // for head/tail
 CONDITION processQueueReadCondition, processQueueWriteCondition;
+int idleWorkers = 0;
 
 void processFilteredState(const CompressedState* state)
 {
@@ -979,8 +982,14 @@ void dequeueState(CompressedState* state)
 {
 	SCOPED_LOCK lock(processQueueMutex);
 		
-	while (processQueueHead == processQueueTail) // while empty
-		CONDITION_WAIT(processQueueWriteCondition, lock);
+	if (processQueueHead == processQueueTail) // while empty
+	{
+		idleWorkers++;
+		do
+			CONDITION_WAIT(processQueueWriteCondition, lock);
+		while (processQueueHead == processQueueTail);
+		idleWorkers--;
+	}
 	*state = processQueue[processQueueTail++ % PROCESS_QUEUE_SIZE];
 	CONDITION_NOTIFY(processQueueReadCondition, lock);
 }
@@ -997,17 +1006,12 @@ void worker()
 
 void flushProcessQueue()
 {
-	/*
-	SCOPED_LOCK lock(processQueueMutex);
 
-	while (processQueueHead != processQueueTail) // while not empty
-		CONDITION_WAIT(processQueueReadCondition, lock);
-    /*/
     while (true)
     {
     	{
 	    	SCOPED_LOCK lock(processQueueMutex);
-    		if (processQueueHead == processQueueTail)
+    		if (processQueueHead == processQueueTail && idleWorkers == WORKERS)
     			return;
     	}
     	SLEEP(1);
@@ -1191,7 +1195,7 @@ int search()
 	}
 
 #ifdef MULTITHREADING
-	for (int i=0; i<THREADS-1; i++)
+	for (int i=0; i<WORKERS; i++)
 		THREAD_CREATE(&worker);
 #endif
 
