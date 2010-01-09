@@ -599,9 +599,10 @@ public:
 	}
 };
 
-void mergeStreams(BufferedInputStream<> inputs[], int inputCount, BufferedOutputStream<>* output)
+template <uint64_t BUFFER_SIZE>
+void mergeStreams(BufferedInputStream<BUFFER_SIZE> inputs[], int inputCount, BufferedOutputStream<>* output)
 {
-	InputHeap<BufferedInputStream<>> heap(inputs, inputCount);
+	InputHeap<BufferedInputStream<BUFFER_SIZE>> heap(inputs, inputCount);
 
 	const CompressedState* first = heap.getHead();
 	if (!first)
@@ -1157,7 +1158,7 @@ void sortAndMerge(FRAME_GROUP g)
 	printf("Merging... "); fflush(stdout);
 	if (chunks>1)
 	{
-		BufferedInputStream<>* chunkInput = new BufferedInputStream<>[chunks];
+		BufferedInputStream<MERGING_BUFFER_SIZE>* chunkInput = new BufferedInputStream<MERGING_BUFFER_SIZE>[chunks];
 		for (int i=0; i<chunks; i++)
 			chunkInput[i].open(formatFileName("chunk", g, i));
 		BufferedOutputStream<>* output = new BufferedOutputStream<>(formatFileName("merging", g));

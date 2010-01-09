@@ -26,6 +26,7 @@
 
 // How many bytes to use for each file stream buffer?
 #define STANDARD_BUFFER_SIZE (1*1024*1024 / sizeof(Node))
+#define MERGING_BUFFER_SIZE  (16*1024*1024 / sizeof(Node))
 #define ALL_FILE_BUFFER_SIZE (64*1024*1024 / sizeof(Node))
 
 // How many nodes to group under a single hash in the cache? Higher values reduce speed but allow better distribution.
