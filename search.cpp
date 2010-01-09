@@ -964,8 +964,9 @@ void processState(const CompressedState* cs)
 CompressedState processQueue[PROCESS_QUEUE_SIZE]; // circular buffer
 size_t processQueueHead=0, processQueueTail=0;
 MUTEX processQueueMutex; // for head/tail
-CONDITION processQueueReadCondition, processQueueWriteCondition;
-int idleWorkers = 0;
+CONDITION processQueueReadCondition, processQueueWriteCondition, processQueueExitCondition;
+int runningWorkers = 0;
+bool stopWorkers = false;
 
 void processFilteredState(const CompressedState* state)
 {
@@ -978,44 +979,48 @@ void processFilteredState(const CompressedState* state)
 	CONDITION_NOTIFY(processQueueWriteCondition, lock);
 }
 
-void dequeueState(CompressedState* state)
+bool dequeueState(CompressedState* state)
 {
 	SCOPED_LOCK lock(processQueueMutex);
 		
-	if (processQueueHead == processQueueTail) // while empty
+	while (processQueueHead == processQueueTail) // while empty
 	{
-		idleWorkers++;
-		do
-			CONDITION_WAIT(processQueueWriteCondition, lock);
-		while (processQueueHead == processQueueTail);
-		idleWorkers--;
+		if (stopWorkers)
+			return false;
+		CONDITION_WAIT(processQueueWriteCondition, lock);
 	}
 	*state = processQueue[processQueueTail++ % PROCESS_QUEUE_SIZE];
 	CONDITION_NOTIFY(processQueueReadCondition, lock);
+	return true;
 }
 
 void worker()
 {
+	runningWorkers++;
 	CompressedState cs;
-	while (true)
-	{
-		dequeueState(&cs);
+	while (dequeueState(&cs))
 		processState(&cs);
+	runningWorkers--;
+
+    /* LOCK */
+	{
+		SCOPED_LOCK lock(processQueueMutex);
+		CONDITION_NOTIFY(processQueueExitCondition, lock);
 	}
 }
 
 void flushProcessQueue()
 {
+    /* LOCK */
+	SCOPED_LOCK lock(processQueueMutex);
 
-    while (true)
-    {
-    	{
-	    	SCOPED_LOCK lock(processQueueMutex);
-    		if (processQueueHead == processQueueTail && idleWorkers == WORKERS)
-    			return;
-    	}
-    	SLEEP(1);
-    }//*/
+	stopWorkers = true;
+	CONDITION_NOTIFY(processQueueWriteCondition, lock);
+
+	while (runningWorkers)
+		CONDITION_WAIT(processQueueExitCondition, lock);
+	
+	stopWorkers = false;
 }
 
 #else
@@ -1194,11 +1199,6 @@ int search()
 		}
 	}
 
-#ifdef MULTITHREADING
-	for (int i=0; i<WORKERS; i++)
-		THREAD_CREATE(&worker);
-#endif
-
 	for (currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
 	{
 		if (!queue[currentFrameGroup])
@@ -1223,6 +1223,12 @@ int search()
 
 		// Step 3: dedup against previous frames, while simultaneously processing filtered nodes
 		printf("Processing... "); fflush(stdout);
+
+#ifdef MULTITHREADING
+		for (int i=0; i<WORKERS; i++)
+			THREAD_CREATE(&worker);
+#endif
+
 #ifdef USE_ALL
 		if (currentFrameGroup==0)
 		{
