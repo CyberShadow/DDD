@@ -670,8 +670,8 @@ void filterStream(BufferedInputStream<>* source, BufferedInputStream<> inputs[],
 	}
 }
 
-template <class FILTERED_NODE_HANDLER, class INPUT1, class INPUT2>
-void mergeTwoStreams(INPUT1* input1, INPUT2* input2, BufferedOutputStream<ALL_FILE_BUFFER_SIZE>* output, BufferedOutputStream<>* output1)
+template <class FILTERED_NODE_HANDLER>
+void mergeTwoStreams(BufferedInputStream<>* input1, BufferedInputStream<ALL_FILE_BUFFER_SIZE>* input2, BufferedOutputStream<ALL_FILE_BUFFER_SIZE>* output, BufferedOutputStream<>* output1)
 {
 	// output <= merged
 	// output1 <= only in input1
