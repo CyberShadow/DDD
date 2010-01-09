@@ -1063,7 +1063,7 @@ void traceExit()
 	{
 		exitSearchState      = exitState;
 		exitSearchStateFrame = exitFrame;
-		int frameGroup = currentFrameGroup;
+		int frameGroup = exitFrame / FRAMES_PER_GROUP;
 		while (frameGroup >= 0)
 		{
 	nextStep:
@@ -1287,6 +1287,7 @@ int search()
 
 		if (exitFound)
 		{
+			assert(currentFrameGroup == exitFrame / FRAMES_PER_GROUP);
 			printf("Exit found (at frame %u), tracing path...\n", exitFrame);
 			traceExit();
 		}
@@ -1664,7 +1665,7 @@ int sortOpen()
 
 int seqFilterOpen()
 {
-	// override global *FrameGroup vars
+	// redeclare currentFrameGroup
 	for (FRAME_GROUP currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
 	{
 		if (!fileExists(formatFileName("open", currentFrameGroup)))
@@ -1883,6 +1884,41 @@ int createAll()
 
 // ******************************************************************************************************
 
+int findExit()
+{
+	// redeclare currentFrameGroup
+	for (FRAME_GROUP currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
+	{
+		const char* fn = formatFileName("closed", currentFrameGroup);
+		if (!fileExists(fn))
+			fn = formatFileName("open", currentFrameGroup);
+		if (fileExists(fn))
+		{
+			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
+			BufferedInputStream input(fn);
+			const CompressedState* cs;
+			while (cs = input.read())
+			{
+				State s;
+				s.decompress(cs);
+				if (s.isFinish())
+				{
+					exitState = s;
+					exitFrame = GET_FRAME(currentFrameGroup, *cs);
+					printf("Exit found (at frame %u), tracing path...\n", exitFrame);
+					traceExit();
+					return 0;
+				}
+			}
+			printf("Done.\n");
+		}
+	}
+	printf("Exit not found.\n");
+	return 2;
+}
+
+// ******************************************************************************************************
+
 // use background CPU and I/O priority when PC is not idle
 
 #if defined(_WIN32)
@@ -2065,6 +2101,11 @@ where <mode> is one of:\n\
 	create-all\n\
 		Creates the \"all\" file from closed node files. Use when\n\
 		turning on USE_ALL, or when the \"all\" file was corrupted.\n\
+	find-exit [frame"GROUP_STR"-range]\n\
+		Searches for exit frames in the specified frame"GROUP_STR" range\n\
+		(both closed an open node files). When a state is found which\n\
+		satisfies the isFinish condition, it is traced back and the\n\
+		solution is written, as during normal search.\n\
 A [frame"GROUP_STR"-range] is a space-delimited list of zero, one or two frame"GROUP_STR"\n\
 numbers. If zero numbers are specified, the range is assumed to be all\n\
 frame"GROUP_STR"s. If one number is specified, the range is set to only that\n\
@@ -2228,6 +2269,11 @@ int run(int argc, const char* argv[])
 	if (argc>1 && strcmp(argv[1], "create-all")==0)
 	{
 		return createAll();
+	}
+	if (argc>1 && strcmp(argv[1], "find-exit")==0)
+	{
+		parseFrameRange(argc-2, argv+2);
+		return findExit();
 	}
 	else
 	{
