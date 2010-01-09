@@ -155,7 +155,7 @@ void expandChildren(FRAME frame, const State* state)
 		if (res > 0)
 		{
 			step.action = action;
-			CHILD_HANDLER::handleChild(&newState, step, frame + res);
+			CHILD_HANDLER::handleChild(state, &newState, step, frame + res);
 		}
 		if (res >= 0)
 			newState = *state;
