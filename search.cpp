@@ -967,7 +967,7 @@ void processState(const CompressedState* cs)
 	class AddStateChildHandler
 	{
 	public:
-		static INLINE void handleChild(const State* state, Step step, FRAME frame)
+		static INLINE void handleChild(const State* parent, const State* state, Step step, FRAME frame)
 		{
 			addState(state, frame);
 		}
@@ -1071,7 +1071,7 @@ bool exitSearchStateFound = false;
 class FinishCheckChildHandler
 {
 public:
-	static INLINE void handleChild(const State* state, Step step, FRAME frame)
+	static INLINE void handleChild(const State* parent, const State* state, Step step, FRAME frame)
 	{
 		if (*state==exitSearchState && frame==exitSearchStateFrame)
 		{
