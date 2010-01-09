@@ -155,6 +155,11 @@ INLINE bool operator==(const CompressedState& a, const CompressedState& b) { ret
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] != ((const uint32_t*)&b)[0]; }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] <  ((const uint32_t*)&b)[0]; }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] <= ((const uint32_t*)&b)[0]; }
+#elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  40 && COMPRESSED_BITS <=  48) // 6 bytes
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return (((const uint64_t*)&a)[0]&0x0000FFFFFFFFFFFFLL) == (((const uint64_t*)&b)[0]&0x0000FFFFFFFFFFFFLL); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return (((const uint64_t*)&a)[0]&0x0000FFFFFFFFFFFFLL) != (((const uint64_t*)&b)[0]&0x0000FFFFFFFFFFFFLL); }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return (((const uint64_t*)&a)[0]&0x0000FFFFFFFFFFFFLL) <  (((const uint64_t*)&b)[0]&0x0000FFFFFFFFFFFFLL); }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return (((const uint64_t*)&a)[0]&0x0000FFFFFFFFFFFFLL) <= (((const uint64_t*)&b)[0]&0x0000FFFFFFFFFFFFLL); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  56 && COMPRESSED_BITS <=  64) // 8 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] == ((const uint64_t*)&b)[0]; }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint64_t*)&a)[0] != ((const uint64_t*)&b)[0]; }
