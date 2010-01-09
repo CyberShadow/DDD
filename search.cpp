@@ -1254,17 +1254,17 @@ int search()
 			copyFile(formatFileName("merged", currentFrameGroup), formatFileName("closing", currentFrameGroup));
 			renameFile(formatFileName("merged", currentFrameGroup), formatFileName("allnew"));
 			
-			BufferedInputStream input(formatFileName("closing", currentFrameGroup));
+			BufferedInputStream<> input(formatFileName("closing", currentFrameGroup));
 			const CompressedState* cs;
 			while (cs = input.read())
 				processFilteredState(cs);
 		}
 		else
 		{
-			BufferedInputStream* source = new BufferedInputStream(formatFileName("merged", currentFrameGroup));
+			BufferedInputStream<>* source = new BufferedInputStream<>(formatFileName("merged", currentFrameGroup));
 			BufferedInputStream<ALL_FILE_BUFFER_SIZE>* all = new BufferedInputStream<ALL_FILE_BUFFER_SIZE>(formatFileName("all"));
 			BufferedOutputStream<ALL_FILE_BUFFER_SIZE>* allnew = new BufferedOutputStream<ALL_FILE_BUFFER_SIZE>(formatFileName("allnew"));
-			BufferedOutputStream* closing = new BufferedOutputStream(formatFileName("closing", currentFrameGroup));
+			BufferedOutputStream<>* closing = new BufferedOutputStream<>(formatFileName("closing", currentFrameGroup));
 			mergeTwoStreams<ProcessStateHandler>(source, all, allnew, closing);
 			allnew->flush();
 			closing->flush();
