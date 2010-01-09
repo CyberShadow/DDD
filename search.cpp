@@ -1227,7 +1227,7 @@ int search()
 		if (currentFrameGroup==0)
 		{
 			copyFile(formatFileName("merged", currentFrameGroup), formatFileName("closing", currentFrameGroup));
-			renameFile(formatFileName("merged", currentFrameGroup), formatFileName("all"));
+			renameFile(formatFileName("merged", currentFrameGroup), formatFileName("allnew"));
 			
 			BufferedInputStream input(formatFileName("closing", currentFrameGroup));
 			const CompressedState* cs;
@@ -1247,8 +1247,6 @@ int search()
 			delete source;
 			delete allnew;
 			delete closing;
-			deleteFile(formatFileName("all"));
-			renameFile(formatFileName("allnew"), formatFileName("all"));
 			deleteFile(formatFileName("merged", currentFrameGroup));
 		}
 #else
@@ -1287,17 +1285,24 @@ int search()
 		printf("Flushing... "); fflush(stdout);
 		flushQueue();
 
-		deleteFile(formatFileName("open", currentFrameGroup));
-		renameFile(formatFileName("closing", currentFrameGroup), formatFileName("closed", currentFrameGroup));
-		
-		printf("Done.\n");
-
 		if (exitFound)
 		{
 			printf("Exit found (at frame %u), tracing path...\n", exitFrame);
 			traceExit();
-			return 0;
 		}
+
+		deleteFile(formatFileName("open", currentFrameGroup));
+		renameFile(formatFileName("closing", currentFrameGroup), formatFileName("closed", currentFrameGroup));
+#ifdef USE_ALL
+		if (fileExists(formatFileName("all")))
+			deleteFile(formatFileName("all"));
+		renameFile(formatFileName("allnew"), formatFileName("all"));
+#endif
+		
+		printf("Done.\n");
+
+		if (exitFound)
+			return 0;
 
 		if (checkStop())
 			return 3;
