@@ -1849,11 +1849,6 @@ int regenerateOpen()
 		if (fileExists(formatFileName("closed", g)) || fileExists(formatFileName("open", g)))
 			noQueue[g] = true;
 	
-#ifdef MULTITHREADING
-	for (int i=0; i<THREADS-1; i++)
-		THREAD_CREATE(&worker);
-#endif
-
 	while (maxFrameGroups>0 && !fileExists(formatFileName("closed", maxFrameGroups-1)))
 		maxFrameGroups--;
 
@@ -1863,6 +1858,11 @@ int regenerateOpen()
 		{
 			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 			
+#ifdef MULTITHREADING
+			for (int i=0; i<WORKERS; i++)
+				THREAD_CREATE(&worker);
+#endif
+
 			BufferedInputStream<> closed(formatFileName("closed", currentFrameGroup));
 			const CompressedState* cs;
 			while (cs = closed.read())
