@@ -18,8 +18,6 @@
 #include "pstdint.h"
 #endif
 
-// ******************************************************************************************************
-
 #ifdef _WIN32
 #define SLEEP(x) Sleep(x)
 #else
@@ -50,7 +48,7 @@
 // TODO: look into user-mode scheduling
 #endif
 
-// ******************************************************************************************************
+// ******************************************** Utility code ********************************************
 
 void error(const char* message = NULL)
 {
@@ -101,6 +99,7 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 #define assert enforce
 #define debug_assert enforce
 #define INLINE
+#define DEBUG_ONLY(x) x
 #else
 #if defined(_MSC_VER)
 #define assert(expr,...) __assume((expr)!=0)
@@ -112,6 +111,7 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 #error Unknown compiler
 #endif
 #define debug_assert(...) do{}while(0)
+#define DEBUG_ONLY(x) do{}while(0)
 #endif
 
 const char* hexDump(const void* data, size_t size)
@@ -124,10 +124,19 @@ const char* hexDump(const void* data, size_t size)
 	return buf;
 }
 
+void printTime()
+{
+	time_t t;
+	time(&t);
+	char* tstr = ctime(&t);
+	tstr[strlen(tstr)-1] = 0;
+	printf("[%s] ", tstr);
+}
+
 #define DO_STRINGIZE(x) #x
 #define STRINGIZE(x) DO_STRINGIZE(x)
 
-// ******************************************************************************************************
+// *********************************************** Types ************************************************
 
 typedef int32_t FRAME;
 typedef int32_t FRAME_GROUP;
@@ -137,11 +146,11 @@ typedef int16_t PACKED_FRAME;
 typedef int32_t PACKED_FRAME;
 #endif
 
-// ******************************************************************************************************
+// ********************************************** Problem ***********************************************
 
 #include STRINGIZE(PROBLEM/PROBLEM.cpp)
 
-// ******************************************************************************************************
+// ************************************* CompressedState comparison *************************************
 
 #ifndef COMPRESSED_BYTES
 #define COMPRESSED_BYTES (((COMPRESSED_BITS) + 7) / 8)
@@ -205,7 +214,7 @@ INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { ret
 INLINE bool operator> (const CompressedState& a, const CompressedState& b) { return b< a; }
 INLINE bool operator>=(const CompressedState& a, const CompressedState& b) { return b<=a; }
 
-// ******************************************************************************************************
+// ******************************************** Frame groups ********************************************
 
 #ifdef GROUP_FRAMES
 
@@ -229,7 +238,7 @@ INLINE bool operator>=(const CompressedState& a, const CompressedState& b) { ret
 
 #endif
 
-// ******************************************************************************************************
+// ************************************************ Disk ************************************************
 
 typedef CompressedState Node;
 
@@ -241,7 +250,7 @@ typedef CompressedState Node;
 #error Disk plugin not set
 #endif
 
-// ******************************************************************************************************
+// *********************************************** Memory ***********************************************
 
 // Allocate RAM at start, use it for different purposes depending on what we're doing
 // Even if we won't use all of it, most OSes shouldn't reserve physical RAM for the entire amount
@@ -259,7 +268,7 @@ CacheNode (*cache)[NODES_PER_HASH] = (CacheNode (*)[NODES_PER_HASH]) ram;
 const size_t BUFFER_SIZE = RAM_SIZE / sizeof(Node);
 Node* buffer = (Node*) ram;
 
-// ******************************************************************************************************
+// ****************************************** Buffered streams ******************************************
 
 #ifndef STANDARD_BUFFER_SIZE
 #define STANDARD_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
@@ -410,17 +419,6 @@ public:
 	void truncate() { s.truncate(); }
 };
 
-// ******************************************************************************************************
-
-void printTime()
-{
-	time_t t;
-	time(&t);
-	char* tstr = ctime(&t);
-	tstr[strlen(tstr)-1] = 0;
-	printf("[%s] ", tstr);
-}
-
 void copyFile(const char* from, const char* to)
 {
 	InputStream input(from);
@@ -434,7 +432,7 @@ void copyFile(const char* from, const char* to)
 	output.flush(); // force disk flush
 }
 
-// ******************************************************************************************************
+// ***************************************** Stream operations ******************************************
 
 template<class INPUT>
 class InputHeap
@@ -775,7 +773,7 @@ size_t deduplicate(CompressedState* start, size_t records)
 	return write-start;
 }
 
-// ******************************************************************************************************
+// ********************************************* File names *********************************************
 
 const char* formatFileName(const char* name)
 {
@@ -792,7 +790,7 @@ const char* formatFileName(const char* name, FRAME_GROUP g, unsigned chunk)
 	return formatProblemFileName(name, format(GROUP_FORMAT "-%u", g, chunk), "bin");
 }
 
-// ******************************************************************************************************
+// ************************************** Disk queue (open nodes) ***************************************
 
 #define MAX_FRAME_GROUPS ((MAX_FRAMES+(FRAMES_PER_GROUP-1))/FRAMES_PER_GROUP)
 
@@ -822,6 +820,15 @@ void writeOpenState(CompressedState* state, FRAME frame)
 		queue[group] = new BufferedOutputStream<>(formatFileName("open", group));
 	queue[group]->write(state);
 }
+
+void flushOpen()
+{
+	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
+		if (queue[g])
+			queue[g]->flush();
+}
+
+// *********************************************** Cache ************************************************
 
 INLINE uint32_t hashState(const CompressedState* state)
 {
@@ -904,78 +911,7 @@ void addState(const State* state, FRAME frame)
 	writeOpenState(&cs, frame);
 }
 
-void flushQueue()
-{
-	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
-		if (queue[g])
-			queue[g]->flush();
-}
-
-// ******************************************************************************************************
-
-FRAME_GROUP firstFrameGroup, maxFrameGroups;
-FRAME_GROUP currentFrameGroup;
-
-// ******************************************************************************************************
-
-bool exitFound;
-FRAME exitFrame;
-State exitState;
-#ifdef MULTITHREADING
-MUTEX finishMutex;
-#endif
-
-INLINE bool finishCheck(const State* s, FRAME frame)
-{
-	if (s->isFinish())
-	{
-#ifdef MULTITHREADING
-		SCOPED_LOCK lock(finishMutex);
-#endif
-		if (exitFound)
-		{
-			if (exitFrame > frame)
-			{
-				exitFrame = frame;
-				exitState = *s;
-			}
-		}
-		else
-		{
-			exitFound = true;
-			exitFrame = frame;
-			exitState = *s;
-		}
-		return true;
-	}
-	return false;
-}
-
-void processState(const CompressedState* cs)
-{
-	State s;
-	s.decompress(cs);
-#ifdef DEBUG
-	CompressedState test;
-	s.compress(&test);
-	assert(test == *cs, "Compression/decompression failed");
-#endif
-	FRAME currentFrame = GET_FRAME(currentFrameGroup, *cs);
-	if (finishCheck(&s, currentFrame))
-		return;
-
-	class AddStateChildHandler
-	{
-	public:
-		static INLINE void handleChild(const State* parent, const State* state, Step step, FRAME frame)
-		{
-			addState(state, frame);
-		}
-	};
-
-	expandChildren<AddStateChildHandler>(currentFrame, &s);
-	assert(currentFrame/FRAMES_PER_GROUP == currentFrameGroup, format("Run-away currentFrameGroup: currentFrame=%u, currentFrameGroup=%u", currentFrame, currentFrameGroup));
-}
+// ****************************************** Processing queue ******************************************
 
 #ifdef MULTITHREADING
 
@@ -1013,19 +949,33 @@ bool dequeueState(CompressedState* state)
 	return true;
 }
 
+template<void (*STATE_HANDLER)(const CompressedState*)>
 void worker()
 {
-	runningWorkers++;
-	CompressedState cs;
-	while (dequeueState(&cs))
-		processState(&cs);
-	runningWorkers--;
-
     /* LOCK */
 	{
 		SCOPED_LOCK lock(processQueueMutex);
+		runningWorkers++;
+	}
+	
+	CompressedState cs;
+	while (dequeueState(&cs))
+		STATE_HANDLER(&cs);
+	
+    /* LOCK */
+	{
+		SCOPED_LOCK lock(processQueueMutex);
+		runningWorkers--;
 		CONDITION_NOTIFY(processQueueExitCondition, lock);
 	}
+}
+
+template<void (*STATE_HANDLER)(const CompressedState*)>
+void startWorkers()
+{
+	void (*myWorker)() = &worker<STATE_HANDLER>;
+	for (int i=0; i<WORKERS; i++)
+		THREAD_CREATE(myWorker);
 }
 
 void flushProcessingQueue()
@@ -1042,36 +992,18 @@ void flushProcessingQueue()
 	stopWorkers = false;
 }
 
-INLINE void processFilteredState(const CompressedState* state)
-{
-	queueState(state);
-}
-
-#else
-
-void processFilteredState(const CompressedState* state)
-{
-	processState(state);
-}
-
 #endif
 
-class ProcessStateHandler
-{
-public:
-	INLINE static void handle(const CompressedState* state)
-	{
-		processFilteredState(state);
-	}
-};
-
-// ******************************************************************************************************
+// ******************************************** Exit tracing ********************************************
 
 State exitSearchState, exitSearchStateParent;
 Step exitSearchStateStep;
 bool exitSearchStateFound = false;
 #ifdef MULTITHREADING
 MUTEX exitSearchStateMutex;
+#endif
+#ifdef DEBUG
+int statesQueued, statesDequeued;
 #endif
 
 class FinishCheckChildHandler
@@ -1091,87 +1023,102 @@ public:
 	}
 };
 
-INLINE void traceExitProcessState(const CompressedState* cs)
+INLINE void processExitState(const CompressedState* cs)
 {
 	State state;
 	state.decompress(cs);
 	//FRAME frame = GET_FRAME(frameGroup, *cs);
 	expandChildren<FinishCheckChildHandler>(0, &state);
-}
 
+#ifdef DEBUG
 #ifdef MULTITHREADING
-void traceExitWorker()
-{
-	runningWorkers++;
-	CompressedState cs;
-	while (dequeueState(&cs))
-		traceExitProcessState(&cs);
-	runningWorkers--;
-
-    /* LOCK */
-	{
-		SCOPED_LOCK lock(processQueueMutex);
-		CONDITION_NOTIFY(processQueueExitCondition, lock);
-	}
-}
+	static MUTEX mutex;
+	SCOPED_LOCK lock(mutex);
 #endif
+	statesDequeued++;
+#endif
+}
 
-void traceExit()
+void traceExit(FRAME exitFrame, const State* exitState)
 {
 	Step steps[MAX_STEPS];
 	int stepNr = 0;
+	exitSearchState = *exitState;
+	int frameGroup = exitFrame / FRAMES_PER_GROUP;
+	
+	if (fileExists(formatFileName("solution")))
 	{
-		exitSearchState = exitState;
-		int frameGroup = exitFrame / FRAMES_PER_GROUP;
-		while (frameGroup >= 0)
+		printf("Resuming exit trace...\n");
+		FILE* f = fopen(formatFileName("solution"), "rb");
+		fread(&frameGroup     , sizeof(frameGroup)     , 1, f);
+		fread(&exitSearchState, sizeof(exitSearchState), 1, f);
+		fread(&stepNr         , sizeof(stepNr)         , 1, f);
+		fread(steps, sizeof(Step), stepNr, f);
+		fclose(f);
+		goto nextStep;
+	}
+	
+	while (frameGroup >= 0)
+	{
+		// save trace-exit progress
 		{
-	nextStep:
-			exitSearchStateFound = false;
-			frameGroup--;
-			if (fileExists(formatFileName("closed", frameGroup)))
-			{
-				printf("Frame" GROUP_STR " " GROUP_FORMAT "... \r", frameGroup);
+			FILE* f = fopen(formatFileName("solution"), "wb");
+			fwrite(&frameGroup     , sizeof(frameGroup)     , 1, f);
+			fwrite(&exitSearchState, sizeof(exitSearchState), 1, f);
+			fwrite(&stepNr         , sizeof(stepNr)         , 1, f);
+			fwrite(steps, sizeof(Step), stepNr, f);
+			fclose(f);
+		}
+
+nextStep:
+		exitSearchStateFound = false;
+		frameGroup--;
+		if (fileExists(formatFileName("closed", frameGroup)))
+		{
+			printf("Frame" GROUP_STR " " GROUP_FORMAT "... \r", frameGroup);
 				
 #ifdef MULTITHREADING
-				for (int i=0; i<WORKERS; i++)
-					THREAD_CREATE(&traceExitWorker);
+			startWorkers<&processExitState>();
 #endif
 
-				BufferedInputStream<> input(formatFileName("closed", frameGroup));
-				const CompressedState *cs;
-				while (cs = input.read())
-				{
+			BufferedInputStream<> input(formatFileName("closed", frameGroup));
+			const CompressedState *cs;
+			DEBUG_ONLY(statesQueued = statesDequeued = 0);
+			while (cs = input.read())
+			{
+				DEBUG_ONLY(statesQueued++);
 #ifdef MULTITHREADING
-					queueState(cs);
+				queueState(cs);
 #else
-					traceExitProcessState(cs);
+				processExitState(cs);
 #endif
-					if (exitSearchStateFound)
-						break;
-				}
+				if (exitSearchStateFound)
+					break;
+			}
 			
 #ifdef MULTITHREADING
-				flushProcessingQueue();
+			flushProcessingQueue();
 #endif
+			debug_assert(statesQueued == statesDequeued, format("Queued %d states but dequeued only %d!", statesQueued, statesDequeued));
 
-				if (exitSearchStateFound)
-				{
-					printTime(); printf("Found (at " GROUP_FORMAT ")!          \n", frameGroup);
-					steps[stepNr++] = exitSearchStateStep;
-					exitSearchState = exitSearchStateParent;
-					if (frameGroup == 0)
-						goto found;
-				}
+			if (exitSearchStateFound)
+			{
+				printTime(); printf("Found (at " GROUP_FORMAT ")!          \n", frameGroup);
+				steps[stepNr++] = exitSearchStateStep;
+				exitSearchState = exitSearchStateParent;
+				if (frameGroup == 0)
+					goto found;
 			}
 		}
 	}
 	error("Lost parent node!");
 found:
-
+    
 	writeSolution(&exitSearchState, steps, stepNr);
+    deleteFile(formatFileName("solution"));
 }
 
-// ******************************************************************************************************
+// **************************************** Common runmode code *****************************************
 
 size_t ramUsed;
 
@@ -1232,7 +1179,87 @@ bool checkStop()
 	return false;
 }
 
-// ******************************************************************************************************
+// *********************************************** Search ***********************************************
+
+FRAME_GROUP firstFrameGroup, maxFrameGroups;
+FRAME_GROUP currentFrameGroup;
+
+bool exitFound;
+FRAME exitFrame;
+State exitState;
+#ifdef MULTITHREADING
+MUTEX finishMutex;
+#endif
+
+INLINE bool finishCheck(const State* s, FRAME frame)
+{
+	if (s->isFinish())
+	{
+#ifdef MULTITHREADING
+		SCOPED_LOCK lock(finishMutex);
+#endif
+		if (exitFound)
+		{
+			if (exitFrame > frame)
+			{
+				exitFrame = frame;
+				exitState = *s;
+			}
+		}
+		else
+		{
+			exitFound = true;
+			exitFrame = frame;
+			exitState = *s;
+		}
+		return true;
+	}
+	return false;
+}
+
+void processState(const CompressedState* cs)
+{
+	State s;
+	s.decompress(cs);
+#ifdef DEBUG
+	CompressedState test;
+	s.compress(&test);
+	assert(test == *cs, "Compression/decompression failed");
+#endif
+	FRAME currentFrame = GET_FRAME(currentFrameGroup, *cs);
+	if (finishCheck(&s, currentFrame))
+		return;
+
+	class AddStateChildHandler
+	{
+	public:
+		static INLINE void handleChild(const State* parent, const State* state, Step step, FRAME frame)
+		{
+			addState(state, frame);
+		}
+	};
+
+	expandChildren<AddStateChildHandler>(currentFrame, &s);
+	assert(currentFrame/FRAMES_PER_GROUP == currentFrameGroup, format("Run-away currentFrameGroup: currentFrame=%u, currentFrameGroup=%u", currentFrame, currentFrameGroup));
+}
+
+INLINE void processFilteredState(const CompressedState* state)
+{
+#ifdef MULTITHREADING
+	queueState(state);
+#else
+	processState(state);
+#endif
+}
+
+class ProcessStateHandler
+{
+public:
+	INLINE static void handle(const CompressedState* state)
+	{
+		processFilteredState(state);
+	}
+};
 
 int search()
 {
@@ -1290,8 +1317,7 @@ int search()
 		printf("Processing... "); fflush(stdout);
 
 #ifdef MULTITHREADING
-		for (int i=0; i<WORKERS; i++)
-			THREAD_CREATE(&worker);
+		startWorkers<&processState>();
 #endif
 
 #ifdef USE_ALL
@@ -1354,13 +1380,13 @@ int search()
 #endif
 
 		printf("Flushing... "); fflush(stdout);
-		flushQueue();
+		flushOpen();
 
 		if (exitFound)
 		{
 			assert(currentFrameGroup == exitFrame / FRAMES_PER_GROUP);
 			printf("\nExit found (at frame %u), tracing path...\n", exitFrame);
-			traceExit();
+			traceExit(exitFrame, &exitState);
 		}
 
 		deleteFile(formatFileName("open", currentFrameGroup));
@@ -1400,7 +1426,7 @@ int search()
 	return 2;
 }
 
-// ******************************************************************************************************
+// ********************************************* Pack-open **********************************************
 
 int packOpen()
 {
@@ -1438,7 +1464,7 @@ int packOpen()
 	return 0;
 }
 
-// ******************************************************************************************************
+// ************************************************ Dump ************************************************
 
 int dump(FRAME_GROUP g)
 {
@@ -1463,7 +1489,7 @@ int dump(FRAME_GROUP g)
 	return 0;
 }
 
-// ******************************************************************************************************
+// *********************************************** Sample ***********************************************
 
 int sample(FRAME_GROUP g)
 {
@@ -1488,7 +1514,7 @@ int sample(FRAME_GROUP g)
 	return 0;
 }
 
-// ******************************************************************************************************
+// ********************************************** Compare ***********************************************
 
 int compare(const char* fn1, const char* fn2)
 {
@@ -1525,7 +1551,7 @@ int compare(const char* fn1, const char* fn2)
 	return 0;
 }
 
-// ******************************************************************************************************
+// ********************************************** Convert ***********************************************
 
 #ifdef GROUP_FRAMES
 
@@ -1608,7 +1634,7 @@ int convert()
 	return 0;
 }
 
-// ******************************************************************************************************
+// *********************************************** Unpack ***********************************************
 
 // Unpack a closed node frame group file to individual frames.
 
@@ -1633,7 +1659,7 @@ int unpack()
 	return 0;
 }
 
-// ******************************************************************************************************
+// *********************************************** Count ************************************************
 
 int count()
 {
@@ -1656,7 +1682,7 @@ int count()
 
 #endif // GROUP_FRAMES
 
-// ******************************************************************************************************
+// *********************************************** Verify ***********************************************
 
 int verify(const char* filename)
 {
@@ -1692,7 +1718,7 @@ int verify(const char* filename)
 	}
 }
 
-// ******************************************************************************************************
+// ********************************************* Sort-open **********************************************
 
 int sortOpen()
 {
@@ -1730,7 +1756,7 @@ int sortOpen()
 	return 0;
 }
 
-// ******************************************************************************************************
+// ****************************************** Seq-filter-open *******************************************
 
 // Filters open node lists without expanding nodes.
 
@@ -1817,7 +1843,7 @@ int seqFilterOpen()
 	return 0;
 }
 
-// ******************************************************************************************************
+// ******************************************** Filter-open *********************************************
 
 void filterStreams(BufferedInputStream<> closed[], int closedCount, BufferedRewriteStream<> open[], int openCount)
 {
@@ -1887,7 +1913,7 @@ int filterOpen()
 	return 0;
 }
 
-// ******************************************************************************************************
+// ****************************************** Regenerate-open *******************************************
 
 int regenerateOpen()
 {
@@ -1905,8 +1931,7 @@ int regenerateOpen()
 			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 			
 #ifdef MULTITHREADING
-			for (int i=0; i<WORKERS; i++)
-				THREAD_CREATE(&worker);
+			startWorkers<&processState>();
 #endif
 
 			BufferedInputStream<> closed(formatFileName("closed", currentFrameGroup));
@@ -1919,7 +1944,7 @@ int regenerateOpen()
 #endif
 			
 			printf("Flushing... "); fflush(stdout);
-			flushQueue();
+			flushOpen();
 			
 			uint64_t size = 0;
 			for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
@@ -1936,7 +1961,7 @@ int regenerateOpen()
 	return 0;
 }
 
-// ******************************************************************************************************
+// ********************************************* Create-all *********************************************
 
 int createAll()
 {
@@ -1954,7 +1979,7 @@ int createAll()
 	return 0;
 }
 
-// ******************************************************************************************************
+// ********************************************* Find-exit **********************************************
 
 int findExit()
 {
@@ -1975,10 +2000,9 @@ int findExit()
 				s.decompress(cs);
 				if (s.isFinish())
 				{
-					exitState = s;
-					exitFrame = GET_FRAME(currentFrameGroup, *cs);
+					FRAME exitFrame = GET_FRAME(currentFrameGroup, *cs);
 					printf("Exit found (at frame %u), tracing path...\n", exitFrame);
-					traceExit();
+					traceExit(exitFrame, &s);
 					return 0;
 				}
 			}
@@ -1989,7 +2013,7 @@ int findExit()
 	return 2;
 }
 
-// ******************************************************************************************************
+// ***************************************** Win32 idle watcher *****************************************
 
 // use background CPU and I/O priority when PC is not idle
 
