@@ -806,7 +806,7 @@ MUTEX queueMutex[MAX_FRAME_GROUPS];
 MUTEX cacheMutex[PARTITIONS];
 #endif
 
-void queueState(CompressedState* state, FRAME frame)
+void writeOpenState(CompressedState* state, FRAME frame)
 {
 	FRAME_GROUP group = frame/FRAMES_PER_GROUP;
 	if (group >= MAX_FRAME_GROUPS)
@@ -884,7 +884,7 @@ void addState(const State* state, FRAME frame)
 			if (nodes[i].state == cs)
 			{
 				if (nodes[i].frame > frame)
-					queueState(&cs, frame);
+					writeOpenState(&cs, frame);
 				// pop to front
 				if (i>0)
 				{
@@ -900,7 +900,7 @@ void addState(const State* state, FRAME frame)
 		nodes[0].frame = (PACKED_FRAME)frame;
 		nodes[0].state = cs;
 	}
-	queueState(&cs, frame);
+	writeOpenState(&cs, frame);
 }
 
 void flushQueue()
@@ -973,7 +973,7 @@ void processState(const CompressedState* cs)
 	};
 
 	expandChildren<AddStateChildHandler>(currentFrame, &s);
-	assert(currentFrame/FRAMES_PER_GROUP == currentFrameGroup, format("Run-away currentFrameGroup: currentFrame=%d, currentFrameGroup=%d", currentFrame, currentFrameGroup));
+	assert(currentFrame/FRAMES_PER_GROUP == currentFrameGroup, format("Run-away currentFrameGroup: currentFrame=%u, currentFrameGroup=%u", currentFrame, currentFrameGroup));
 }
 
 #ifdef MULTITHREADING
@@ -987,9 +987,8 @@ CONDITION processQueueReadCondition, processQueueWriteCondition, processQueueExi
 int runningWorkers = 0;
 bool stopWorkers = false;
 
-void processFilteredState(const CompressedState* state)
+void queueState(const CompressedState* state)
 {
-	// queue state
 	SCOPED_LOCK lock(processQueueMutex);
 
 	while (processQueueHead == processQueueTail+PROCESS_QUEUE_SIZE) // while full
@@ -1028,7 +1027,7 @@ void worker()
 	}
 }
 
-void flushProcessQueue()
+void flushProcessingQueue()
 {
     /* LOCK */
 	SCOPED_LOCK lock(processQueueMutex);
@@ -1040,6 +1039,11 @@ void flushProcessQueue()
 		CONDITION_WAIT(processQueueExitCondition, lock);
 	
 	stopWorkers = false;
+}
+
+INLINE void processFilteredState(const CompressedState* state)
+{
+	queueState(state);
 }
 
 #else
@@ -1062,31 +1066,61 @@ public:
 
 // ******************************************************************************************************
 
-State exitSearchState;
-FRAME exitSearchStateFrame;
+State exitSearchState, exitSearchStateParent;
 Step exitSearchStateStep;
 bool exitSearchStateFound = false;
+#ifdef MULTITHREADING
+MUTEX exitSearchStateMutex;
+#endif
 
 class FinishCheckChildHandler
 {
 public:
 	static INLINE void handleChild(const State* parent, const State* state, Step step, FRAME frame)
 	{
-		if (*state==exitSearchState && frame==exitSearchStateFrame)
+		if (*state==exitSearchState)
 		{
-			exitSearchStateFound = true;
-			exitSearchStateStep = step;
+#ifdef MULTITHREADING
+			SCOPED_LOCK lock(exitSearchStateMutex);
+#endif
+			exitSearchStateFound  = true;
+			exitSearchStateStep   = step;
+			exitSearchStateParent = *parent;
 		}
 	}
 };
+
+INLINE void traceExitProcessState(const CompressedState* cs)
+{
+	State state;
+	state.decompress(cs);
+	//FRAME frame = GET_FRAME(frameGroup, *cs);
+	expandChildren<FinishCheckChildHandler>(0, &state);
+}
+
+#ifdef MULTITHREADING
+void traceExitWorker()
+{
+	runningWorkers++;
+	CompressedState cs;
+	while (dequeueState(&cs))
+		traceExitProcessState(&cs);
+	runningWorkers--;
+
+    /* LOCK */
+	{
+		SCOPED_LOCK lock(processQueueMutex);
+		CONDITION_NOTIFY(processQueueExitCondition, lock);
+	}
+}
+#endif
 
 void traceExit()
 {
 	Step steps[MAX_STEPS];
 	int stepNr = 0;
 	{
-		exitSearchState      = exitState;
-		exitSearchStateFrame = exitFrame;
+		exitSearchState = exitState;
 		int frameGroup = exitFrame / FRAMES_PER_GROUP;
 		while (frameGroup >= 0)
 		{
@@ -1096,25 +1130,36 @@ void traceExit()
 			if (fileExists(formatFileName("closed", frameGroup)))
 			{
 				printf("Frame" GROUP_STR " " GROUP_FORMAT "... \r", frameGroup);
-				// TODO: parallelize?
+				
+#ifdef MULTITHREADING
+				for (int i=0; i<WORKERS; i++)
+					THREAD_CREATE(&traceExitWorker);
+#endif
+
 				BufferedInputStream<> input(formatFileName("closed", frameGroup));
 				const CompressedState *cs;
 				while (cs = input.read())
 				{
-					State state;
-					state.decompress(cs);
-					FRAME frame = GET_FRAME(frameGroup, *cs);
-					expandChildren<FinishCheckChildHandler>(frame, &state);
+#ifdef MULTITHREADING
+					queueState(cs);
+#else
+					traceExitProcessState(cs);
+#endif
 					if (exitSearchStateFound)
-					{
-						printTime(); printf("Found (at %d)!          \n", frame);
-						steps[stepNr++] = exitSearchStateStep;
-						exitSearchState      = state;
-						exitSearchStateFrame = frame;
-						if (frame == 0)
-							goto found;
-						goto nextStep;
-					}
+						break;
+				}
+			
+#ifdef MULTITHREADING
+				flushProcessingQueue();
+#endif
+
+				if (exitSearchStateFound)
+				{
+					printTime(); printf("Found (at " GROUP_FORMAT ")!          \n", frameGroup);
+					steps[stepNr++] = exitSearchStateStep;
+					exitSearchState = exitSearchStateParent;
+					if (frameGroup == 0)
+						goto found;
 				}
 			}
 		}
@@ -1214,7 +1259,7 @@ int search()
 			State s = initialStates[i];
 			CompressedState c;
 			s.compress(&c);
-			queueState(&c, 0);
+			writeOpenState(&c, 0);
 		}
 	}
 
@@ -1304,7 +1349,7 @@ int search()
 #endif
 
 #ifdef MULTITHREADING
-		flushProcessQueue();
+		flushProcessingQueue();
 #endif
 
 		printf("Flushing... "); fflush(stdout);
@@ -1313,7 +1358,7 @@ int search()
 		if (exitFound)
 		{
 			assert(currentFrameGroup == exitFrame / FRAMES_PER_GROUP);
-			printf("Exit found (at frame %u), tracing path...\n", exitFrame);
+			printf("\nExit found (at frame %u), tracing path...\n", exitFrame);
 			traceExit();
 		}
 
@@ -1869,9 +1914,10 @@ int regenerateOpen()
 				processFilteredState(cs);
 			
 #ifdef MULTITHREADING
-			flushProcessQueue();
-			//printf("%d/%d\n", processQueueHead, processQueueTail);
+			flushProcessingQueue();
 #endif
+			
+			printf("Flushing... "); fflush(stdout);
 			flushQueue();
 			
 			uint64_t size = 0;
