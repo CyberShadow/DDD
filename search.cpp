@@ -952,12 +952,6 @@ bool dequeueState(CompressedState* state)
 template<void (*STATE_HANDLER)(const CompressedState*)>
 void worker()
 {
-    /* LOCK */
-	{
-		SCOPED_LOCK lock(processQueueMutex);
-		runningWorkers++;
-	}
-	
 	CompressedState cs;
 	while (dequeueState(&cs))
 		STATE_HANDLER(&cs);
@@ -973,6 +967,7 @@ void worker()
 template<void (*STATE_HANDLER)(const CompressedState*)>
 void startWorkers()
 {
+	runningWorkers = WORKERS;
 	void (*myWorker)() = &worker<STATE_HANDLER>;
 	for (int i=0; i<WORKERS; i++)
 		THREAD_CREATE(myWorker);
@@ -980,7 +975,6 @@ void startWorkers()
 
 void flushProcessingQueue()
 {
-    /* LOCK */
 	SCOPED_LOCK lock(processQueueMutex);
 
 	stopWorkers = true;
