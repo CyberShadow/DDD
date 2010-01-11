@@ -1178,6 +1178,14 @@ bool checkStop()
 	return false;
 }
 
+enum // exit reasons
+{
+	EXIT_OK,
+	EXIT_STOP,
+	EXIT_NOTFOUND,
+	EXIT_ERROR
+};
+
 // *********************************************** Search ***********************************************
 
 FRAME_GROUP firstFrameGroup, maxFrameGroups;
@@ -1399,10 +1407,10 @@ int search()
 		printf("Done.\n");
 
 		if (exitFound)
-			return 0;
+			return EXIT_OK;
 
 		if (checkStop())
-			return 3;
+			return EXIT_STOP;
 
 #ifdef FREE_SPACE_THRESHOLD
 		if (getFreeSpace() < FREE_SPACE_THRESHOLD)
@@ -1422,7 +1430,7 @@ int search()
 	}
 	
 	printf("Exit not found.\n");
-	return 2;
+	return EXIT_NOTFOUND;
 }
 
 // ********************************************* Pack-open **********************************************
@@ -1460,7 +1468,7 @@ int packOpen()
 			deleteFile(formatFileName("open", g));
 			renameFile(formatFileName("openpacked", g), formatFileName("open", g));
     	}
-	return 0;
+	return EXIT_OK;
 }
 
 // ************************************************ Dump ************************************************
@@ -1485,7 +1493,7 @@ int dump(FRAME_GROUP g)
 		s.decompress(cs);
 		puts(s.toString());
 	}
-	return 0;
+	return EXIT_OK;
 }
 
 // *********************************************** Sample ***********************************************
@@ -1510,7 +1518,7 @@ int sample(FRAME_GROUP g)
 	State s;
 	s.decompress(&cs);
 	puts(s.toString());
-	return 0;
+	return EXIT_OK;
 }
 
 // ********************************************** Compare ***********************************************
@@ -1547,7 +1555,7 @@ int compare(const char* fn1, const char* fn2)
 	}
 	printf("%llu duplicate states\n", dups);
 	printf("%llu interweaves\n", switches);
-	return 0;
+	return EXIT_OK;
 }
 
 // ********************************************** Convert ***********************************************
@@ -1630,7 +1638,7 @@ int convert()
 		}
 		free(inputs);
 	}
-	return 0;
+	return EXIT_OK;
 }
 
 // *********************************************** Unpack ***********************************************
@@ -1655,7 +1663,7 @@ int unpack()
 				outputs[cs->subframe].write(&cs2);
 			}
 		}
-	return 0;
+	return EXIT_OK;
 }
 
 // *********************************************** Count ************************************************
@@ -1676,7 +1684,7 @@ int count()
 					printf("Frame %u: %llu\n", g*FRAMES_PER_GROUP+i, counts[i]);
 			fflush(stdout);
 		}
-	return 0;
+	return EXIT_OK;
 }
 
 #endif // GROUP_FRAMES
@@ -1694,7 +1702,7 @@ int verify(const char* filename)
 		const CompressedState* cs2 = input.read();
 		pos++;
 		if (cs2==NULL)
-			return 0;
+			return EXIT_OK;
 		if (cs == *cs2)
 			if (!equalFound)
 			{
@@ -1713,7 +1721,7 @@ int verify(const char* filename)
 #endif
 		cs = *cs2;
 		if (equalFound && oooFound)
-			return 0;
+			return EXIT_OK;
 	}
 }
 
@@ -1750,9 +1758,9 @@ int sortOpen()
 		printf("Done: %lld -> %lld.\n", initialSize, finalSize);
 
 		if (checkStop())
-			return 3;
+			return EXIT_STOP;
 	}
-	return 0;
+	return EXIT_OK;
 }
 
 // ****************************************** Seq-filter-open *******************************************
@@ -1837,9 +1845,9 @@ int seqFilterOpen()
 		printf("Done: %lld -> %lld.\n", initialSize, finalSize);
 
 		if (checkStop())
-			return 3;
+			return EXIT_STOP;
 	}
-	return 0;
+	return EXIT_OK;
 }
 
 // ******************************************** Filter-open *********************************************
@@ -1909,7 +1917,7 @@ int filterOpen()
 			open[g].truncate();
 	
 	delete[] open;
-	return 0;
+	return EXIT_OK;
 }
 
 // ****************************************** Regenerate-open *******************************************
@@ -1954,10 +1962,10 @@ int regenerateOpen()
 			oldSize = size;
 
 			if (checkStop())
-				return 3;
+				return EXIT_STOP;
 		}
 	
-	return 0;
+	return EXIT_OK;
 }
 
 // ********************************************* Create-all *********************************************
@@ -1975,7 +1983,7 @@ int createAll()
 	}
 
 	renameFile(formatFileName("allnew"), formatFileName("all"));
-	return 0;
+	return EXIT_OK;
 }
 
 // ********************************************* Find-exit **********************************************
@@ -2002,14 +2010,14 @@ int findExit()
 					FRAME exitFrame = GET_FRAME(currentFrameGroup, *cs);
 					printf("Exit found (at frame %u), tracing path...\n", exitFrame);
 					traceExit(&s, exitFrame);
-					return 0;
+					return EXIT_OK;
 				}
 			}
 			printf("Done.\n");
 		}
 	}
 	printf("Exit not found.\n");
-	return 2;
+	return EXIT_NOTFOUND;
 }
 
 // ***************************************** Win32 idle watcher *****************************************
@@ -2265,7 +2273,7 @@ int run(int argc, const char* argv[])
 	if (fileExists(formatProblemFileName("stop", NULL, "txt")))
 	{
 		printf("Stop file present.\n");
-		return 3;
+		return EXIT_STOP;
 	}
 
 #if defined(_WIN32)
@@ -2373,7 +2381,7 @@ int run(int argc, const char* argv[])
 	else
 	{
 		printf("%s", usage);
-		return 0;
+		return EXIT_OK;
 	}
 }
 
@@ -2383,7 +2391,7 @@ int run(int argc, const char* argv[])
 // define main() in another file and #include "search.cpp"
 #elif defined(PROBLEM_RELATED)
 #include BOOST_PP_STRINGIZE(PROBLEM/PROBLEM_RELATED.cpp)
-int main(int argc, const char* argv[]) { try { return run_related(argc, argv); } catch(const char* s) { printf("\n%s\n", s); return 1; } }
+int main(int argc, const char* argv[]) { try { return run_related(argc, argv); } catch(const char* s) { printf("\n%s\n", s); return EXIT_ERROR; } }
 #else
-int main(int argc, const char* argv[]) { try { return run        (argc, argv); } catch(const char* s) { printf("\n%s\n", s); return 1; } }
+int main(int argc, const char* argv[]) { try { return run        (argc, argv); } catch(const char* s) { printf("\n%s\n", s); return EXIT_ERROR; } }
 #endif
