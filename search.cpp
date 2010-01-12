@@ -2091,6 +2091,29 @@ int findExit()
 	return EXIT_NOTFOUND;
 }
 
+
+// *************************************** Write-partial-solution ***************************************
+
+int writePartialSolution()
+{
+	if (!fileExists(formatFileName("solution")))
+		error(format("Partial trace solution file (%s) not found.", formatFileName("solution")));
+	
+	int stepNr;
+	Step steps[MAX_STEPS];
+
+	FILE* f = fopen(formatFileName("solution"), "rb");
+	fread(&exitSearchFrameGroup, sizeof(exitSearchFrameGroup), 1, f);
+	fread(&exitSearchState     , sizeof(exitSearchState)     , 1, f);
+	fread(&stepNr              , sizeof(stepNr)              , 1, f);
+	fread(steps, sizeof(Step), stepNr, f);
+	fclose(f);
+
+	writeSolution(&exitSearchState, steps, stepNr);
+
+	return EXIT_OK;
+}
+
 // ***************************************** Win32 idle watcher *****************************************
 
 // use background CPU and I/O priority when PC is not idle
@@ -2280,6 +2303,11 @@ where <mode> is one of:\n\
 		(both closed an open node files). When a state is found which\n\
 		satisfies the isFinish condition, it is traced back and the\n\
 		solution is written, as during normal search.\n\
+	write-partial-solution\n\
+		Saves the partial solution, using the partial exit trace solution\n\
+		file. Allows exit tracing inspection. Warning: uses the same code\n\
+		as when writing the full solution, and may overwrite an existing\n\
+		solution.\n\
 A [frame"GROUP_STR"-range] is a space-delimited list of zero, one or two frame"GROUP_STR"\n\
 numbers. If zero numbers are specified, the range is assumed to be all\n\
 frame"GROUP_STR"s. If one number is specified, the range is set to only that\n\
@@ -2452,6 +2480,11 @@ int run(int argc, const char* argv[])
 	{
 		parseFrameRange(argc-2, argv+2);
 		return findExit();
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "write-partial-solution")==0)
+	{
+		return writePartialSolution();
 	}
 	else
 	{
