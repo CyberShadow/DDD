@@ -1282,7 +1282,17 @@ void processState(const CompressedState* cs)
 #ifdef DEBUG
 	CompressedState test;
 	s.compress(&test);
-	assert(test == *cs, "Compression/decompression failed");
+	if (test != *cs)
+	{
+		puts("");
+		puts(hexDump(cs, sizeof(CompressedState)));
+		puts(cs->toString());
+		puts(hexDump(&s, sizeof(State)));
+		puts(s.toString());
+		puts(hexDump(&test, sizeof(CompressedState)));
+		puts(test.toString());
+		error("Compression/decompression failed");
+	}
 #endif
 	FRAME currentFrame = GET_FRAME(currentFrameGroup, *cs);
 	if (finishCheck(&s, currentFrame))
@@ -1876,11 +1886,17 @@ int seqFilterOpen()
 			int inputCount = 0;
 			for (FRAME_GROUP g=0; g<currentFrameGroup; g++)
 			{
+#ifdef USE_ALL
+				if (fileExists(formatFileName("all", g)))
+				{
+					inputs[inputCount  ].setBufferSize(ALL_FILE_BUFFER_SIZE);
+					inputs[inputCount++].open(formatFileName("all", g));
+					break;
+				}
+#endif
 				const char* fn = formatFileName("open", g);
-#ifndef USE_ALL
 				if (!fileExists(fn))
 					fn = formatFileName("closed", g);
-#endif
 				if (fileExists(fn))
 				{
 					inputs[inputCount].open(fn);
@@ -1890,9 +1906,6 @@ int seqFilterOpen()
 						inputs[inputCount].close();
 				}
 			}
-#ifdef USE_ALL
-			inputs[inputCount++].open(formatFileName("all"));
-#endif
 			BufferedOutputStream* output = new BufferedOutputStream(formatFileName("filtering", currentFrameGroup));
 			filterStream<NullStateHandler>(source, inputs, inputCount, output);
 			delete source;
@@ -1966,19 +1979,22 @@ int filterOpen()
 			open[g].open(formatFileName("open", g));
 	    }
 
-#ifndef USE_ALL
 	BufferedInputStream* closed = new BufferedInputStream[MAX_FRAME_GROUPS];
 	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
+#ifdef USE_ALL
+		if (fileExists(formatFileName("all", g)))
+		{
+			closed[g].setBufferSize(ALL_FILE_BUFFER_SIZE);
+			closed[g].open(formatFileName("all", g));
+			break;
+		}
+		else
+#endif
 		if (fileExists(formatFileName("closed", g)))
 			closed[g].open(formatFileName("closed", g));
 
 	filterStreams(closed, MAX_FRAME_GROUPS, open, MAX_FRAME_GROUPS);
-
 	delete[] closed;
-#else
-	BufferedInputStream all(formatFileName("all"));
-	filterStreams(&all, 1, open, MAX_FRAME_GROUPS);
-#endif
 	
 	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++) // on success, truncate open nodes manually
 		if (open[g].isOpen())
@@ -2040,17 +2056,21 @@ int regenerateOpen()
 
 int createAll()
 {
+	FRAME_GROUP maxClosed = 0;
 	BufferedInputStream* closed = new BufferedInputStream[MAX_FRAME_GROUPS];
 	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
 		if (fileExists(formatFileName("closed", g)))
+		{
 			closed[g].open(formatFileName("closed", g));
+			maxClosed = g;
+		}
 
 	{
-		BufferedOutputStream all(formatFileName("allnew"));
+		BufferedOutputStream all(formatFileName("allnew", maxClosed));
 		mergeStreams(closed, MAX_FRAME_GROUPS, &all);
 	}
 
-	renameFile(formatFileName("allnew"), formatFileName("all"));
+	renameFile(formatFileName("allnew", maxClosed), formatFileName("all", maxClosed));
 	return EXIT_OK;
 }
 
@@ -2199,8 +2219,9 @@ void testCompressedState()
 	}
 
 	p1[subframe] = 0xFF;
-	enforce(c1.subframe == 0xFF, format("Misaligned subframe!\n%s", hexDump(p1, sizeof(CompressedState))));
 	enforce(c1 == c2, "Different subframe causes inequality");
+	c2.subframe = 0xFF;
+	enforce(c1.subframe == 0xFF && p2[subframe] == 0xFF && memcmp(p1, p2, sizeof(CompressedState))==0, format("Misaligned subframe!\n%s\n%s", hexDump(p1, sizeof(CompressedState)), hexDump(p2, sizeof(CompressedState))));
 #endif
 	
 	for (int i=0; i<COMPRESSED_BITS; i++)
