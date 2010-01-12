@@ -1040,9 +1040,6 @@ void traceExit(const State* exitState, FRAME exitFrame)
 {
 	Step steps[MAX_STEPS];
 	int stepNr = 0;
-	exitSearchState      = *exitState;
-	exitSearchStateFrame =  exitFrame;
-	exitSearchFrameGroup =  exitFrame / FRAMES_PER_GROUP;
 	
 	if (fileExists(formatFileName("solution")))
 	{
@@ -1053,8 +1050,16 @@ void traceExit(const State* exitState, FRAME exitFrame)
 		fread(&stepNr              , sizeof(stepNr)              , 1, f);
 		fread(steps, sizeof(Step), stepNr, f);
 		fclose(f);
-		goto nextStep;
 	}
+	else
+	if (exitState)
+	{
+		exitSearchState      = *exitState;
+		exitSearchStateFrame =  exitFrame;
+		exitSearchFrameGroup =  exitFrame / FRAMES_PER_GROUP;
+	}
+	else
+		error("Can't resume exit tracing - partial trace solution file not found");
 	
 	while (exitSearchFrameGroup >= 0)
 	{
@@ -1068,7 +1073,6 @@ void traceExit(const State* exitState, FRAME exitFrame)
 			fclose(f);
 		}
 
-nextStep:
 		exitSearchStateFound = false;
 		exitSearchFrameGroup--;
 		if (fileExists(formatFileName("closed", exitSearchFrameGroup)))
@@ -1271,6 +1275,13 @@ public:
 int search()
 {
 	firstFrameGroup = 0;
+
+	if (fileExists(formatFileName("solution")))
+	{
+		printf("Partial trace solution file present, resuming exit trace...\n");
+		traceExit(NULL, 0);
+		return EXIT_OK;
+	}
 
 	for (FRAME_GROUP g=MAX_FRAME_GROUPS; g>0; g--)
 		if (fileExists(formatFileName("closed", g)))
@@ -1990,6 +2001,9 @@ int createAll()
 
 int findExit()
 {
+	if (fileExists(formatFileName("solution")))
+		error(format("Partial trace solution file (%s) present - if you want to resume exit tracing, run \"search\" instead, otherwise delete the file", formatFileName("solution")));
+	
 	// redeclare currentFrameGroup
 	for (FRAME_GROUP currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
 	{
