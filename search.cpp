@@ -141,9 +141,9 @@ void printTime()
 typedef int32_t FRAME;
 typedef int32_t FRAME_GROUP;
 #if (MAX_FRAMES<65536)
-typedef int16_t PACKED_FRAME;
+typedef uint16_t PACKED_FRAME;
 #else
-typedef int32_t PACKED_FRAME;
+typedef uint32_t PACKED_FRAME;
 #endif
 
 // ********************************************** Problem ***********************************************
@@ -1260,7 +1260,7 @@ bool checkStop()
 
 FRAME_GROUP lastAll()
 {
-	for (int g=MAX_FRAME_GROUPS-1; g>=0; g--)
+	for (FRAME_GROUP g=MAX_FRAME_GROUPS-1; g>=0; g--)
 		if (fileExists(formatFileName("all", g)))
 			return g;
 	error("All file not found!");
@@ -1274,6 +1274,10 @@ enum // exit reasons
 	EXIT_NOTFOUND,
 	EXIT_ERROR
 };
+
+// Forward declarations
+int doSortOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups);
+int filterOpen();
 
 // *********************************************** Search ***********************************************
 
@@ -1531,12 +1535,14 @@ int search()
 #ifdef FREE_SPACE_THRESHOLD
 		if (getFreeSpace() < FREE_SPACE_THRESHOLD)
 		{
-			int filterOpen();
-			int sortOpen();
 			printf("Low disk space detected. Sorting open nodes...\n");
-			sortOpen();
+			doSortOpen(0, MAX_FRAME_GROUPS);
+			if (checkStop()) return EXIT_STOP;
+
 			printf("Done. Filtering open nodes...\n");
 			filterOpen();
+			if (checkStop()) return EXIT_STOP;
+			
 			if (getFreeSpace() < FREE_SPACE_THRESHOLD)
 				error("Open node filter failed to produce sufficient free space");
 			printf("Done, resuming search...\n");
@@ -1843,8 +1849,9 @@ int verify(const char* filename)
 
 // ********************************************* Sort-open **********************************************
 
-int sortOpen()
+int doSortOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups)
 {
+	// override global variables
 	for (FRAME_GROUP currentFrameGroup=maxFrameGroups-1; currentFrameGroup>=firstFrameGroup; currentFrameGroup--)
 	{
 		if (!fileExists(formatFileName("open", currentFrameGroup)))
@@ -1877,6 +1884,11 @@ int sortOpen()
 			return EXIT_STOP;
 	}
 	return EXIT_OK;
+}
+
+int sortOpen()
+{
+	return doSortOpen(firstFrameGroup, maxFrameGroups);
 }
 
 // ****************************************** Seq-filter-open *******************************************
@@ -1922,7 +1934,7 @@ int seqFilterOpen()
 			BufferedInputStream* source = new BufferedInputStream(formatFileName("merged", currentFrameGroup));
 			BufferedInputStream* inputs = new BufferedInputStream[MAX_FRAME_GROUPS+1];
 			int inputCount = 0;
-			for (FRAME_GROUP g=0; g<currentFrameGroup; g++)
+			for (FRAME_GROUP g=currentFrameGroup-1; g>=0; g--)
 			{
 #ifdef USE_ALL
 				if (fileExists(formatFileName("all", g)))
@@ -2007,10 +2019,10 @@ void filterStreams(BufferedInputStream closed[], int closedCount, BufferedRewrit
 	}
 }
 
-int filterOpen()
+int doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups)
 {
 	BufferedRewriteStream* open = new BufferedRewriteStream[MAX_FRAME_GROUPS];
-	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
+	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
 		if (fileExists(formatFileName("open", g)))
 		{
 			enforce(!fileExists(formatFileName("closed", g)), format("Open and closed node files present for the same frame" GROUP_STR " " GROUP_FORMAT, g));
@@ -2018,7 +2030,7 @@ int filterOpen()
 	    }
 
 	BufferedInputStream* closed = new BufferedInputStream[MAX_FRAME_GROUPS];
-	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
+	for (FRAME_GROUP g=MAX_FRAME_GROUPS-1; g>=0; g--)
 #ifdef USE_ALL
 		if (fileExists(formatFileName("all", g)))
 		{
@@ -2040,6 +2052,11 @@ int filterOpen()
 	
 	delete[] open;
 	return EXIT_OK;
+}
+
+int filterOpen()
+{
+	doFilterOpen(0, MAX_FRAME_GROUPS);
 }
 
 // ****************************************** Regenerate-open *******************************************
