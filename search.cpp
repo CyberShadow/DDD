@@ -1278,6 +1278,8 @@ enum // exit reasons
 // Forward declarations
 int doSortOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups);
 int filterOpen();
+void doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups);
+void filterAgainstClosed(BufferedRewriteStream open[], int openCount);
 
 // *********************************************** Search ***********************************************
 
@@ -1382,7 +1384,7 @@ int search()
 		return EXIT_OK;
 	}
 
-	for (FRAME_GROUP g=MAX_FRAME_GROUPS; g>0; g--)
+	for (FRAME_GROUP g=MAX_FRAME_GROUPS; g>=0; g--)
 		if (fileExists(formatFileName("closed", g)))
 		{
 			printf("Resuming from frame" GROUP_STR " " GROUP_FORMAT "\n", g+1);
@@ -1542,15 +1544,193 @@ int search()
 			printf("Done. Filtering open nodes...\n");
 			filterOpen();
 			if (checkStop()) return EXIT_STOP;
-			
+
 			if (getFreeSpace() < FREE_SPACE_THRESHOLD)
 				error("Open node filter failed to produce sufficient free space");
 			printf("Done, resuming search...\n");
-
 		}
 #endif
 	}
 	
+	printf("Exit not found.\n");
+	return EXIT_NOTFOUND;
+}
+
+// ******************************************* Grouped-search *******************************************
+
+int groupedSearch(FRAME_GROUP groupSize, bool filterFirst)
+{
+	firstFrameGroup = 0;
+
+	if (fileExists(formatFileName("solution")))
+		error(format("Partial trace solution file (%s) present - if you want to resume exit tracing, run \"search\" instead, otherwise delete the file", formatFileName("solution")));
+
+	for (FRAME_GROUP g=MAX_FRAME_GROUPS; g>=0; g--)
+		if (fileExists(formatFileName("closed", g)))
+		{
+			printf("Resuming from frame" GROUP_STR " " GROUP_FORMAT "\n", g+1);
+			firstFrameGroup = g+1;
+			break;
+	    }
+
+	if (firstFrameGroup==0)
+		error("No closed node files found");
+
+	for (FRAME_GROUP g=firstFrameGroup; g<MAX_FRAME_GROUPS; g++)
+		if (fileExists(formatFileName("open", g)))
+		{
+			printTime(); printf("Reopening queue for frame" GROUP_STR " " GROUP_FORMAT "\n", g);
+			queue[g] = new BufferedOutputStream(formatFileName("open", g), true);
+		}
+
+	FRAME_GROUP baseFrameGroup = firstFrameGroup;
+
+	while (true)
+	{
+		bool haveOpen = false;
+		for (FRAME_GROUP g=baseFrameGroup; g<MAX_FRAME_GROUPS; g++)
+			if (fileExists(formatFileName("open", g)))
+			{
+				haveOpen = true;
+				break;
+			}
+		if (!haveOpen)
+			break;
+
+		printTime(); printf("=== Frame"GROUP_STR"s "GROUP_FORMAT" .. "GROUP_FORMAT" ===\n", baseFrameGroup, baseFrameGroup+groupSize-1);
+
+		if (filterFirst)
+		{
+			for (FRAME_GROUP g=baseFrameGroup; g<baseFrameGroup+groupSize; g++)
+				if (queue[g])
+				{
+					delete queue[g];
+					queue[g] = NULL;
+				}
+
+			printTime(); printf("Sorting...\n");
+			doSortOpen(baseFrameGroup, baseFrameGroup+groupSize);
+			if (checkStop()) return EXIT_STOP;
+
+			printTime(); printf("Processing...\n");
+			doFilterOpen(baseFrameGroup, baseFrameGroup+groupSize);
+			if (checkStop()) return EXIT_STOP;
+		}
+
+		for (FRAME_GROUP g=baseFrameGroup; g<baseFrameGroup+groupSize; g++)
+			if (!queue[g] && fileExists(formatFileName("open", g)))
+			{
+				//printTime(); printf("Reopening queue for frame" GROUP_STR " " GROUP_FORMAT "\n", g);
+				queue[g] = new BufferedOutputStream(formatFileName("open", g), true);
+			}
+
+		for (currentFrameGroup=baseFrameGroup; currentFrameGroup<baseFrameGroup+groupSize; currentFrameGroup++)
+		{
+			if (!queue[currentFrameGroup])
+				continue;
+			delete queue[currentFrameGroup];
+			queue[currentFrameGroup] = NULL;
+
+			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT ": ", currentFrameGroup); fflush(stdout);
+			sortAndMerge(currentFrameGroup);
+
+			printf("Expanding... "); fflush(stdout);
+#ifdef MULTITHREADING
+			startWorkers<&processState>();
+#endif
+			BufferedInputStream input(formatFileName("merged", currentFrameGroup));
+			const CompressedState* cs;
+			while (cs = input.read())
+				processFilteredState(cs);
+#ifdef MULTITHREADING
+			flushProcessingQueue();
+#endif
+			printf("Done.\n");
+
+			if (exitFound)
+			{
+				assert(currentFrameGroup == exitFrame / FRAMES_PER_GROUP);
+				printf("Exit has been found, stopping.\n");
+				break;
+			}
+		}
+
+		printTime(); printf("Flushing...\n");
+		flushOpen();
+
+		for (FRAME_GROUP g=baseFrameGroup; g<baseFrameGroup+groupSize; g++)
+			if (queue[g])
+			{
+				delete queue[g];
+				queue[g] = NULL;
+			}
+
+		printTime(); printf("Filtering...\n");
+		BufferedRewriteStream* merged = new BufferedRewriteStream[groupSize];
+		for (int g=0; g<groupSize; g++)
+			if (fileExists(formatFileName("merged", baseFrameGroup+g)))
+			{
+				merged[g].setBufferSize(MERGING_BUFFER_SIZE);
+				merged[g].open(formatFileName("merged", baseFrameGroup+g));
+			}
+		filterAgainstClosed(merged, groupSize);
+		delete[] merged;
+
+		for (FRAME_GROUP g=baseFrameGroup; g<baseFrameGroup+groupSize; g++)
+			if (fileExists(formatFileName("merged", g)))
+			{
+				deleteFile(formatFileName("open", g));
+				renameFile(formatFileName("merged", g), formatFileName("closed", g));
+			}
+
+		if (exitFound)
+		{
+			printf("\nExit found (at frame %u), tracing path...\n", exitFrame);
+			traceExit(&exitState, exitFrame);
+			return EXIT_OK;
+		}
+
+#ifdef USE_ALL
+		printTime(); printf("Updating \"all\" file...\n");
+
+		FRAME_GROUP maxClosed = 0;
+		FRAME_GROUP lastAll = -1;
+		BufferedInputStream* closed = new BufferedInputStream[MAX_FRAME_GROUPS];
+		for (FRAME_GROUP g=baseFrameGroup+groupSize-1; g>=0; g--)
+		{
+			if (fileExists(formatFileName("all", g)))
+			{
+				closed[g].setBufferSize(ALL_FILE_BUFFER_SIZE);
+				closed[g].open(formatFileName("all", g));
+				lastAll = g;
+				break;
+			}
+			else
+			if (fileExists(formatFileName("closed", g)))
+			{
+				closed[g].open(formatFileName("closed", g));
+				if (maxClosed == 0)
+					maxClosed = g;
+			}
+		}
+		assert(maxClosed, "No closed node files found");
+
+		{
+			BufferedOutputStream all(formatFileName("allnew", maxClosed));
+			mergeStreams(closed, MAX_FRAME_GROUPS, &all);
+		}
+		delete[] closed;
+
+		renameFile(formatFileName("allnew", maxClosed), formatFileName("all", maxClosed));
+		if (lastAll>=0)
+			deleteFile(formatFileName("all", lastAll));
+#endif
+
+		baseFrameGroup += groupSize;
+
+		if (checkStop())
+			return EXIT_STOP;
+	}
 	printf("Exit not found.\n");
 	return EXIT_NOTFOUND;
 }
@@ -2019,16 +2199,9 @@ void filterStreams(BufferedInputStream closed[], int closedCount, BufferedRewrit
 	}
 }
 
-int doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups)
+// use closed/all files implicitly
+void filterAgainstClosed(BufferedRewriteStream open[], int openCount)
 {
-	BufferedRewriteStream* open = new BufferedRewriteStream[MAX_FRAME_GROUPS];
-	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
-		if (fileExists(formatFileName("open", g)))
-		{
-			enforce(!fileExists(formatFileName("closed", g)), format("Open and closed node files present for the same frame" GROUP_STR " " GROUP_FORMAT, g));
-			open[g].open(formatFileName("open", g));
-	    }
-
 	BufferedInputStream* closed = new BufferedInputStream[MAX_FRAME_GROUPS];
 	for (FRAME_GROUP g=MAX_FRAME_GROUPS-1; g>=0; g--)
 #ifdef USE_ALL
@@ -2043,20 +2216,36 @@ int doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups)
 		if (fileExists(formatFileName("closed", g)))
 			closed[g].open(formatFileName("closed", g));
 
-	filterStreams(closed, MAX_FRAME_GROUPS, open, MAX_FRAME_GROUPS);
+	filterStreams(closed, MAX_FRAME_GROUPS, open, openCount);
 	delete[] closed;
 	
-	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++) // on success, truncate open nodes manually
+	for (FRAME_GROUP g=0; g<openCount; g++) // on success, truncate open nodes manually
 		if (open[g].isOpen())
+		{
+			open[g].flush();
 			open[g].truncate();
-	
+		}
+}
+
+void doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups)
+{
+	BufferedRewriteStream* open = new BufferedRewriteStream[MAX_FRAME_GROUPS];
+	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
+		if (fileExists(formatFileName("open", g)))
+		{
+			enforce(!fileExists(formatFileName("closed", g)), format("Open and closed node files present for the same frame" GROUP_STR " " GROUP_FORMAT, g));
+			open[g].open(formatFileName("open", g));
+	    }
+
+	filterAgainstClosed(open, MAX_FRAME_GROUPS);
+
 	delete[] open;
-	return EXIT_OK;
 }
 
 int filterOpen()
 {
 	doFilterOpen(0, MAX_FRAME_GROUPS);
+	return EXIT_OK;
 }
 
 // ****************************************** Regenerate-open *******************************************
@@ -2117,13 +2306,16 @@ int createAll()
 		if (fileExists(formatFileName("closed", g)))
 		{
 			closed[g].open(formatFileName("closed", g));
-			maxClosed = g;
+			if (maxClosed == 0)
+				maxClosed = g;
 		}
+	enforce(maxClosed, "No closed node files found");
 
 	{
 		BufferedOutputStream all(formatFileName("allnew", maxClosed));
 		mergeStreams(closed, MAX_FRAME_GROUPS, &all);
 	}
+	delete[] closed;
 
 	renameFile(formatFileName("allnew", maxClosed), formatFileName("all", maxClosed));
 	return EXIT_OK;
@@ -2324,6 +2516,17 @@ where <mode> is one of:\n\
 	search [max-frame"GROUP_STR"]\n\
 		Sorts, filters and expands open nodes. 	If no open node files\n\
 		are present, starts a new search from the initial state.\n\
+	grouped-search <size>\n\
+		Performs the same operation as \"search\", but processes <size>\n\
+		open frame"GROUP_STR"s at once. The nodes for each frame"GROUP_STR"\n\
+		are expanded without being filtered, and all frame"GROUP_STR"s are\n\
+		sorted, filtered and \"closed\" at the end. This mode is useful\n\
+		when the open node files become much smaller than the total size\n\
+		of the closed node files.\n\
+	grouped-search-no-filter <size>\n\
+		Same as above, but does not sort and filter the node files\n\
+		before expanding them. Use with care, as it may lead to an\n\
+		explosion in the number of open nodes.\n\
 	dump <frame"GROUP_STR">\n\
 		Dumps all states from the specified frame"GROUP_STR", which\n\
 		can be either open or closed.\n\
@@ -2474,6 +2677,17 @@ int run(int argc, const char* argv[])
 		if (argc>2)
 			maxFrameGroups = parseInt(argv[2]);
 		return search();
+	}
+	if (argc>1 && strcmp(argv[1], "grouped-search")==0)
+	{
+		enforce(argc==3, "Specify how many frame"GROUP_STR"s to process at once");
+		return groupedSearch(parseInt(argv[2]), true);
+	}
+	else
+	if (argc>1 && strcmp(argv[1], "grouped-search-no-filter")==0)
+	{
+		enforce(argc==3, "Specify how many frame"GROUP_STR"s to process at once");
+		return groupedSearch(parseInt(argv[2]), false);
 	}
 	else
 	if (argc>1 && strcmp(argv[1], "dump")==0)
