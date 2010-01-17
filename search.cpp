@@ -146,6 +146,8 @@ typedef uint16_t PACKED_FRAME;
 typedef uint32_t PACKED_FRAME;
 #endif
 
+enum { PREFERRED_STATE_COMPRESSED, PREFERRED_STATE_UNCOMPRESSED, PREFERRED_STATE_NEITHER };
+
 // ********************************************** Problem ***********************************************
 
 #include STRINGIZE(PROBLEM/PROBLEM.cpp)
@@ -951,14 +953,14 @@ MUTEX queueMutex[MAX_FRAME_GROUPS];
 MUTEX cacheMutex[PARTITIONS];
 #endif
 
-void writeOpenState(CompressedState* state, FRAME frame)
+void writeOpenState(const CompressedState* state, FRAME frame)
 {
 	FRAME_GROUP group = frame/FRAMES_PER_GROUP;
 	if (group >= MAX_FRAME_GROUPS)
 		return;
 	if (noQueue[group])
 		return;
-	SET_SUBFRAME(*state, frame);
+	SET_SUBFRAME(*(CompressedState*)state, frame); // HACK: remove const
 #ifdef MULTITHREADING
 	SCOPED_LOCK lock(queueMutex[group]);
 #endif
@@ -1008,26 +1010,9 @@ INLINE uint32_t hashState(const CompressedState* state)
 	return h;
 }
 
-void addState(const State* state, FRAME frame)
+void addState(const CompressedState* cs, FRAME frame)
 {
-	CompressedState cs;
-	state->compress(&cs);
-#ifdef DEBUG
-	State test;
-	test.decompress(&cs);
-	if (!(test == *state))
-	{
-		puts("");
-		puts(hexDump(state, sizeof(State)));
-		puts(state->toString());
-		puts(hexDump(&cs, sizeof(CompressedState)));
-		puts(cs.toString());
-		puts(hexDump(&test, sizeof(State)));
-		puts(test.toString());
-		error("Compression/decompression failed");
-	}
-#endif
-	uint32_t hash = hashState(&cs) % CACHE_HASH_SIZE;
+	uint32_t hash = hashState(cs) % CACHE_HASH_SIZE;
 	
 	{
 #ifdef MULTITHREADING
@@ -1035,15 +1020,15 @@ void addState(const State* state, FRAME frame)
 #endif
 		CacheNode* nodes = cache[hash];
 		for (int i=0; i<NODES_PER_HASH; i++)
-			if (nodes[i].state == cs)
+			if (nodes[i].state == *cs)
 			{
 				if (nodes[i].frame > frame)
-					writeOpenState(&cs, frame);
+					writeOpenState(cs, frame);
 				// pop to front
 				if (i>0)
 				{
 					memmove(nodes+1, nodes, i * sizeof(CacheNode));
-					nodes[0].state = cs;
+					nodes[0].state = *cs;
 				}
 				nodes[0].frame = (PACKED_FRAME)frame;
 				return;
@@ -1052,9 +1037,9 @@ void addState(const State* state, FRAME frame)
 		// new node
 		memmove(nodes+1, nodes, (NODES_PER_HASH-1) * sizeof(CacheNode));
 		nodes[0].frame = (PACKED_FRAME)frame;
-		nodes[0].state = cs;
+		nodes[0].state = *cs;
 	}
-	writeOpenState(&cs, frame);
+	writeOpenState(cs, frame);
 }
 
 // ****************************************** Processing queue ******************************************
@@ -1136,6 +1121,7 @@ void flushProcessingQueue()
 
 // ******************************************** Exit tracing ********************************************
 
+CompressedState exitSearchCompressedState;
 State exitSearchState     , exitSearchStateParent     ;
 FRAME exitSearchStateFrame, exitSearchStateParentFrame;
 Step exitSearchStateStep;
@@ -1151,18 +1137,29 @@ int statesQueued, statesDequeued;
 class FinishCheckChildHandler
 {
 public:
+	enum { PREFERRED = PREFERRED_STATE_NEITHER };
+
 	static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const State* state, FRAME frame)
 	{
 		if (*state==exitSearchState && frame==exitSearchStateFrame)
-		{
+			found(step, parent, parentFrame);
+	}
+
+	static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const CompressedState* state, FRAME frame)
+	{
+		if (*state==exitSearchCompressedState && frame==exitSearchStateFrame)
+			found(step, parent, parentFrame);
+	}
+
+	static void found(Step step, const State* parent, FRAME parentFrame)
+	{
 #ifdef MULTITHREADING
-			SCOPED_LOCK lock(exitSearchStateMutex);
+		SCOPED_LOCK lock(exitSearchStateMutex);
 #endif
-			exitSearchStateFound       = true;
-			exitSearchStateStep        = step;
-			exitSearchStateParent      = *parent;
-			exitSearchStateParentFrame = parentFrame;
-		}
+		exitSearchStateFound       = true;
+		exitSearchStateStep        = step;
+		exitSearchStateParent      = *parent;
+		exitSearchStateParentFrame = parentFrame;
 	}
 };
 
@@ -1209,21 +1206,24 @@ void traceExit(const State* exitState, FRAME exitFrame)
 	
 	while (exitSearchFrameGroup >= 0)
 	{
-		// save trace-exit progress
-		{
-			FILE* f = fopen(formatFileName("solution"), "wb");
-			fwrite(&exitSearchFrameGroup, sizeof(exitSearchFrameGroup), 1, f);
-			fwrite(&exitSearchState     , sizeof(exitSearchState)     , 1, f);
-			fwrite(&stepNr              , sizeof(stepNr)              , 1, f);
-			fwrite(steps, sizeof(Step), stepNr, f);
-			fclose(f);
-		}
-
-		exitSearchStateFound = false;
 		exitSearchFrameGroup--;
+
 		if (fileExists(formatFileName("closed", exitSearchFrameGroup)))
 		{
+			// save trace-exit progress
+			{
+				FILE* f = fopen(formatFileName("solution"), "wb");
+				fwrite(&exitSearchFrameGroup, sizeof(exitSearchFrameGroup), 1, f);
+				fwrite(&exitSearchState     , sizeof(exitSearchState)     , 1, f);
+				fwrite(&stepNr              , sizeof(stepNr)              , 1, f);
+				fwrite(steps, sizeof(Step), stepNr, f);
+				fclose(f);
+			}
+
 			printf("Frame" GROUP_STR " " GROUP_FORMAT "... \r", exitSearchFrameGroup);
+
+			exitSearchState.compress(&exitSearchCompressedState);
+			exitSearchStateFound = false;
 				
 #ifdef MULTITHREADING
 			startWorkers<&processExitState>();
@@ -1418,9 +1418,18 @@ void processState(const CompressedState* cs)
 	class AddStateChildHandler
 	{
 	public:
+		enum { PREFERRED = PREFERRED_STATE_COMPRESSED };
+
+		static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const CompressedState* cs, FRAME frame)
+		{
+			addState(cs, frame);
+		}
+
 		static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const State* state, FRAME frame)
 		{
-			addState(state, frame);
+			CompressedState cs;
+			state->compress(&cs);
+			addState(&cs, frame);
 		}
 	};
 
