@@ -114,13 +114,16 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 #define DEBUG_ONLY(x) do{}while(0)
 #endif
 
-const char* hexDump(const void* data, size_t size)
+const char* hexDump(const void* data, size_t size, int columns = 0)
 {
 	char* buf = getTempString();
 	enforce(size*3+1 < 1024);
 	const uint8_t* s = (const uint8_t*)data;
 	for (size_t x=0; x<size; x++)
 		sprintf(buf+x*3, "%02X ", s[x]);
+	if (columns)
+		for (size_t x=columns; x<size; x+=columns)
+			buf[x*3-1] = '\n';
 	return buf;
 }
 
@@ -1694,7 +1697,7 @@ int groupedSearch(FRAME_GROUP groupSize, bool filterFirst)
 			doSortOpen(baseFrameGroup, baseFrameGroup+groupSize);
 			if (checkStop()) return EXIT_STOP;
 
-			printTime(); printf("Processing...\n");
+			printTime(); printf("Filtering...\n");
 			doFilterOpen(baseFrameGroup, baseFrameGroup+groupSize);
 			if (checkStop()) return EXIT_STOP;
 		}
@@ -2603,8 +2606,8 @@ where <mode> is one of:\n\
 		open frame"GROUP_STR"s at once. The nodes for each frame"GROUP_STR"\n\
 		are expanded without being filtered, and all frame"GROUP_STR"s are\n\
 		sorted, filtered and \"closed\" at the end. This mode is useful\n\
-		when the open node files become much smaller than the total size\n\
-		of the closed node files.\n\
+		when the open node files become much smaller than the total\n\
+		size of the closed node files.\n\
 	grouped-search-no-filter <size>\n\
 		Same as above, but does not sort and filter the node files\n\
 		before expanding them. Use with care, as it may lead to an\n\
@@ -2665,10 +2668,10 @@ where <mode> is one of:\n\
 		satisfies the isFinish condition, it is traced back and the\n\
 		solution is written, as during normal search.\n\
 	write-partial-solution\n\
-		Saves the partial solution, using the partial exit trace solution\n\
-		file. Allows exit tracing inspection. Warning: uses the same code\n\
-		as when writing the full solution, and may overwrite an existing\n\
-		solution.\n\
+		Saves the partial solution, using the partial exit trace\n\
+		solution file. Allows exit tracing inspection. Warning: uses\n\
+		the same code as when writing the full solution, and may\n\
+		overwrite an existing solution.\n\
 A [frame"GROUP_STR"-range] is a space-delimited list of zero, one or two frame"GROUP_STR"\n\
 numbers. If zero numbers are specified, the range is assumed to be all\n\
 frame"GROUP_STR"s. If one number is specified, the range is set to only that\n\
