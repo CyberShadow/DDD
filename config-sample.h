@@ -9,7 +9,7 @@
 
 // MULTITHREADING will enable threading and synchronization code.
 #define MULTITHREADING
-#define THREADS 7
+#define THREADS 6
 
 // THREAD_* defines how will threads be created.
 #define THREAD_BOOST
@@ -21,13 +21,12 @@
 //#define SYNC_WINAPI_SPIN
 #define SYNC_INTEL_SPIN
 
-// How much bytes of RAM to use?
+// How many bytes of RAM to use?
 #define RAM_SIZE (8LL*1024*1024*1024)
 
-// How many bytes to use for each file stream buffer?
-#define STANDARD_BUFFER_SIZE (1*1024*1024 / sizeof(Node))
-#define MERGING_BUFFER_SIZE  (16*1024*1024 / sizeof(Node))
-#define ALL_FILE_BUFFER_SIZE (64*1024*1024 / sizeof(Node))
+// How many bytes to use for file stream buffers?
+#define STANDARD_BUFFER_SIZE (  1*1024*1024 / sizeof(Node)) // allocated separately in heap - used for open node files and other files
+#define ALL_FILE_BUFFER_SIZE ( 64*1024*1024 / sizeof(Node)) // for USE_ALL: taken twice from RAM_SIZE (the rest is used for the cache)
 
 // How many nodes to group under a single hash in the cache? Higher values reduce speed but allow better distribution.
 #define NODES_PER_HASH 4

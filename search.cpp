@@ -386,6 +386,19 @@ typedef CompressedState Node;
 // Allocate RAM at start, use it for different purposes depending on what we're doing
 // Even if we won't use all of it, most OSes shouldn't reserve physical RAM for the entire amount
 void* ram = malloc(RAM_SIZE);
+void* ramEnd = (char*)ram + RAM_SIZE;
+
+#ifndef STANDARD_BUFFER_SIZE
+#define STANDARD_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
+#endif
+#ifndef ALL_FILE_BUFFER_SIZE
+#define ALL_FILE_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
+#endif
+
+#ifndef USE_ALL
+#undef ALL_FILE_BUFFER_SIZE
+#define ALL_FILE_BUFFER_SIZE 0
+#endif
 
 struct CacheNode
 {
@@ -393,23 +406,20 @@ struct CacheNode
 	PACKED_FRAME frame;
 };
 
-const size_t CACHE_HASH_SIZE = RAM_SIZE / sizeof(CacheNode) / NODES_PER_HASH;
+const size_t CACHE_SIZE = RAM_SIZE - 2*(ALL_FILE_BUFFER_SIZE*sizeof(Node));
+
+const size_t CACHE_HASH_SIZE = CACHE_SIZE / sizeof(CacheNode) / NODES_PER_HASH;
 CacheNode (*cache)[NODES_PER_HASH] = (CacheNode (*)[NODES_PER_HASH]) ram;
 
 const size_t BUFFER_SIZE = RAM_SIZE / sizeof(Node);
 Node* buffer = (Node*) ram;
 
-// ****************************************** Buffered streams ******************************************
+#ifdef USE_ALL
+Node* allReadBuffer  = (Node*)((char*)ram + CACHE_SIZE);
+Node* allWriteBuffer = allReadBuffer + ALL_FILE_BUFFER_SIZE;
+#endif
 
-#ifndef STANDARD_BUFFER_SIZE
-#define STANDARD_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
-#endif
-#ifndef MERGING_BUFFER_SIZE
-#define MERGING_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
-#endif
-#ifndef ALL_FILE_BUFFER_SIZE
-#define ALL_FILE_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
-#endif
+// ****************************************** Buffered streams ******************************************
 
 class Buffer
 {
@@ -421,9 +431,10 @@ public:
 	{
 	}
 
+	// A pre-specified size of 0 is allowed. The calling code must later call reallocate() before any read/write operations.
 	void allocate()
 	{
-		if (!buf)
+		if (!buf && size)
 			buf = new Node[size];
 	}
 
@@ -434,9 +445,38 @@ public:
 		size = newSize;
 	}
 
+	void reallocate(uint32_t newSize)
+	{
+		if (size != newSize)
+		{
+			deallocate();
+			size = newSize;
+			if (size)
+				buf = new Node[size];
+		}
+	}
+
+	void assign(Node* newBuf, uint32_t newSize)
+	{
+		deallocate();
+		assert(newBuf >= ram && newBuf < ramEnd);
+		buf = newBuf;
+		size = newSize;
+	}
+
+	void deallocate()
+	{
+		if (buf)
+		{
+			if (buf < ram || buf >= ramEnd)
+				delete[] buf;
+			buf = NULL;
+		}
+	}
+
 	~Buffer()
 	{
-		delete[] buf;
+		deallocate();
 	}
 };
 
@@ -504,6 +544,18 @@ public:
 	{
 		flushBuffer();
 	}
+
+	void setWriteBuffer(Node* buf, uint32_t size)
+	{
+		flushBuffer();
+		buffer.assign(buf, size);
+	}
+
+	void setWriteBufferSize(uint32_t size)
+	{
+		flushBuffer();
+		buffer.reallocate(size);
+	}
 };
 
 template<class STREAM>
@@ -536,6 +588,18 @@ public:
 		uint64_t left = s.size() - s.position();
 		end = (uint32_t)s.read(buffer.buf, (size_t)(left < buffer.size ? left : buffer.size));
 	}
+
+	void setReadBuffer(Node* buf, uint32_t size)
+	{
+		assert(pos == end, "Buffer is dirty");
+		buffer.assign(buf, size);
+	}
+
+	// Useable only before allocation
+	void setReadBufferSize(uint32_t size)
+	{
+		buffer.setSize(size);
+	}
 };
 
 class BufferedInputStream : public ReadBuffer<InputStream>
@@ -544,7 +608,6 @@ public:
 	BufferedInputStream(uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer(size) {}
 	BufferedInputStream(const char* filename, uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer(size) { open(filename); }
 	void open(const char* filename) { s.open(filename); buffer.allocate(); }
-	void setBufferSize(uint32_t size) { buffer.setSize(size); }
 };
 
 class BufferedOutputStream : public WriteBuffer<OutputStream>
@@ -553,17 +616,15 @@ public:
 	BufferedOutputStream(uint32_t size = STANDARD_BUFFER_SIZE) : WriteBuffer(size) {}
 	BufferedOutputStream(const char* filename, bool resume=false, uint32_t size = STANDARD_BUFFER_SIZE) : WriteBuffer(size) { open(filename, resume); }
 	void open(const char* filename, bool resume=false) { s.open(filename, resume); buffer.allocate(); }
-	void setBufferSize(uint32_t size) { buffer.setSize(size); }
 };
 
 class BufferedRewriteStream : public ReadBuffer<RewriteStream>, public WriteBuffer<RewriteStream>
 {
 public:
-	BufferedRewriteStream(uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer(size), WriteBuffer(size) {}
-	BufferedRewriteStream(const char* filename, uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer(size), WriteBuffer(size) { open(filename); }
+	BufferedRewriteStream(uint32_t readSize = STANDARD_BUFFER_SIZE, uint32_t writeSize = STANDARD_BUFFER_SIZE) : ReadBuffer(readSize), WriteBuffer(writeSize) {}
+	BufferedRewriteStream(const char* filename, uint32_t readSize = STANDARD_BUFFER_SIZE, uint32_t writeSize = STANDARD_BUFFER_SIZE) : ReadBuffer(readSize), WriteBuffer(writeSize) { open(filename); }
 	void open(const char* filename) { s.open(filename); ReadBuffer<RewriteStream>::buffer.allocate(); WriteBuffer<RewriteStream>::buffer.allocate(); }
 	void truncate() { s.truncate(); }
-	void setBufferSize(uint32_t size) { ReadBuffer<RewriteStream>::buffer.setSize(size); WriteBuffer<RewriteStream>::buffer.setSize(size); }
 };
 
 void copyFile(const char* from, const char* to)
@@ -990,11 +1051,21 @@ void writeOpenState(const CompressedState* state, FRAME frame)
 	queue[group]->write(state);
 }
 
+void prepareOpen()
+{
+	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
+		if (queue[g])
+			queue[g]->setWriteBufferSize(STANDARD_BUFFER_SIZE); // reallocate buffer
+}
+
 void flushOpen()
 {
 	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
 		if (queue[g])
+		{
 			queue[g]->flush();
+			queue[g]->setWriteBufferSize(0); // deallocate buffer
+		}
 }
 
 // *********************************************** Cache ************************************************
@@ -1003,16 +1074,16 @@ INLINE uint32_t hashState(const CompressedState* state)
 {
 	// Based on MurmurHash ( http://murmurhash.googlepages.com/MurmurHash2.cpp )
 	
-	const unsigned int m = 0x5bd1e995;
+	const uint32_t m = 0x5bd1e995;
 	const int r = 24;
 
-	unsigned int h = sizeof(CompressedState);
+	uint32_t h = sizeof(CompressedState);
 
-	const unsigned char* data = (const unsigned char *)state;
+	const uint32_t* data = (const uint32_t*)state;
 
 	for (int i=0; i<sizeof(CompressedState)/4; i++) // should unroll
 	{
-		unsigned int k = *(unsigned int *)data;
+		uint32_t k = *data;
 
 		k *= m; 
 		k ^= k >> r; 
@@ -1021,7 +1092,7 @@ INLINE uint32_t hashState(const CompressedState* state)
 		h *= m; 
 		h ^= k;
 
-		data += 4;
+		data ++;
 	}
 	
 	h ^= h >> 13;
@@ -1296,7 +1367,7 @@ void sortAndMerge(FRAME_GROUP g)
 {
 	// Step 1: read chunks of BUFFER_SIZE nodes, sort+dedup them in RAM and write them to disk
 	int chunks = 0;
-	ramUsed = 0;
+
 	printf("Sorting... "); fflush(stdout);
 	{
 		InputStream input(formatFileName("open", g));
@@ -1320,13 +1391,19 @@ void sortAndMerge(FRAME_GROUP g)
 	printf("Merging... "); fflush(stdout);
 	if (chunks>1)
 	{
+		ramUsed = RAM_SIZE;
+		int outputBufferParts = (chunks+1)/2; // 2/3 for input, 1/3 for output
+		size_t bufferSize = RAM_SIZE / (chunks + outputBufferParts) / sizeof(Node);
+		
 		BufferedInputStream* chunkInput = new BufferedInputStream[chunks];
 		for (int i=0; i<chunks; i++)
 		{
-			chunkInput[i].setBufferSize(MERGING_BUFFER_SIZE);
+			chunkInput[i].setReadBuffer(buffer + i*bufferSize, bufferSize);
 			chunkInput[i].open(formatFileName("chunk", g, i));
 		}
-		BufferedOutputStream* output = new BufferedOutputStream(formatFileName("merging", g));
+		BufferedOutputStream* output = new BufferedOutputStream;
+		output->setWriteBuffer(buffer + chunks*bufferSize, bufferSize*outputBufferParts);
+		output->open(formatFileName("merging", g));
 		mergeStreams(chunkInput, chunks, output);
 		delete[] chunkInput;
 		output->flush();
@@ -1499,7 +1576,7 @@ int search()
 		if (fileExists(formatFileName("open", g)))
 		{
 			printTime(); printf("Reopening queue for frame" GROUP_STR " " GROUP_FORMAT "\n", g);
-			queue[g] = new BufferedOutputStream(formatFileName("open", g), true);
+			queue[g] = new BufferedOutputStream(formatFileName("open", g), true, 0);
 		}
 
 	if (firstFrameGroup==0 && !queue[0])
@@ -1522,6 +1599,7 @@ int search()
 
 		printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 
+		ramUsed = 0;
 		if (fileExists(formatFileName("merged", currentFrameGroup)))
 		{
 			printf("(reopening merged)    ");
@@ -1541,6 +1619,7 @@ int search()
 #ifdef MULTITHREADING
 		startWorkers<&processState>();
 #endif
+		prepareOpen();
 
 #ifdef USE_ALL
 		if (currentFrameGroup==0)
@@ -1558,8 +1637,15 @@ int search()
 			{
 				BufferedInputStream source(formatFileName("merged", currentFrameGroup));
 				FRAME_GROUP allFrameGroup = lastAll();
-				BufferedInputStream all(formatFileName("all", allFrameGroup), ALL_FILE_BUFFER_SIZE);
-				BufferedOutputStream allnew(formatFileName("allnew", currentFrameGroup), false, ALL_FILE_BUFFER_SIZE);
+				
+				BufferedInputStream all;
+				all.setReadBuffer(allReadBuffer, ALL_FILE_BUFFER_SIZE);
+				all.open(formatFileName("all", allFrameGroup));
+				
+				BufferedOutputStream allnew;
+				allnew.setWriteBuffer(allWriteBuffer, ALL_FILE_BUFFER_SIZE);
+				allnew.open(formatFileName("allnew", currentFrameGroup), false);
+				
 				BufferedOutputStream closing(formatFileName("closing", currentFrameGroup));
 				
 				BufferedInputStream* inputs = new BufferedInputStream[MAX_FRAME_GROUPS+1];
@@ -1683,7 +1769,7 @@ int groupedSearch(FRAME_GROUP groupSize, bool filterFirst)
 		if (fileExists(formatFileName("open", g)))
 		{
 			printTime(); printf("Reopening queue for frame" GROUP_STR " " GROUP_FORMAT "\n", g);
-			queue[g] = new BufferedOutputStream(formatFileName("open", g), true);
+			queue[g] = new BufferedOutputStream(formatFileName("open", g), true, 0);
 		}
 
 	FRAME_GROUP baseFrameGroup = firstFrameGroup;
@@ -1724,9 +1810,11 @@ int groupedSearch(FRAME_GROUP groupSize, bool filterFirst)
 			if (!queue[g] && fileExists(formatFileName("open", g)))
 			{
 				//printTime(); printf("Reopening queue for frame" GROUP_STR " " GROUP_FORMAT "\n", g);
-				queue[g] = new BufferedOutputStream(formatFileName("open", g), true);
+				queue[g] = new BufferedOutputStream(formatFileName("open", g), true, 0);
 			}
 
+		prepareOpen();
+		
 		for (currentFrameGroup=baseFrameGroup; currentFrameGroup<baseFrameGroup+groupSize; currentFrameGroup++)
 		{
 			if (!queue[currentFrameGroup])
@@ -1735,7 +1823,11 @@ int groupedSearch(FRAME_GROUP groupSize, bool filterFirst)
 			queue[currentFrameGroup] = NULL;
 
 			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT ": ", currentFrameGroup); fflush(stdout);
+			ramUsed = 0;
 			sortAndMerge(currentFrameGroup);
+
+			printf("Clearing... "); fflush(stdout);
+			memset(ram, 0, ramUsed); // clear cache
 
 			printf("Expanding... "); fflush(stdout);
 #ifdef MULTITHREADING
@@ -1773,7 +1865,8 @@ int groupedSearch(FRAME_GROUP groupSize, bool filterFirst)
 		for (int g=0; g<groupSize; g++)
 			if (fileExists(formatFileName("merged", baseFrameGroup+g)))
 			{
-				merged[g].setBufferSize(MERGING_BUFFER_SIZE);
+				//merged[g].setReadBufferSize(MERGING_BUFFER_SIZE);
+				//merged[g].setWriteBufferSize(MERGING_BUFFER_SIZE);
 				merged[g].open(formatFileName("merged", baseFrameGroup+g));
 			}
 		filterAgainstClosed(merged, groupSize);
@@ -1803,7 +1896,7 @@ int groupedSearch(FRAME_GROUP groupSize, bool filterFirst)
 		{
 			if (fileExists(formatFileName("all", g)))
 			{
-				closed[g].setBufferSize(ALL_FILE_BUFFER_SIZE);
+				closed[g].setReadBuffer(allReadBuffer, ALL_FILE_BUFFER_SIZE);
 				closed[g].open(formatFileName("all", g));
 				lastAll = g;
 				break;
@@ -2222,7 +2315,7 @@ int seqFilterOpen()
 #ifdef USE_ALL
 				if (fileExists(formatFileName("all", g)))
 				{
-					inputs[inputCount  ].setBufferSize(ALL_FILE_BUFFER_SIZE);
+					inputs[inputCount  ].setReadBuffer(allReadBuffer, ALL_FILE_BUFFER_SIZE);
 					inputs[inputCount++].open(formatFileName("all", g));
 					break;
 				}
@@ -2310,7 +2403,7 @@ void filterAgainstClosed(BufferedRewriteStream open[], int openCount)
 #ifdef USE_ALL
 		if (fileExists(formatFileName("all", g)))
 		{
-			closed[g].setBufferSize(ALL_FILE_BUFFER_SIZE);
+			closed[g].setReadBufferSize(ALL_FILE_BUFFER_SIZE);
 			closed[g].open(formatFileName("all", g));
 			break;
 		}
@@ -2371,6 +2464,7 @@ int regenerateOpen()
 #ifdef MULTITHREADING
 			startWorkers<&processState>();
 #endif
+			prepareOpen();
 
 			BufferedInputStream closed(formatFileName("closed", currentFrameGroup));
 			const CompressedState* cs;
