@@ -165,7 +165,22 @@ enum { PREFERRED_STATE_COMPRESSED, PREFERRED_STATE_UNCOMPRESSED, PREFERRED_STATE
 // Note that the optimized comparison operators are incompatible with the memcmp operators, due to the former being "middle-endian" and the latter being big-endian.
 // TODO: relax ranges for !GROUP_FRAMES
 
-#if   (!defined(USE_MEMCMP) && COMPRESSED_BITS >  24 && COMPRESSED_BITS <=  32) // 4 bytes
+#if   (!defined(USE_MEMCMP) && COMPRESSED_BITS >   0 && COMPRESSED_BITS <=   8) // 1 bytes
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint8_t*)&a)[0] == ((const uint8_t*)&b)[0]; }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint8_t*)&a)[0] != ((const uint8_t*)&b)[0]; }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint8_t*)&a)[0] <  ((const uint8_t*)&b)[0]; }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint8_t*)&a)[0] <= ((const uint8_t*)&b)[0]; }
+#elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >   8 && COMPRESSED_BITS <=  16) // 2 bytes
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint16_t*)&a)[0] == ((const uint16_t*)&b)[0]; }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint16_t*)&a)[0] != ((const uint16_t*)&b)[0]; }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint16_t*)&a)[0] <  ((const uint16_t*)&b)[0]; }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return ((const uint16_t*)&a)[0] <= ((const uint16_t*)&b)[0]; }
+#elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  16 && COMPRESSED_BITS <=  24) // 3 bytes
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return (((const uint32_t*)&a)[0]&0x00FFFFFF) == (((const uint32_t*)&b)[0]&0x00FFFFFF); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return (((const uint32_t*)&a)[0]&0x00FFFFFF) != (((const uint32_t*)&b)[0]&0x00FFFFFF); }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return (((const uint32_t*)&a)[0]&0x00FFFFFF) <  (((const uint32_t*)&b)[0]&0x00FFFFFF); }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return (((const uint32_t*)&a)[0]&0x00FFFFFF) <= (((const uint32_t*)&b)[0]&0x00FFFFFF); }
+#elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  24 && COMPRESSED_BITS <=  32) // 4 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] == ((const uint32_t*)&b)[0]; }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] != ((const uint32_t*)&b)[0]; }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return ((const uint32_t*)&a)[0] <  ((const uint32_t*)&b)[0]; }
