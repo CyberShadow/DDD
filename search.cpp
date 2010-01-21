@@ -2888,7 +2888,7 @@ int run(int argc, const char* argv[])
 #ifdef NO_MAIN
 // define main() in another file and #include "search.cpp"
 #elif defined(PROBLEM_RELATED)
-#include BOOST_PP_STRINGIZE(PROBLEM/PROBLEM_RELATED.cpp)
+#include STRINGIZE(PROBLEM/PROBLEM_RELATED.cpp)
 int main(int argc, const char* argv[]) { try { return run_related(argc, argv); } catch(const char* s) { printf("\n%s\n", s); return EXIT_ERROR; } }
 #else
 int main(int argc, const char* argv[]) { try { return run        (argc, argv); } catch(const char* s) { printf("\n%s\n", s); return EXIT_ERROR; } }
