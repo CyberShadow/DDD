@@ -404,6 +404,9 @@ Node* buffer = (Node*) ram;
 #ifndef STANDARD_BUFFER_SIZE
 #define STANDARD_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
 #endif
+#ifndef MERGING_BUFFER_SIZE
+#define MERGING_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
+#endif
 #ifndef ALL_FILE_BUFFER_SIZE
 #define ALL_FILE_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
 #endif
