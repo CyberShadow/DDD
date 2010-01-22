@@ -394,6 +394,9 @@ void* ramEnd = (char*)ram + RAM_SIZE;
 #ifndef ALL_FILE_BUFFER_SIZE
 #define ALL_FILE_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
 #endif
+#ifndef EXPECTED_MERGING_RATIO
+#define EXPECTED_MERGING_RATIO 0.6
+#endif
 
 #ifndef USE_ALL
 #undef ALL_FILE_BUFFER_SIZE
@@ -1392,17 +1395,17 @@ void sortAndMerge(FRAME_GROUP g)
 	if (chunks>1)
 	{
 		ramUsed = RAM_SIZE;
-		int outputBufferParts = (chunks+1)/2; // 2/3 for input, 1/3 for output
-		size_t bufferSize = RAM_SIZE / (chunks + outputBufferParts) / sizeof(Node);
+		double outbuf_inbuf_ratio = sqrt(EXPECTED_MERGING_RATIO * chunks);
+		size_t bufferSize = (size_t)floor(RAM_SIZE / ((chunks + outbuf_inbuf_ratio) * sizeof(Node)));
 		
 		BufferedInputStream* chunkInput = new BufferedInputStream[chunks];
 		for (int i=0; i<chunks; i++)
 		{
-			chunkInput[i].setReadBuffer(buffer + i*bufferSize, bufferSize);
+			chunkInput[i].setReadBuffer(buffer + i*bufferSize, (uint32_t)bufferSize);
 			chunkInput[i].open(formatFileName("chunk", g, i));
 		}
 		BufferedOutputStream* output = new BufferedOutputStream;
-		output->setWriteBuffer(buffer + chunks*bufferSize, bufferSize*outputBufferParts);
+		output->setWriteBuffer(buffer + chunks*bufferSize, (uint32_t)floor(bufferSize * outbuf_inbuf_ratio));
 		output->open(formatFileName("merging", g));
 		mergeStreams(chunkInput, chunks, output);
 		delete[] chunkInput;

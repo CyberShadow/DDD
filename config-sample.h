@@ -28,6 +28,9 @@
 #define STANDARD_BUFFER_SIZE (  1*1024*1024 / sizeof(Node)) // allocated separately in heap - used for open node files and other files
 #define ALL_FILE_BUFFER_SIZE ( 64*1024*1024 / sizeof(Node)) // for USE_ALL: taken twice from RAM_SIZE (the rest is used for the cache)
 
+// The expected ratio of Merging output/input
+#define EXPECTED_MERGING_RATIO 0.6
+
 // How many nodes to group under a single hash in the cache? Higher values reduce speed but allow better distribution.
 #define NODES_PER_HASH 4
 
