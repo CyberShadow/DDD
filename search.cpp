@@ -434,7 +434,7 @@ public:
 	{
 	}
 
-	// A pre-specified size of 0 is allowed. The calling code must later call reallocate() before any read/write operations.
+	// A pre-specified size of 0 is allowed. The calling code must later call reallocate() or assign() before any read/write operations.
 	void allocate()
 	{
 		if (!buf && size)
@@ -603,6 +603,12 @@ public:
 	{
 		buffer.setSize(size);
 	}
+
+	void rewind()
+	{
+		assert(pos > 0);
+		pos--;
+	}
 };
 
 class BufferedInputStream : public ReadBuffer<InputStream>
@@ -648,6 +654,7 @@ void copyFile(const char* from, const char* to)
 template<class INPUT>
 class InputHeap
 {
+protected:    
 	struct HeapNode
 	{
 		const CompressedState* state;
@@ -812,21 +819,17 @@ public:
 template<class INPUT>
 class InputHeapReader : InputHeap<INPUT>
 {
-private:
-	bool first;
-
 public:
-	InputHeapReader(INPUT inputs[], int count) : InputHeap(inputs, count), first(true) {}
-
-	const CompressedState* read()
+	InputHeapReader(INPUT inputs[], int count) : InputHeap(inputs, count)
 	{
-		if (!first)
-		{
-			if (!next())
-				return NULL;
-		}
-		else
-			first = false;
+		if (size)
+			head->input->rewind();
+	}
+
+	INLINE const CompressedState* read()
+	{
+		if (!next())
+			return NULL;
 		return getHead();
 	}
 };
