@@ -1421,11 +1421,12 @@ void sortAndMerge(FRAME_GROUP g)
 	}
 }
 
-bool checkStop()
+bool checkStop(bool newline=false)
 {
 	if (fileExists(formatProblemFileName("stop", NULL, "txt")))
 	{
 		deleteFile(formatProblemFileName("stop", NULL, "txt"));
+		if (newline) putchar('\n');
 		printTime(); printf("Stop file found.\n");
 		return true;
 	}
@@ -1612,6 +1613,9 @@ int search()
 			// Step 1 & 2: sort and merge open nodes
 			sortAndMerge(currentFrameGroup);
 		}
+
+		if (checkStop(true))
+			return EXIT_STOP;
 
 		printf("Clearing... "); fflush(stdout);
 		memset(ram, 0, ramUsed); // clear cache
