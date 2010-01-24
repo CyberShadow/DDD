@@ -1122,7 +1122,7 @@ void addState(const CompressedState* cs, FRAME frame)
 			if (nodes->frame <= frame)
 				return;
 			else
-				nodes->frame = frame;
+				nodes->frame = (PACKED_FRAME)frame;
 		else
 		{
 			nodes->state == *cs;
