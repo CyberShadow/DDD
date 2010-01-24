@@ -1117,6 +1117,18 @@ void addState(const CompressedState* cs, FRAME frame)
 		SCOPED_LOCK lock(cacheMutex[hash % PARTITIONS]);
 #endif
 		CacheNode* nodes = cache[hash];
+#if (NODES_PER_HASH==1)
+		if (nodes->state == *cs)
+			if (nodes->frame <= frame)
+				return;
+			else
+				nodes->frame = frame;
+		else
+		{
+			nodes->state == *cs;
+			nodes->frame = (PACKED_FRAME)frame;
+		}
+#else
 		for (int i=0; i<NODES_PER_HASH; i++)
 			if (nodes[i].state == *cs)
 			{
@@ -1136,6 +1148,7 @@ void addState(const CompressedState* cs, FRAME frame)
 		memmove(nodes+1, nodes, (NODES_PER_HASH-1) * sizeof(CacheNode));
 		nodes[0].frame = (PACKED_FRAME)frame;
 		nodes[0].state = *cs;
+#endif
 	}
 	writeOpenState(cs, frame);
 }
