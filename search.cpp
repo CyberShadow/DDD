@@ -143,17 +143,22 @@ void printTime()
 
 typedef int32_t FRAME;
 typedef int32_t FRAME_GROUP;
-#if (MAX_FRAMES<65536)
-typedef uint16_t PACKED_FRAME;
-#else
-typedef uint32_t PACKED_FRAME;
-#endif
 
 enum { PREFERRED_STATE_COMPRESSED, PREFERRED_STATE_UNCOMPRESSED, PREFERRED_STATE_NEITHER };
 
 // ********************************************** Problem ***********************************************
 
 #include STRINGIZE(PROBLEM/PROBLEM.cpp)
+
+// ************************************ Types dependent on Problem **************************************
+
+#if   (MAX_FRAMES<0x100)
+typedef uint8_t  PACKED_FRAME;
+#elif (MAX_FRAMES<0x10000)
+typedef uint16_t PACKED_FRAME;
+#else
+typedef uint32_t PACKED_FRAME;
+#endif
 
 // ************************************* CompressedState comparison *************************************
 
