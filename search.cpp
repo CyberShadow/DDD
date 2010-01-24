@@ -1122,38 +1122,54 @@ void addState(const CompressedState* cs, FRAME frame)
 		SCOPED_LOCK lock(cacheMutex[hash % PARTITIONS]);
 #endif
 		CacheNode* nodes = cache[hash];
-#if (NODES_PER_HASH==1)
-		if (nodes->state == *cs)
-			if (nodes->frame <= frame)
+		if (nodes[0].state == *cs)
+		{
+			if (nodes[0].frame <= frame)
 				return;
 			else
-				nodes->frame = (PACKED_FRAME)frame;
+				nodes[0].frame = (PACKED_FRAME)frame;
+		}
 		else
 		{
-			nodes->state = *cs;
-			nodes->frame = (PACKED_FRAME)frame;
-		}
-#else
-		for (int i=0; i<NODES_PER_HASH; i++)
-			if (nodes[i].state == *cs)
+#if (NODES_PER_HASH==2)
+			if (nodes[1].state == *cs)
 			{
-				if (nodes[i].frame > frame)
-					writeOpenState(cs, frame);
-				// pop to front
-				if (i>0)
+				FRAME earliest_frame = nodes[1].frame;
+				if (earliest_frame > frame)
 				{
-					memmove(nodes+1, nodes, i * sizeof(CacheNode));
-					nodes[0].state = *cs;
+					earliest_frame = frame;
+					writeOpenState(cs, frame);
 				}
-				nodes[0].frame = (PACKED_FRAME)frame;
+				// pop to front
+				nodes[1] = nodes[0];
+				nodes[0].state = *cs;
+				nodes[0].frame = (PACKED_FRAME)earliest_frame;
 				return;
 			}
-		
-		// new node
-		memmove(nodes+1, nodes, (NODES_PER_HASH-1) * sizeof(CacheNode));
-		nodes[0].frame = (PACKED_FRAME)frame;
-		nodes[0].state = *cs;
+			// new node
+			nodes[1] = nodes[0];
+#elif (NODES_PER_HASH>2)
+			for (int i=1; i<NODES_PER_HASH; i++)
+				if (nodes[i].state == *cs)
+				{
+					FRAME earliest_frame = nodes[i].frame;
+					if (earliest_frame > frame)
+					{
+						earliest_frame = frame;
+						writeOpenState(cs, frame);
+					}
+					// pop to front
+					memmove(nodes+1, nodes, i * sizeof(CacheNode));
+					nodes[0].state = *cs;
+					nodes[0].frame = (PACKED_FRAME)earliest_frame;
+					return;
+				}
+			// new node
+			memmove(nodes+1, nodes, (NODES_PER_HASH-1) * sizeof(CacheNode));
 #endif
+			nodes[0].state = *cs;
+			nodes[0].frame = (PACKED_FRAME)frame;
+		}
 	}
 	writeOpenState(cs, frame);
 }
