@@ -1125,7 +1125,7 @@ void addState(const CompressedState* cs, FRAME frame)
 				nodes->frame = (PACKED_FRAME)frame;
 		else
 		{
-			nodes->state == *cs;
+			nodes->state = *cs;
 			nodes->frame = (PACKED_FRAME)frame;
 		}
 #else
