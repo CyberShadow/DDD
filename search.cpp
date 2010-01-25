@@ -408,14 +408,18 @@ void* ramEnd = (char*)ram + RAM_SIZE;
 #define ALL_FILE_BUFFER_SIZE 0
 #endif
 
-struct CompressedState_packed
+struct PackedCompressedState
 {
-	uint8_t bytes[(COMPRESSED_BITS+7)/8];
+	uint8_t bytes[COMPRESSED_BYTES];
+
+	bool operator ==(const CompressedState& state) { return *(CompressedState*)this == state; }
+
+	PackedCompressedState& operator =(const CompressedState& state) { return *this = (PackedCompressedState&)state; }
 };
 
 struct CacheNode
 {
-	CompressedState_packed state;
+	PackedCompressedState state;
 	PACKED_FRAME frame;
 };
 
@@ -1127,7 +1131,7 @@ void addState(const CompressedState* cs, FRAME frame)
 		SCOPED_LOCK lock(cacheMutex[hash % PARTITIONS]);
 #endif
 		CacheNode* nodes = cache[hash];
-		if ((CompressedState&)nodes[0].state == *cs)
+		if (nodes[0].state == *cs)
 		{
 			if (nodes[0].frame <= frame)
 				return;
@@ -1137,7 +1141,7 @@ void addState(const CompressedState* cs, FRAME frame)
 		else
 		{
 #if (NODES_PER_HASH==2)
-			if ((CompressedState&)nodes[1].state == *cs)
+			if (nodes[1].state == *cs)
 			{
 				FRAME earliest_frame = nodes[1].frame;
 				if (earliest_frame > frame)
@@ -1147,7 +1151,7 @@ void addState(const CompressedState* cs, FRAME frame)
 				}
 				// pop to front
 				nodes[1] = nodes[0];
-				nodes[0].state = *(CompressedState_packed*)cs;
+				nodes[0].state = *cs;
 				nodes[0].frame = (PACKED_FRAME)earliest_frame;
 				return;
 			}
@@ -1155,7 +1159,7 @@ void addState(const CompressedState* cs, FRAME frame)
 			nodes[1] = nodes[0];
 #elif (NODES_PER_HASH>2)
 			for (int i=1; i<NODES_PER_HASH; i++)
-				if ((CompressedState&)nodes[i].state == *cs)
+				if (nodes[i].state == *cs)
 				{
 					FRAME earliest_frame = nodes[i].frame;
 					if (earliest_frame > frame)
@@ -1165,14 +1169,14 @@ void addState(const CompressedState* cs, FRAME frame)
 					}
 					// pop to front
 					memmove(nodes+1, nodes, i * sizeof(CacheNode));
-					nodes[0].state = *(CompressedState_packed*)cs;
+					nodes[0].state = *cs;
 					nodes[0].frame = (PACKED_FRAME)earliest_frame;
 					return;
 				}
 			// new node
 			memmove(nodes+1, nodes, (NODES_PER_HASH-1) * sizeof(CacheNode));
 #endif
-			nodes[0].state = *(CompressedState_packed*)cs;
+			nodes[0].state = *cs;
 			nodes[0].frame = (PACKED_FRAME)frame;
 		}
 	}
