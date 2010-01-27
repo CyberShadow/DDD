@@ -211,7 +211,7 @@ void deleteFile(const char* filename)
 {
 	BOOL b = DeleteFile(filename);
 	if (!b)
-		windowsError("Error deleting file");
+		windowsError(format("Error deleting file %s", filename));
 }
 
 void renameFile(const char* from, const char* to)
@@ -219,7 +219,7 @@ void renameFile(const char* from, const char* to)
 	DeleteFile(to); // ignore error
 	BOOL b = MoveFile(from, to);
 	if (!b)
-		windowsError("Error moving file");
+		windowsError(format("Error moving file %s to %s, from, to"));
 }
 
 bool fileExists(const char* filename)
