@@ -31,8 +31,8 @@
 // The expected ratio of Merging output/input
 #define EXPECTED_MERGING_RATIO 0.6
 
-// How many nodes to group under a single hash in the cache? Higher values reduce speed but allow better distribution.
-#define NODES_PER_HASH 2
+// How many nodes to group under a single hash in the cache? Higher values reduce speed but may allow better distribution.
+#define NODES_PER_HASH 1
 
 // DISK_* selects the back-end storage to be used for the node disk files.
 #define DISK_WINFILES
