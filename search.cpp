@@ -1798,6 +1798,8 @@ int search()
 			break;
 	    }
 
+	bool alreadyExpanded = false;
+
 	if (firstFrameGroup == -1)
 	{
 		currentFrameGroup = -1;
@@ -1815,63 +1817,81 @@ int search()
 
 		firstFrameGroup = 0;
 	}
+	else
+	if (fileExists(formatFileName("expandedcount", firstFrameGroup)))
+	{
+		firstFrameGroup--;
+		alreadyExpanded = true;
+	}
 
 	for (currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
 	{
 		printTime(); printf("Frame" GROUP_STR " " GROUP_ALIGNED_FORMAT "/" GROUP_ALIGNED_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 
-		printf("Processing... "); fflush(stdout);
+		if (alreadyExpanded)
 		{
-			closedNodesInCurrentFrameGroup = 0;
-			combinedNodesTotal = 0;
-			
-			BufferedInputStream<OpenNode> inputs[2];
-			DoubleOutput<OpenNode, ProcessStateOutput, BufferedOutputStream<OpenNode>> output;
+			printf("Processed already, skipping to next step;  "); fflush(stdout);
 
-			inputs[1].setReadBuffer((OpenNode*)ram, ALL1_FILE_BUFFER_SIZE);
-			inputs[1].open(formatFileName("expanded", currentFrameGroup));
+			InputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup+1));
+			resumeInfo.read(&expansionChunks, 1);
 
-			inputs[0].setReadBuffer((OpenNode*)ram + ALL1_FILE_BUFFER_SIZE, ALL2_FILE_BUFFER_SIZE);
-			inputs[0].open(formatFileName("combined", currentFrameGroup));
+			alreadyExpanded = false;
+		}
+		else
+		{
+			printf("Processing... "); fflush(stdout);
+			{
+				closedNodesInCurrentFrameGroup = 0;
+				combinedNodesTotal = 0;
+				
+				BufferedInputStream<OpenNode> inputs[2];
+				DoubleOutput<OpenNode, ProcessStateOutput, BufferedOutputStream<OpenNode>> output;
 
-			output.b()->setWriteBuffer((OpenNode*)ram + ALL1_FILE_BUFFER_SIZE + ALL2_FILE_BUFFER_SIZE, ALL3_FILE_BUFFER_SIZE);
-			output.b()->open(formatFileName("combining", currentFrameGroup+1), false);
+				inputs[1].setReadBuffer((OpenNode*)ram, ALL1_FILE_BUFFER_SIZE);
+				inputs[1].open(formatFileName("expanded", currentFrameGroup));
 
-			expansionBuffer = (OpenNode*)ram + ALL1_FILE_BUFFER_SIZE + ALL2_FILE_BUFFER_SIZE + ALL3_FILE_BUFFER_SIZE;
-			expansionBufferSize = OPENNODE_BUFFER_SIZE - ALL1_FILE_BUFFER_SIZE - ALL2_FILE_BUFFER_SIZE - ALL3_FILE_BUFFER_SIZE;
+				inputs[0].setReadBuffer((OpenNode*)ram + ALL1_FILE_BUFFER_SIZE, ALL2_FILE_BUFFER_SIZE);
+				inputs[0].open(formatFileName("combined", currentFrameGroup));
+
+				output.b()->setWriteBuffer((OpenNode*)ram + ALL1_FILE_BUFFER_SIZE + ALL2_FILE_BUFFER_SIZE, ALL3_FILE_BUFFER_SIZE);
+				output.b()->open(formatFileName("combining", currentFrameGroup+1), false);
+
+				expansionBuffer = (OpenNode*)ram + ALL1_FILE_BUFFER_SIZE + ALL2_FILE_BUFFER_SIZE + ALL3_FILE_BUFFER_SIZE;
+				expansionBufferSize = OPENNODE_BUFFER_SIZE - ALL1_FILE_BUFFER_SIZE - ALL2_FILE_BUFFER_SIZE - ALL3_FILE_BUFFER_SIZE;
 
 #ifdef MULTITHREADING
-			startWorkers<&processState>();
+				startWorkers<&processState>();
 #endif
-			mergeStreams(inputs, 2, &output);
+				mergeStreams(inputs, 2, &output);
 #ifdef MULTITHREADING
-			flushProcessingQueue();
+				flushProcessingQueue();
 #endif
 
-			writeExpansionChunk();
-			output.b()->flush();
-		}
+				writeExpansionChunk();
+				output.b()->flush();
+			}
 
-		{
-			OutputStream<unsigned> resumeInfo(formatFileName("expandedcounting", currentFrameGroup+1), false);
-			resumeInfo.write(&expansionChunks, 1);
-		}
-		deleteFile(formatFileName("combined", currentFrameGroup));
-		renameFile(formatFileName("combining", currentFrameGroup+1), formatFileName("combined", currentFrameGroup+1));
-		deleteFile(formatFileName("expanded", currentFrameGroup));
-		renameFile(formatFileName("expandedcounting", currentFrameGroup+1), formatFileName("expandedcount", currentFrameGroup+1));
+			{
+				OutputStream<unsigned> resumeInfo(formatFileName("expandedcounting", currentFrameGroup+1), false);
+				resumeInfo.write(&expansionChunks, 1);
+			}
+			deleteFile(formatFileName("combined", currentFrameGroup));
+			renameFile(formatFileName("combining", currentFrameGroup+1), formatFileName("combined", currentFrameGroup+1));
+			deleteFile(formatFileName("expanded", currentFrameGroup));
+			renameFile(formatFileName("expandedcounting", currentFrameGroup+1), formatFileName("expandedcount", currentFrameGroup+1));
 
-		printf("%12llu nodes closed, %12llu nodes combined;  ", closedNodesInCurrentFrameGroup, combinedNodesTotal);
+			printf("%12llu closed, %12llu combined;  ", closedNodesInCurrentFrameGroup, combinedNodesTotal); fflush(stdout);
 
-		if (checkStop())
-			return EXIT_STOP;
+			if (checkStop(true))
+				return EXIT_STOP;
 
-		if (exitFound)
-		{
-			assert(currentFrameGroup == exitFrame / FRAMES_PER_GROUP);
-			printf("\nExit found (at frame %u), tracing path...\n", exitFrame);
-			traceExit(&exitState, exitFrame);
-			return EXIT_OK;
+			if (exitFound)
+			{
+				assert(currentFrameGroup == exitFrame / FRAMES_PER_GROUP);
+				printf("\nExit found (at frame %u), tracing path...\n", exitFrame);
+				traceExit(&exitState, exitFrame);
+				return EXIT_OK;
+			}
 		}
 
 		printf("Merging... "); fflush(stdout);
