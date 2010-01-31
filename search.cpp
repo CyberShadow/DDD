@@ -1260,31 +1260,36 @@ void memoryMergingThread(THREAD_ID threadID)
 {
 	while(1)
 	{
+		SLEEP(1);
+
+		if (stopWorkers)
 		{
 			SCOPED_LOCK_NICE lock(processQueueMutex);
 				
 			if (stopWorkers)
 				break;
 		}
+
+		if (expansionChunksCommited == WORKERS)
 		{
 			SCOPED_LOCK_NICE lock(expansionMutex);
 
-			if (expansionChunksCommited == WORKERS)
-			{
-				BufferedOutputStream<OpenNode> output;
-				output.setWriteBuffer((OpenNode*)ram, MEM_MERGE_BUFFER_SIZE);
-				output.open(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
+			if (expansionChunksCommited != WORKERS)
+				continue;
 
-				MemoryInputStream<OpenNode> inputs[WORKERS];
-				for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-					inputs[threadID].open(expansionBuffer[threadID], expansionBuffer[threadID] + expansionCommitted[threadID]);
-				mergeStreams<OpenNode>(inputs, WORKERS, &output);
-				expansionChunks++;
+			BufferedOutputStream<OpenNode> output;
+			output.setWriteBuffer((OpenNode*)ram, MEM_MERGE_BUFFER_SIZE);
+			output.open(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
 
-				for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-					expansionMoveMe[threadID] = true;
-				expansionChunksCommited = 0;
-			}
+			MemoryInputStream<OpenNode> inputs[WORKERS];
+			for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+				inputs[threadID].open(expansionBuffer[threadID], expansionBuffer[threadID] + expansionCommitted[threadID]);
+			mergeStreams<OpenNode>(inputs, WORKERS, &output);
+			expansionChunks++;
+
+			for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+				expansionMoveMe[threadID] = true;
+			expansionChunksCommited = 0;
 		}
 	}
 
