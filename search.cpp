@@ -374,6 +374,8 @@ INLINE bool operator>=(const CompressedState& a, const CompressedState& b) { ret
 
 #endif
 
+FRAME_GROUP currentFrameGroup;
+
 // ************************************************ Disk ************************************************
 
 typedef CompressedState Node;
@@ -414,34 +416,48 @@ struct PackedCompressedState
 
 	bool operator ==(const CompressedState& state) { return *(CompressedState*)this == state; }
 
-	PackedCompressedState& operator =(const CompressedState& state) { return *this = (PackedCompressedState&)state; }
+	PackedCompressedState& operator =(const CompressedState& state) { return *this =  (PackedCompressedState&)state; }
+	PackedCompressedState& operator =(const CompressedState* state) { return *this = *(PackedCompressedState*)state; }
 };
 
-struct CacheNode
+typedef PackedCompressedState BareNode;
+
+struct OpenNode
 {
 	PackedCompressedState state;
 	PACKED_FRAME frame;
+
+	CompressedState& getState() const { return (CompressedState&)state; }
 };
 
-const size_t CACHE_SIZE = RAM_SIZE - 2*(ALL_FILE_BUFFER_SIZE*sizeof(Node));
+INLINE bool operator==(const OpenNode& a, const OpenNode& b) { return a.getState() == b.getState(); }
+INLINE bool operator!=(const OpenNode& a, const OpenNode& b) { return a.getState() != b.getState(); }
+INLINE bool operator< (const OpenNode& a, const OpenNode& b) { return a.getState() <  b.getState(); }
+INLINE bool operator<=(const OpenNode& a, const OpenNode& b) { return a.getState() <= b.getState(); }
+INLINE bool operator> (const OpenNode& a, const OpenNode& b) { return a.getState() >  b.getState(); }
+INLINE bool operator>=(const OpenNode& a, const OpenNode& b) { return a.getState() >= b.getState(); }
 
-const size_t CACHE_HASH_SIZE = CACHE_SIZE / sizeof(CacheNode) / NODES_PER_HASH;
-CacheNode (*cache)[NODES_PER_HASH] = (CacheNode (*)[NODES_PER_HASH]) ram;
+// For deduplication
+INLINE unsigned     getFrame(const CompressedState* state) { return state->subframe; }
+INLINE PACKED_FRAME getFrame(const OpenNode* node)         { return  node->frame; }
+INLINE void setFrame(CompressedState* state, unsigned     frame) { state->subframe = frame; }
+INLINE void setFrame(OpenNode* node,         PACKED_FRAME frame) {  node->frame    = frame; }
+
+const size_t EXPANSION_BUFFER_SIZE = RAM_SIZE / sizeof(OpenNode);
+OpenNode* expansionBuffer = (OpenNode*) ram;
+size_t expansionCount = 0;
+int expansionChunks = 0;
 
 const size_t BUFFER_SIZE = RAM_SIZE / sizeof(Node);
 Node* buffer = (Node*) ram;
 
-#ifdef USE_ALL
-Node* allReadBuffer  = (Node*)((char*)ram + CACHE_SIZE);
-Node* allWriteBuffer = allReadBuffer + ALL_FILE_BUFFER_SIZE;
-#endif
-
 // ****************************************** Buffered streams ******************************************
 
+template<class NODE>
 class Buffer
 {
 public:
-	Node* buf;
+	NODE* buf;
 	uint32_t size;
 
 	Buffer(uint32_t size) : size(size), buf(NULL)
@@ -452,7 +468,7 @@ public:
 	void allocate()
 	{
 		if (!buf && size)
-			buf = new Node[size];
+			buf = new NODE[size];
 	}
 
 	// When we need to use the default constructor (e.g. arrays)
@@ -469,11 +485,11 @@ public:
 			deallocate();
 			size = newSize;
 			if (size)
-				buf = new Node[size];
+				buf = new NODE[size];
 		}
 	}
 
-	void assign(Node* newBuf, uint32_t newSize)
+	void assign(NODE* newBuf, uint32_t newSize)
 	{
 		deallocate();
 		assert(newBuf >= ram && newBuf < ramEnd);
@@ -509,16 +525,16 @@ public:
 	void close() { return s.close(); }
 };
 
-template<class STREAM>
+template<class STREAM, class NODE>
 class WriteBuffer : virtual public BufferedStreamBase<STREAM>
 {
 	uint32_t pos;
 protected:
-	Buffer buffer;
+	Buffer<NODE> buffer;
 public:
 	WriteBuffer(uint32_t size) : buffer(size), pos(0) {}
 
-	void write(const Node* p, bool verify=false)
+	void write(const NODE* p, bool verify=false)
 	{
 		buffer.buf[pos++] = *p;
 #ifdef DEBUG
@@ -562,7 +578,7 @@ public:
 		flushBuffer();
 	}
 
-	void setWriteBuffer(Node* buf, uint32_t size)
+	void setWriteBuffer(NODE* buf, uint32_t size)
 	{
 		flushBuffer();
 		buffer.assign(buf, size);
@@ -577,16 +593,16 @@ public:
 	enum { WRITABLE = true };
 };
 
-template<class STREAM>
+template<class STREAM, class NODE>
 class ReadBuffer : virtual public BufferedStreamBase<STREAM>
 {
 	uint32_t pos, end;
 protected:
-	Buffer buffer;
+	Buffer<NODE> buffer;
 public:
 	ReadBuffer(uint32_t size) : buffer(size), pos(0), end(0) {}
 
-	const Node* read()
+	const NODE* read()
 	{
 		if (pos == end)
 		{
@@ -608,7 +624,7 @@ public:
 		end = (uint32_t)s.read(buffer.buf, (size_t)(left < buffer.size ? left : buffer.size));
 	}
 
-	void setReadBuffer(Node* buf, uint32_t size)
+	void setReadBuffer(NODE* buf, uint32_t size)
 	{
 		assert(pos == end, "Buffer is dirty");
 		buffer.assign(buf, size);
@@ -627,7 +643,7 @@ public:
 	}
 
 	// some InputHeap compatibility
-	INLINE const Node* getHead()
+	INLINE const NODE* getHead()
 	{
 		if (pos == 0)
 			return NULL;
@@ -651,23 +667,23 @@ public:
 	}
 
 	template<bool checkFirst, class OUTPUT>
-	int scanTo(const Node* target, OUTPUT* output)
+	int scanTo(const NODE* target, OUTPUT* output)
 	{
 		if (checkFirst)
 		{
-			const Node* headState = getHead();
+			const NODE* headState = getHead();
 			if (headState && *headState >= *target)
 				return (*headState > *target);
 		}
 		else
 			debug_assert(getHead()==NULL || *getHead() < *target);
 
-		const Node* node;
+		const NODE* node;
 		do
 		{
 			if (OUTPUT::WRITABLE)
 			{
-				const Node* head = getHead();
+				const NODE* head = getHead();
 				if (head)
 					output->write(head);
 			}
@@ -679,7 +695,8 @@ public:
 	}
 };
 
-class BufferedInputStream : public ReadBuffer<InputStream>
+template<class NODE>
+class BufferedInputStream : public ReadBuffer<InputStream, NODE>
 {
 public:
 	BufferedInputStream(uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer(size) {}
@@ -687,7 +704,8 @@ public:
 	void open(const char* filename) { s.open(filename); buffer.allocate(); }
 };
 
-class BufferedOutputStream : public WriteBuffer<OutputStream>
+template<class NODE>
+class BufferedOutputStream : public WriteBuffer<OutputStream, NODE>
 {
 public:
 	BufferedOutputStream(uint32_t size = STANDARD_BUFFER_SIZE) : WriteBuffer(size) {}
@@ -695,7 +713,8 @@ public:
 	void open(const char* filename, bool resume=false) { s.open(filename, resume); buffer.allocate(); }
 };
 
-class BufferedRewriteStream : public ReadBuffer<RewriteStream>, public WriteBuffer<RewriteStream>
+template<class NODE>
+class BufferedRewriteStream : public ReadBuffer<RewriteStream, NODE>, public WriteBuffer<RewriteStream, NODE>
 {
 public:
 	BufferedRewriteStream(uint32_t readSize = STANDARD_BUFFER_SIZE, uint32_t writeSize = STANDARD_BUFFER_SIZE) : ReadBuffer(readSize), WriteBuffer(writeSize) {}
@@ -719,13 +738,13 @@ void copyFile(const char* from, const char* to)
 
 // ***************************************** Stream operations ******************************************
 
-template<class INPUT>
+template<class INPUT, class NODE>
 class InputHeap
 {
 protected:    
 	struct HeapNode
 	{
-		const CompressedState* state;
+		const NODE* state;
 		INPUT* input;
 		INLINE bool operator<(const HeapNode& b) const { return *this->state < *b.state; }
 	};
@@ -769,7 +788,7 @@ public:
 		delete[] heap;
 	}
 
-	const CompressedState* getHead() const { return head->state; }
+	const NODE* getHead() const { return head->state; }
 	INPUT* getHeadInput() const { return head->input; }
 
 	bool next()
@@ -790,7 +809,7 @@ public:
 		return true;
 	}
 
-	INLINE const CompressedState* read()
+	INLINE const NODE* read()
 	{
 		if (!next())
 		{
@@ -802,7 +821,7 @@ public:
 
 	/// output receives "old" states (that is, *getHead() on function entry but not on exit)
 	template<bool checkFirst, class OUTPUT>
-	int scanTo(const CompressedState* target, OUTPUT* output)
+	int scanTo(const NODE* target, OUTPUT* output)
 	{
 		test();
 		if (size == 0)
@@ -810,7 +829,7 @@ public:
 
 		if (checkFirst)
 		{
-			const CompressedState* headState = getHead();
+			const NODE* headState = getHead();
 			if (headState && *headState >= *target)
 				return (*headState > *target);
 		}
@@ -821,8 +840,8 @@ public:
 		{
 			do
 			{
-				CompressedState readUntil = *target;
-				const CompressedState* minChild = heap[2].state;
+				NODE readUntil = *target;
+				const NODE* minChild = heap[2].state;
 				if (size>2 && *minChild > *heap[3].state)
 					minChild = heap[3].state;
 				if (readUntil > *minChild)
@@ -925,9 +944,39 @@ void copyStream(INPUT* input, OUTPUT* output)
 		output->write(cs, false);
 }
 
-void mergeStreams(BufferedInputStream inputs[], int inputCount, BufferedOutputStream* output)
+template<class NODE>
+void mergeStreams(BufferedInputStream<NODE> inputs[], int inputCount, BufferedOutputStream<NODE>* output)
 {
-	InputHeap<BufferedInputStream> heap(inputs, inputCount);
+	InputHeap<BufferedInputStream<NODE>, NODE> heap(inputs, inputCount);
+
+	const NODE* first = heap.read();
+	if (!first)
+		return;
+	NODE cs = *(NODE*)first;
+	const NODE* cs2;
+	
+	while (cs2 = heap.read())
+	{
+		debug_assert(*cs2 >= cs);
+		if (cs == *cs2) // CompressedState::operator== does not compare subframe
+		{
+#ifdef GROUP_FRAMES
+			if (getFrame(&cs) > getFrame(cs2)) // in case of duplicate frames, pick the one from the smallest frame
+				setFrame(&cs,   getFrame(cs2));
+#endif
+		}
+		else
+		{
+			output->write(&cs, true);
+			cs = *cs2;
+		}
+	}
+	output->write(&cs, true);
+}
+
+void mergeStreams(BufferedInputStream<Node> inputs[], int inputCount, BufferedOutputStream<BareNode>* output)
+{
+	InputHeap<BufferedInputStream<Node>, Node> heap(inputs, inputCount);
 
 	const CompressedState* first = heap.read();
 	if (!first)
@@ -938,20 +987,13 @@ void mergeStreams(BufferedInputStream inputs[], int inputCount, BufferedOutputSt
 	while (cs2 = heap.read())
 	{
 		debug_assert(*cs2 >= cs);
-		if (cs == *cs2) // CompressedState::operator== does not compare subframe
+		if (cs != *cs2) // CompressedState::operator!= does not compare subframe
 		{
-#ifdef GROUP_FRAMES
-			if (cs.subframe > cs2->subframe) // in case of duplicate frames, pick the one from the smallest frame
-				cs.subframe = cs2->subframe;
-#endif
-		}
-		else
-		{
-			output->write(&cs, true);
+			output->write(&(BareNode&)cs, true);
 			cs = *cs2;
 		}
 	}
-	output->write(&cs, true);
+	output->write(&(BareNode&)cs, true);
 }
 
 class NullOutput
@@ -1008,8 +1050,8 @@ void filterStream(CLOSED* closed, OPEN* open, FILTERED* filtered, MERGED* merged
 		while (closed->next());
 }
 
-template<class CLOSED, class MERGED>
-void filterStreams(CLOSED* closed, BufferedRewriteStream open[], int openCount, MERGED* merged)
+template<class CLOSED, class MERGED, class NODE>
+void filterStreams(CLOSED* closed, BufferedRewriteStream<NODE> open[], int openCount, MERGED* merged)
 {
 	if (openCount==0)
 	{
@@ -1053,20 +1095,21 @@ void filterStreams(CLOSED* closed, BufferedRewriteStream open[], int openCount, 
 }
 
 // In-place deduplicate sorted nodes in memory. Return new number of nodes.
-size_t deduplicate(CompressedState* start, size_t records)
+template<class COMPRESSED_STATE>
+size_t deduplicate(COMPRESSED_STATE* start, size_t records)
 {
 	if (records==0)
 		return 0;
-	CompressedState *read=start+1, *write=start+1;
-	CompressedState *end = start+records;
+	COMPRESSED_STATE *read=start+1, *write=start+1;
+	COMPRESSED_STATE *end = start+records;
 	while (read < end)
 	{
 		debug_assert(*read >= *(read-1));
 		if (*read == *(write-1)) // CompressedState::operator== does not compare subframe
 		{
 #ifdef GROUP_FRAMES
-			if ((write-1)->subframe > read->subframe)
-				(write-1)->subframe = read->subframe;
+			if (getFrame(write-1) > getFrame(read))
+				setFrame(write-1,   getFrame(read));
 #endif
 		}
 		else
@@ -1100,48 +1143,28 @@ const char* formatFileName(const char* name, FRAME_GROUP g, unsigned chunk)
 
 #define MAX_FRAME_GROUPS ((MAX_FRAMES+(FRAMES_PER_GROUP-1))/FRAMES_PER_GROUP)
 
-BufferedOutputStream* queue[MAX_FRAME_GROUPS];
-bool noQueue[MAX_FRAME_GROUPS];
-#ifdef MULTITHREADING
-MUTEX queueMutex[MAX_FRAME_GROUPS];
-#endif
-
-#ifdef MULTITHREADING
-#define PARTITIONS (CACHE_HASH_SIZE/256)
-MUTEX cacheMutex[PARTITIONS];
-#endif
+void writeExpansionChunk()
+{
+	if (expansionCount)
+	{
+		std::sort(expansionBuffer, expansionBuffer + expansionCount);
+		size_t records = deduplicate(expansionBuffer, expansionCount);
+		OutputStream output(formatFileName("expanded", currentFrameGroup, expansionChunks));
+		output.write(expansionBuffer, records);
+		expansionChunks++;
+	}
+}
 
 void writeOpenState(const CompressedState* state, FRAME frame)
 {
 	FRAME_GROUP group = frame/FRAMES_PER_GROUP;
 	if (group >= MAX_FRAME_GROUPS)
 		return;
-	if (noQueue[group])
-		return;
-	SET_SUBFRAME(*(CompressedState*)state, frame); // HACK: remove const
-#ifdef MULTITHREADING
-	SCOPED_LOCK lock(queueMutex[group]);
-#endif
-	if (!queue[group])
-		queue[group] = new BufferedOutputStream(formatFileName("open", group));
-	queue[group]->write(state);
-}
-
-void prepareOpen()
-{
-	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
-		if (queue[g])
-			queue[g]->setWriteBufferSize(STANDARD_BUFFER_SIZE); // reallocate buffer
-}
-
-void flushOpen()
-{
-	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
-		if (queue[g])
-		{
-			queue[g]->flush();
-			queue[g]->setWriteBufferSize(0); // deallocate buffer
-		}
+	expansionBuffer[expansionCount].state = state;
+	expansionBuffer[expansionCount].frame = (PACKED_FRAME)frame;
+	expansionCount++;
+	if (expansionCount == EXPANSION_BUFFER_SIZE)
+		writeExpansionChunk();
 }
 
 // *********************************************** Cache ************************************************
@@ -1180,62 +1203,6 @@ INLINE uint32_t hashState(const CompressedState* state)
 
 void addState(const CompressedState* cs, FRAME frame)
 {
-	uint32_t hash = hashState(cs) % CACHE_HASH_SIZE;
-	
-	{
-#ifdef MULTITHREADING
-		SCOPED_LOCK lock(cacheMutex[hash % PARTITIONS]);
-#endif
-		CacheNode* nodes = cache[hash];
-		if (nodes[0].state == *cs)
-		{
-			if (nodes[0].frame <= frame)
-				return;
-			else
-				nodes[0].frame = (PACKED_FRAME)frame;
-		}
-		else
-		{
-#if (NODES_PER_HASH==2)
-			if (nodes[1].state == *cs)
-			{
-				FRAME earliest_frame = nodes[1].frame;
-				if (earliest_frame > frame)
-				{
-					earliest_frame = frame;
-					writeOpenState(cs, frame);
-				}
-				// pop to front
-				nodes[1] = nodes[0];
-				nodes[0].state = *cs;
-				nodes[0].frame = (PACKED_FRAME)earliest_frame;
-				return;
-			}
-			// new node
-			nodes[1] = nodes[0];
-#elif (NODES_PER_HASH>2)
-			for (int i=1; i<NODES_PER_HASH; i++)
-				if (nodes[i].state == *cs)
-				{
-					FRAME earliest_frame = nodes[i].frame;
-					if (earliest_frame > frame)
-					{
-						earliest_frame = frame;
-						writeOpenState(cs, frame);
-					}
-					// pop to front
-					memmove(nodes+1, nodes, i * sizeof(CacheNode));
-					nodes[0].state = *cs;
-					nodes[0].frame = (PACKED_FRAME)earliest_frame;
-					return;
-				}
-			// new node
-			memmove(nodes+1, nodes, (NODES_PER_HASH-1) * sizeof(CacheNode));
-#endif
-			nodes[0].state = *cs;
-			nodes[0].frame = (PACKED_FRAME)frame;
-		}
-	}
 	writeOpenState(cs, frame);
 }
 
@@ -1426,7 +1393,7 @@ void traceExit(const State* exitState, FRAME exitFrame)
 			startWorkers<&processExitState>();
 #endif
 
-			BufferedInputStream input(formatFileName("closed", exitSearchFrameGroup));
+			BufferedInputStream<Node> input(formatFileName("closed", exitSearchFrameGroup));
 			const CompressedState *cs;
 			DEBUG_ONLY(statesQueued = statesDequeued = 0);
 			while (cs = input.read())
@@ -1500,13 +1467,13 @@ void sortAndMerge(FRAME_GROUP g)
 		double outbuf_inbuf_ratio = sqrt(EXPECTED_MERGING_RATIO * chunks);
 		size_t bufferSize = (size_t)floor(RAM_SIZE / ((chunks + outbuf_inbuf_ratio) * sizeof(Node)));
 		
-		BufferedInputStream* chunkInput = new BufferedInputStream[chunks];
+		BufferedInputStream<Node>* chunkInput = new BufferedInputStream<Node>[chunks];
 		for (int i=0; i<chunks; i++)
 		{
 			chunkInput[i].setReadBuffer(buffer + i*bufferSize, (uint32_t)bufferSize);
 			chunkInput[i].open(formatFileName("chunk", g, i));
 		}
-		BufferedOutputStream* output = new BufferedOutputStream;
+		BufferedOutputStream<Node>* output = new BufferedOutputStream<Node>;
 		output->setWriteBuffer(buffer + chunks*bufferSize, (uint32_t)floor(bufferSize * outbuf_inbuf_ratio));
 		output->open(formatFileName("merging", g));
 		mergeStreams(chunkInput, chunks, output);
@@ -1523,9 +1490,41 @@ void sortAndMerge(FRAME_GROUP g)
 	}
 }
 
+void mergedExpanded()
+{
+	printf("Merging... "); fflush(stdout);
+	if (expansionChunks>1)
+	{
+		ramUsed = RAM_SIZE;
+		double outbuf_inbuf_ratio = sqrt(EXPECTED_MERGING_RATIO * expansionChunks);
+		size_t bufferSize = (size_t)floor(RAM_SIZE / ((expansionChunks + outbuf_inbuf_ratio) * sizeof(Node)));
+		
+		BufferedInputStream<OpenNode>* chunkInput = new BufferedInputStream<OpenNode>[expansionChunks];
+		for (int i=0; i<expansionChunks; i++)
+		{
+			chunkInput[i].setReadBuffer(expansionBuffer + i*bufferSize, (uint32_t)bufferSize);
+			chunkInput[i].open(formatFileName("expanded", currentFrameGroup, i));
+		}
+		BufferedOutputStream<OpenNode>* output = new BufferedOutputStream<OpenNode>;
+		output->setWriteBuffer(expansionBuffer + expansionChunks*bufferSize, (uint32_t)floor(bufferSize * outbuf_inbuf_ratio));
+		output->open(formatFileName("merging", currentFrameGroup));
+		mergeStreams(chunkInput, expansionChunks, output);
+		delete[] chunkInput;
+		output->flush();
+		delete output;
+		renameFile(formatFileName("merging", currentFrameGroup), formatFileName("expanded", currentFrameGroup));
+	}
+	else
+	{
+		renameFile(formatFileName("expanded", currentFrameGroup, 0), formatFileName("expanded", currentFrameGroup));
+	}
+	expansionCount = 0;
+	expansionChunks = 0;
+}
+
 // use closed/all files implicitly, optionally update all file by merging input with existing all/closed files
 template <bool updateAll>
-void filterAgainstClosed(BufferedRewriteStream open[], int openCount)
+void filterAgainstClosed(BufferedRewriteStream<Node> open[], int openCount)
 {
 	BufferedInputStream* closed = new BufferedInputStream[MAX_FRAME_GROUPS];
 	FRAME_GROUP lastAll = -1, maxClosed = -1;
@@ -1616,7 +1615,6 @@ void doFilterOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups);
 // *********************************************** Search ***********************************************
 
 FRAME_GROUP firstFrameGroup, maxFrameGroups;
-FRAME_GROUP currentFrameGroup;
 
 bool exitFound;
 FRAME exitFrame;
@@ -1733,110 +1731,116 @@ int search()
 			break;
 	    }
 
-	for (FRAME_GROUP g=firstFrameGroup; g<MAX_FRAME_GROUPS; g++)
-		if (fileExists(formatFileName("open", g)))
-		{
-			printTime(); printf("Reopening queue for frame" GROUP_STR " " GROUP_FORMAT "\n", g);
-			queue[g] = new BufferedOutputStream(formatFileName("open", g), true, 0);
-		}
-
-	if (firstFrameGroup==0 && !queue[0])
+	if (firstFrameGroup==0)
 	{
-		for (int i=0; i<initialStateCount; i++)
 		{
-			State s = initialStates[i];
-			CompressedState c;
-			s.compress(&c);
-			writeOpenState(&c, 0);
+			BufferedOutputStream<OpenNode> output(formatFileName("allnew", 0), false);
+			for (int i=0; i<initialStateCount; i++)
+			{
+				State s = initialStates[i];
+				CompressedState c;
+				s.compress(&c);
+				output.write(&(BareNode&)c);
+			}
+			output.flush();
 		}
+		renameFile(formatFileName("allnew", currentFrameGroup), formatFileName("all", currentFrameGroup));
+
+		OutputStream output(formatFileName("expanded", 0), false); // create zero byte file
 	}
 
 	for (currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
 	{
-		if (!queue[currentFrameGroup])
-			continue;
-		delete queue[currentFrameGroup];
-		queue[currentFrameGroup] = NULL;
-
 		printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 
-		ramUsed = 0;
-		if (fileExists(formatFileName("merged", currentFrameGroup)))
-		{
-			printf("(reopening merged)    ");
-		}
-		else
-		{
-			// Step 1 & 2: sort and merge open nodes
-			sortAndMerge(currentFrameGroup);
-		}
-
-		if (checkStop(true))
-			return EXIT_STOP;
-
-		printf("Clearing... "); fflush(stdout);
-		memset(ram, 0, ramUsed); // clear cache
-
-		// Step 3: dedup against previous frames, while simultaneously processing filtered nodes
-		printf("Processing... "); fflush(stdout);
-
+		printf("Expanding... "); fflush(stdout);
 #ifdef MULTITHREADING
 		startWorkers<&processState>();
 #endif
-		prepareOpen();
+		BufferedInputStream<Node> input(formatFileName("closed", currentFrameGroup));
+		ProcessStateOutput processor;
+		copyStream(&input, &processor);
+#ifdef MULTITHREADING
+		flushProcessingQueue();
+#endif
+		writeExpansionChunk();
+
+		printf("Merging... "); fflush(stdout);
+		mergedExpanded();
+
+		//printf("Clearing... "); fflush(stdout);
+		//memset(ram, 0, ramUsed); // clear cache
 
 #ifdef USE_ALL
-		if (currentFrameGroup==0)
 		{
-			copyFile(formatFileName("merged", currentFrameGroup), formatFileName("closing", currentFrameGroup));
-			renameFile(formatFileName("merged", currentFrameGroup), formatFileName("allnew", currentFrameGroup));
+			BufferedInputStream<OpenNode> source;
+			source.setReadBuffer((OpenNode*)ram + (RAM_SIZE/6) * 0 / sizeof(OpenNode), (RAM_SIZE/6) / sizeof(OpenNode));
+			source.open(formatFileName("expanded", currentFrameGroup));
+
+			//FRAME_GROUP allFrameGroup = lastAll();
 			
-			BufferedInputStream input(formatFileName("closing", currentFrameGroup));
-			ProcessStateOutput processor;
-			copyStream(&input, &processor);
-		}
-		else
-		{
+			BufferedInputStream<BareNode> all;
+			all.setReadBuffer((BareNode*)ram + (RAM_SIZE/6) * 1 / sizeof(BareNode), (RAM_SIZE/6) / sizeof(BareNode));
+			all.open(formatFileName("all", currentFrameGroup));
+			
+			BufferedOutputStream<BareNode> allnew;
+			allnew.setWriteBuffer((BareNode*)ram + (RAM_SIZE/6) * 2 / sizeof(BareNode), (RAM_SIZE/6) / sizeof(BareNode));
+			allnew.open(formatFileName("allnew", currentFrameGroup+1), false);
+			
+			//DoubleOutput<ProcessStateOutput, BufferedOutputStream> output;
+			//output.b()->open(formatFileName("closing", currentFrameGroup));
+
+			BufferedOutputStream<Node> output;
+			output.setWriteBuffer((Node*)ram + (RAM_SIZE/6) * 3 / sizeof(Node), (RAM_SIZE/6) / sizeof(Node));
+			output.open(formatFileName("closing", currentFrameGroup), false);
+
+			BufferedInputStream<OpenNode> openall;
+			openall.setReadBuffer((OpenNode*)ram + (RAM_SIZE/6) * 4 / sizeof(OpenNode), (RAM_SIZE/6) / sizeof(OpenNode));
+			openall.open(formatFileName("openall", currentFrameGroup));
+			
+			BufferedOutputStream<OpenNode> openallnew;
+			openallnew.setWriteBuffer((OpenNode*)ram + (RAM_SIZE/6) * 5 / sizeof(OpenNode), (RAM_SIZE/6) / sizeof(OpenNode));
+			openallnew.open(formatFileName("openallnew", currentFrameGroup+1), false);
+			
+			filterStream(&all, &source, &output, &allnew);
+
+			/*
+			int additionalInputs = 0;
+			for (FRAME_GROUP g=allFrameGroup+1; g<currentFrameGroup; g++)
+				if (fileExists(formatFileName("closed", g)))
+				{
+					InputStream input;
+					input.open(formatFileName("closed", g));
+					if (input.size())
+						additionalInputs++;
+				}
+
+			if (additionalInputs==0)
+				filterStream(&all , &source, &output, &allnew);
+			else
 			{
-				BufferedInputStream source(formatFileName("merged", currentFrameGroup));
-				FRAME_GROUP allFrameGroup = lastAll();
-				
-				BufferedInputStream all;
-				all.setReadBuffer(allReadBuffer, ALL_FILE_BUFFER_SIZE);
-				all.open(formatFileName("all", allFrameGroup));
-				
-				BufferedOutputStream allnew;
-				allnew.setWriteBuffer(allWriteBuffer, ALL_FILE_BUFFER_SIZE);
-				allnew.open(formatFileName("allnew", currentFrameGroup), false);
-				
-				DoubleOutput<ProcessStateOutput, BufferedOutputStream> output;
-				output.b()->open(formatFileName("closing", currentFrameGroup));
-				
-				BufferedInputStream* inputs = new BufferedInputStream[MAX_FRAME_GROUPS+1];
-				int additionalInputs = 0;
-				for (FRAME_GROUP g=allFrameGroup+1; g<currentFrameGroup; g++)
+				BufferedInputStream<Node>* inputs = new BufferedInputStream<Node>[additionalInputs+1];
+				int i=0;
+				for (FRAME_GROUP g=allFrameGroup+1; i<additionalInputs && g<currentFrameGroup; g++)
 					if (fileExists(formatFileName("closed", g)))
 					{
 						inputs[g].open(formatFileName("closed", g));
 						if (inputs[g].size())
-							additionalInputs++;
+							i++;
 						else
 							inputs[g].close();
 					}
-				if (additionalInputs==0)
-					filterStream(&all , &source, &output, &allnew);
-				else
-				{
-					inputs[MAX_FRAME_GROUPS] = all;
-					InputHeap<BufferedInputStream> heap(inputs, MAX_FRAME_GROUPS+1);
-					filterStream(&heap, &source, &output, &allnew);
-				}
+				inputs[i] = all;
+				InputHeap<BufferedInputStream> heap(inputs, i+1);
+				filterStream(&heap, &source, &output, &allnew);
 				delete[] inputs;
-				allnew.flush();
-				output.b()->flush();
 			}
-			deleteFile(formatFileName("merged", currentFrameGroup));
+			*/
+
+			allnew.flush();
+			//output.b()->flush();
 		}
+		deleteFile(formatFileName("merged", currentFrameGroup));
 #else
 		{
 			BufferedInputStream source(formatFileName("merged", currentFrameGroup));
@@ -1860,13 +1864,6 @@ int search()
 		}
 		deleteFile(formatFileName("merged", currentFrameGroup));
 #endif
-
-#ifdef MULTITHREADING
-		flushProcessingQueue();
-#endif
-
-		printf("Flushing... "); fflush(stdout);
-		flushOpen();
 
 		if (exitFound)
 		{
@@ -1911,6 +1908,7 @@ int search()
 	return EXIT_NOTFOUND;
 }
 
+#if 0
 // ******************************************* Grouped-search *******************************************
 
 int groupedSearch(FRAME_GROUP groupSize, bool filterFirst)
@@ -2064,6 +2062,7 @@ int groupedSearch(FRAME_GROUP groupSize, bool filterFirst)
 	printf("Exit not found.\n");
 	return EXIT_NOTFOUND;
 }
+#endif
 
 // ********************************************* Pack-open **********************************************
 
@@ -2109,12 +2108,12 @@ int dump(FRAME_GROUP g)
 {
 	printf("Dumping frame" GROUP_STR " " GROUP_FORMAT ":\n", g);
 	const char* fn = formatFileName("closed", g);
-	if (!fileExists(fn))
-		fn = formatFileName("open", g);
+	/*if (!fileExists(fn))
+		fn = formatFileName("open", g);*/
 	if (!fileExists(fn))
 		error(format("Can't find neither open nor closed node file for frame" GROUP_STR " " GROUP_FORMAT, g));
 	
-	BufferedInputStream in(fn);
+	BufferedInputStream<Node> in(fn);
 	const CompressedState* cs;
 	while (cs = in.read())
 	{
@@ -2157,7 +2156,7 @@ int sample(FRAME_GROUP g)
 
 int compare(const char* fn1, const char* fn2)
 {
-	BufferedInputStream i1(fn1), i2(fn2);
+	BufferedInputStream<Node> i1(fn1), i2(fn2);
 	printf("%s: %llu states\n%s: %llu states\n", fn1, i1.size(), fn2, i2.size());
 	const CompressedState *cs1, *cs2;
 	cs1 = i1.read();
@@ -2198,9 +2197,9 @@ int compare(const char* fn1, const char* fn2)
 
 // HACK: the following code uses pointer arithmetics with BufferedInputStream objects to quickly determine the subframe from which a CompressedState came from.
 
-void convertMerge(BufferedInputStream inputs[], int inputCount, BufferedOutputStream* output)
+void convertMerge(BufferedInputStream<Node> inputs[], int inputCount, BufferedOutputStream<Node>* output)
 {
-	InputHeap<BufferedInputStream> heap(inputs, inputCount);
+	InputHeap<BufferedInputStream<Node>, Node> heap(inputs, inputCount);
 	//uint64_t* positions = new uint64_t[inputCount];
 	//for (int i=0; i<inputCount; i++)
 	//	positions[i] = 0;
@@ -2250,7 +2249,7 @@ int convert()
 	for (FRAME_GROUP g=firstFrameGroup; g<maxFrameGroups; g++)
 	{
 		bool haveClosed=false, haveOpen=false;
-		BufferedInputStream inputs[FRAMES_PER_GROUP];
+		BufferedInputStream<Node> inputs[FRAMES_PER_GROUP];
 		for (FRAME f=g*FRAMES_PER_GROUP; f<(g+1)*FRAMES_PER_GROUP; f++)
 			if (fileExists(formatProblemFileName("closed", format("%u", f), "bin")))
 				inputs[f%FRAMES_PER_GROUP].open(formatProblemFileName("closed", format("%u", f), "bin")),
@@ -2263,7 +2262,7 @@ int convert()
 		{
 			printf(GROUP_FORMAT "...\n", g);
 			{
-				BufferedOutputStream output(formatFileName("converting", g));
+				BufferedOutputStream<Node> output(formatFileName("converting", g));
 				convertMerge(inputs, FRAMES_PER_GROUP, &output);
 			}
 			renameFile(formatFileName("converting", g), formatFileName(haveOpen ? "open" : "closed", g));
@@ -2283,8 +2282,8 @@ int unpack()
 		if (fileExists(formatFileName("closed", g)))
 		{
 			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "\n", g); fflush(stdout);
-			BufferedInputStream input(formatFileName("closed", g));
-			BufferedOutputStream outputs[FRAMES_PER_GROUP];
+			BufferedInputStream<Node> input(formatFileName("closed", g));
+			BufferedOutputStream<Node> outputs[FRAMES_PER_GROUP];
 			for (int i=0; i<FRAMES_PER_GROUP; i++)
 				outputs[i].open(formatProblemFileName("closed", format("%u", g*FRAMES_PER_GROUP+i), "bin"));
 			const CompressedState* cs;
@@ -2306,7 +2305,7 @@ int count()
 		if (fileExists(formatFileName("closed", g)))
 		{
 			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT ":\n", g);
-			BufferedInputStream input(formatFileName("closed", g));
+			BufferedInputStream<Node> input(formatFileName("closed", g));
 			const CompressedState* cs;
 			uint64_t counts[FRAMES_PER_GROUP] = {0};
 			while (cs = input.read())
@@ -2325,7 +2324,7 @@ int count()
 
 int verify(const char* filename)
 {
-	BufferedInputStream input(filename);
+	BufferedInputStream<Node> input(filename);
 	CompressedState cs = *input.read();
 	bool equalFound=false, oooFound=false;
 	uint64_t pos = 0;
@@ -2357,6 +2356,7 @@ int verify(const char* filename)
 	}
 }
 
+#if 0
 // ********************************************* Sort-open **********************************************
 
 int doSortOpen(FRAME_GROUP firstFrameGroup, FRAME_GROUP maxFrameGroups)
@@ -2449,6 +2449,8 @@ int seqFilterOpen()
 #ifdef USE_ALL
 				if (fileExists(formatFileName("all", g)))
 				{
+					Node *allReadBuffer = (Node*)ram;
+
 					inputs[inputCount  ].setReadBuffer(allReadBuffer, ALL_FILE_BUFFER_SIZE);
 					inputs[inputCount++].open(formatFileName("all", g));
 					break;
@@ -2565,13 +2567,14 @@ int regenerateOpen()
 	
 	return EXIT_OK;
 }
+#endif
 
 // ********************************************* Create-all *********************************************
 
 int createAll()
 {
 	FRAME_GROUP maxClosed = -1;
-	BufferedInputStream* closed = new BufferedInputStream[MAX_FRAME_GROUPS];
+	BufferedInputStream<Node>* closed = new BufferedInputStream<Node>[MAX_FRAME_GROUPS];
 	for (FRAME_GROUP g=0; g<MAX_FRAME_GROUPS; g++)
 		if (fileExists(formatFileName("closed", g)))
 		{
@@ -2582,7 +2585,7 @@ int createAll()
 	enforce(maxClosed >= 0, "No closed node files found");
 
 	{
-		BufferedOutputStream all(formatFileName("allnew", maxClosed));
+		BufferedOutputStream<BareNode> all(formatFileName("allnew", maxClosed));
 		mergeStreams(closed, MAX_FRAME_GROUPS, &all);
 	}
 	delete[] closed;
@@ -2607,7 +2610,7 @@ int findExit()
 		if (fileExists(fn))
 		{
 			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
-			BufferedInputStream input(fn);
+			BufferedInputStream<Node> input(fn);
 			const CompressedState* cs;
 			while (cs = input.read())
 			{
@@ -2908,7 +2911,7 @@ int run(int argc, const char* argv[])
 	testCompressedState();
 
 	enforce(ram, "RAM allocation failed");
-	printf("Using %lld bytes of RAM for %lld cache nodes and %lld buffer nodes\n", (long long)RAM_SIZE, (long long)CACHE_HASH_SIZE, (long long)BUFFER_SIZE);
+	printf("Using %lld bytes of RAM for %lld expansion nodes and %lld buffer nodes\n", (long long)RAM_SIZE, (long long)EXPANSION_BUFFER_SIZE, (long long)BUFFER_SIZE);
 
 #if defined(DISK_WINFILES)
 	printf("Using Windows API files\n");
@@ -2948,6 +2951,7 @@ int run(int argc, const char* argv[])
 			maxFrameGroups = parseInt(argv[2]);
 		return search();
 	}
+#if 0
 	if (argc>1 && strcmp(argv[1], "grouped-search")==0)
 	{
 		enforce(argc==3, "Specify how many frame"GROUP_STR"s to process at once");
@@ -2960,6 +2964,7 @@ int run(int argc, const char* argv[])
 		return groupedSearch(parseInt(argv[2]), false);
 	}
 	else
+#endif
 	if (argc>1 && strcmp(argv[1], "dump")==0)
 	{
 		enforce(argc==3, "Specify a frame"GROUP_STR" to dump");
@@ -3003,6 +3008,7 @@ int run(int argc, const char* argv[])
 		enforce(argc==3, "Specify a file to verify");
 		return verify(argv[2]);
 	}
+#if 0
 	else
 	if (argc>1 && strcmp(argv[1], "pack-open")==0)
 	{
@@ -3032,6 +3038,7 @@ int run(int argc, const char* argv[])
 		parseFrameRange(argc-2, argv+2);
 		return regenerateOpen();
 	}
+#endif
 	if (argc>1 && strcmp(argv[1], "create-all")==0)
 	{
 		return createAll();

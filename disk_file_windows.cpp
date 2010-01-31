@@ -96,7 +96,8 @@ public:
 		}
 	}
 
-	void write(const Node* p, size_t n)
+	template<class NODE>
+	void write(const NODE* p, size_t n)
 	{
 		assert(archive, "File not open");
 		size_t total = n * sizeof(Node);
