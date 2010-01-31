@@ -43,6 +43,7 @@ public:
 	}
 };
 
+template<class NODE>
 class InputStream
 {
 	int archive;
@@ -54,9 +55,9 @@ public:
 			error(_strerror(NULL));
 	}
 
-	int read(Node* p, int n)
+	int read(NODE* p, int n)
 	{
-		size_t total = n * sizeof(Node);
+		size_t total = n * sizeof(NODE);
 		size_t bytes = 0;
 		char* data = (char*)p;
 		while (bytes < total) // read in 1GB chunks
@@ -68,8 +69,8 @@ public:
 				error(_strerror(NULL));
 			if (r == 0)
 			{
-				assert(bytes % sizeof(Node) == 0, "Unaligned EOF");
-				return bytes / sizeof(Node);
+				assert(bytes % sizeof(NODE) == 0, "Unaligned EOF");
+				return bytes / sizeof(NODE);
 			}
 			bytes += r;
 		}

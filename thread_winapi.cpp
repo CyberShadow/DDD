@@ -2,13 +2,14 @@
 #error Wrong platform?
 #endif
 
+typedef size_t THREAD_ID;
+
+template<void (*WORKER_FUNCTION)(THREAD_ID threadID)>
 DWORD WINAPI CallCFunction(__in LPVOID lpParameter)
 {
-	typedef void (*C_FUNC)();
-	C_FUNC f = (C_FUNC)lpParameter;
 	try
 	{
-		f();
+		WORKER_FUNCTION((THREAD_ID)lpParameter);
 	}
 	catch (const char* s)
 	{
@@ -19,7 +20,7 @@ DWORD WINAPI CallCFunction(__in LPVOID lpParameter)
 }
 
 #define THREAD HANDLE
-#define THREAD_CREATE(delegate) CreateThread(NULL, 0, &CallCFunction, delegate, 0, NULL)
+#define THREAD_CREATE(delegate,threadID) CreateThread(NULL, 0, &CallCFunction<delegate>, (void*)threadID, 0, NULL)
 #define THREAD_JOIN(thread) WaitForSingleObject(thread, INFINITE);
 #define THREAD_DESTROY(thread) CloseHandle(thread)
 

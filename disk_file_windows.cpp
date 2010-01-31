@@ -71,6 +71,7 @@ public:
 	}
 };
 
+template<class NODE>
 class OutputStream : virtual public Stream
 {
 public:
@@ -96,11 +97,10 @@ public:
 		}
 	}
 
-	template<class NODE>
 	void write(const NODE* p, size_t n)
 	{
 		assert(archive, "File not open");
-		size_t total = n * sizeof(Node);
+		size_t total = n * sizeof(NODE);
 		size_t bytes = 0;
 		const char* data = (const char*)p;
 		while (bytes < total) // write in 1GB chunks
@@ -123,6 +123,7 @@ public:
 	}
 };
 
+template<class NODE>
 class InputStream : virtual public Stream
 {
 public:
@@ -140,10 +141,10 @@ public:
 			windowsError(format("File open failure (%s)", filename));
 	}
 
-	size_t read(Node* p, size_t n)
+	size_t read(NODE* p, size_t n)
 	{
 		assert(archive, "File not open");
-		size_t total = n * sizeof(Node);
+		size_t total = n * sizeof(NODE);
 		size_t bytes = 0;
 		char* data = (char*)p;
 		while (bytes < total) // read in 1GB chunks
@@ -154,8 +155,8 @@ public:
 			BOOL b = ReadFile(archive, data + bytes, chunk, &r, NULL);
 			if ((!b && GetLastError() == ERROR_HANDLE_EOF) || (b && r==0))
 			{
-				assert(bytes % sizeof(Node) == 0, "Unaligned EOF");
-				return bytes / sizeof(Node);
+				assert(bytes % sizeof(NODE) == 0, "Unaligned EOF");
+				return bytes / sizeof(NODE);
 			}
 			if (!b || r==0)
 				windowsError(format("Read error %d", GetLastError()));
@@ -166,7 +167,8 @@ public:
 };
 
 // For in-place filtering. Written nodes must be <= read nodes.
-class RewriteStream : public InputStream, public OutputStream
+template<class NODE>
+class RewriteStream : public InputStream<NODE>, public OutputStream<NODE>
 {
 	uint64_t readpos, writepos;
 public:
@@ -185,7 +187,7 @@ public:
 		readpos = writepos = 0;
 	}
 
-	size_t read(Node* p, size_t n)
+	size_t read(NODE* p, size_t n)
 	{
 		assert(readpos >= writepos, "Write position overwritten");
 		seek(readpos);
@@ -194,7 +196,7 @@ public:
 		return r;
 	}
 
-	void write(const Node* p, size_t n)
+	void write(const NODE* p, size_t n)
 	{
 		seek(writepos);
 		OutputStream::write(p, n);
@@ -220,7 +222,7 @@ void renameFile(const char* from, const char* to)
 	DeleteFile(to); // ignore error
 	BOOL b = MoveFile(from, to);
 	if (!b)
-		windowsError(format("Error moving file %s to %s, from, to"));
+		windowsError(format("Error moving file from %s to %s", from, to));
 }
 
 bool fileExists(const char* filename)
