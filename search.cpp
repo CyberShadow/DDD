@@ -1140,79 +1140,6 @@ const char* formatFileName(const char* name, FRAME_GROUP g, unsigned chunk)
 	return formatProblemFileName(name, format(GROUP_FORMAT "-%u", g, chunk), "bin");
 }
 
-// ************************************** Disk queue (open nodes) ***************************************
-
-#define MAX_FRAME_GROUPS ((MAX_FRAMES+(FRAMES_PER_GROUP-1))/FRAMES_PER_GROUP)
-
-uint64_t closedNodesInCurrentFrameGroup;
-uint64_t combinedNodesTotal;
-
-OpenNode* expansionBuffer = (OpenNode*) ram;
-size_t expansionBufferSize = RAM_SIZE / sizeof(OpenNode);
-size_t expansionCount = 0;
-unsigned expansionChunks = 0;
-
-void writeExpansionChunk()
-{
-	if (expansionCount)
-	{
-		std::sort(expansionBuffer, expansionBuffer + expansionCount);
-		size_t records = deduplicate(expansionBuffer, expansionCount);
-		OutputStream<OpenNode> output(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
-		output.write(expansionBuffer, records);
-		
-		expansionCount = 0;
-		expansionChunks++;
-	}
-}
-
-void mergedExpanded()
-{
-	if (expansionChunks>1)
-	{
-		double outbuf_inbuf_ratio = sqrt(EXPECTED_MERGING_RATIO * expansionChunks);
-		size_t bufferSize = (size_t)floor(RAM_SIZE / ((expansionChunks + outbuf_inbuf_ratio) * sizeof(Node)));
-		
-		BufferedInputStream<OpenNode>* chunkInput = new BufferedInputStream<OpenNode>[expansionChunks];
-		for (unsigned i=0; i<expansionChunks; i++)
-		{
-			chunkInput[i].setReadBuffer((OpenNode*)ram + i*bufferSize, (uint32_t)bufferSize);
-			chunkInput[i].open(formatFileName("expanded", currentFrameGroup+1, i));
-		}
-		BufferedOutputStream<OpenNode>* output = new BufferedOutputStream<OpenNode>;
-		output->setWriteBuffer((OpenNode*)ram + expansionChunks*bufferSize, (uint32_t)floor(bufferSize * outbuf_inbuf_ratio));
-		output->open(formatFileName("merging", currentFrameGroup+1));
-		mergeStreams(chunkInput, expansionChunks, output);
-		delete[] chunkInput;
-		output->flush();
-		delete output;
-		renameFile(formatFileName("merging", currentFrameGroup+1), formatFileName("expanded", currentFrameGroup+1));
-		for (unsigned i=0; i<expansionChunks; i++)
-			deleteFile(formatFileName("expanded", currentFrameGroup+1, i));
-	}
-	else
-	if (expansionChunks)
-		renameFile(formatFileName("expanded", currentFrameGroup+1, 0), formatFileName("expanded", currentFrameGroup+1));
-	else
-		OutputStream<OpenNode> output(formatFileName("expanded", currentFrameGroup+1), false); // create zero byte file
-
-	expansionCount = 0;
-	expansionChunks = 0;
-}
-
-template<class NODE>
-void writeOpenState(const NODE* state, FRAME frame)
-{
-	FRAME_GROUP group = frame/FRAMES_PER_GROUP;
-	if (group >= MAX_FRAME_GROUPS)
-		return;
-	expansionBuffer[expansionCount].state = *state;
-	expansionBuffer[expansionCount].frame = (PACKED_FRAME)frame;
-	expansionCount++;
-	if (expansionCount == expansionBufferSize)
-		writeExpansionChunk();
-}
-
 // ****************************************** Processing queue ******************************************
 
 #ifdef MULTITHREADING
@@ -1225,12 +1152,6 @@ MUTEX processQueueMutex; // for head/tail
 CONDITION processQueueReadCondition, processQueueWriteCondition, processQueueExitCondition;
 int runningWorkers = 0;
 bool stopWorkers = false;
-
-MUTEX expansionQueueMutex;
-/*#define EXPANSION_THREAD_BUFFER_SIZE 0x100
-PackedCompressedState expansionQueueState[WORKERS][EXPANSION_THREAD_BUFFER_SIZE];
-FRAME                 expansionQueueFrame[WORKERS][EXPANSION_THREAD_BUFFER_SIZE];
-int expansionQueuePos = 0;*/
 
 void queueState(const CompressedState* state)
 {
@@ -1291,36 +1212,87 @@ void flushProcessingQueue()
 		CONDITION_WAIT(processQueueExitCondition, lock);
 	
 	stopWorkers = false;
-
-	/*for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-	{
-		SCOPED_LOCK lock(expansionQueueMutex[threadID]);
-
-		for (int i=0; i<expansionQueuePos; i++)
-			writeOpenState(&expansionQueueState[threadID][i], expansionQueueFrame[threadID][i]);
-		expansionQueuePos = 0;
-	}*/
-}
-
-void writeOpenStateWrapper(const CompressedState* state, FRAME frame, THREAD_ID threadID)
-{
-	SCOPED_LOCK lock(expansionQueueMutex);
-
-	writeOpenState(state, frame);
-
-	/*expansionQueueState[threadID][expansionQueuePos] = state;
-	expansionQueueFrame[threadID][expansionQueuePos] = frame;
-	expansionQueuePos++;
-
-	if (expansionQueuePos == EXPANSION_THREAD_BUFFER_SIZE)
-	{
-		for (int i=0; i<EXPANSION_THREAD_BUFFER_SIZE; i++)
-			writeOpenState(&expansionQueueState[threadID][i], expansionQueueFrame[threadID][i]);
-		expansionQueuePos = 0;
-	}*/
 }
 
 #endif
+
+// ************************************** Disk queue (open nodes) ***************************************
+
+#define MAX_FRAME_GROUPS ((MAX_FRAMES+(FRAMES_PER_GROUP-1))/FRAMES_PER_GROUP)
+
+uint64_t closedNodesInCurrentFrameGroup;
+uint64_t combinedNodesTotal;
+
+OpenNode* expansionBuffer[WORKERS] = {(OpenNode*)ram};
+size_t expansionBufferSize = RAM_SIZE / sizeof(OpenNode);
+size_t expansionCount[WORKERS] = {0};
+unsigned expansionChunks = 0;
+
+MUTEX expansionMutex;
+
+void writeExpansionChunk(THREAD_ID threadID)
+{
+	if (expansionCount)
+	{
+		std::sort(expansionBuffer[threadID], expansionBuffer[threadID] + expansionCount[threadID]);
+		size_t records = deduplicate(expansionBuffer[threadID], expansionCount[threadID]);
+		expansionCount[threadID] = 0;
+		{
+			SCOPED_LOCK lock(expansionMutex);
+
+			OutputStream<OpenNode> output(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
+			output.write(expansionBuffer[threadID], records);
+			
+			expansionChunks++;
+		}
+	}
+}
+
+void mergedExpanded()
+{
+	if (expansionChunks>1)
+	{
+		double outbuf_inbuf_ratio = sqrt(EXPECTED_MERGING_RATIO * expansionChunks);
+		size_t bufferSize = (size_t)floor(RAM_SIZE / ((expansionChunks + outbuf_inbuf_ratio) * sizeof(Node)));
+		
+		BufferedInputStream<OpenNode>* chunkInput = new BufferedInputStream<OpenNode>[expansionChunks];
+		for (unsigned i=0; i<expansionChunks; i++)
+		{
+			chunkInput[i].setReadBuffer((OpenNode*)ram + i*bufferSize, (uint32_t)bufferSize);
+			chunkInput[i].open(formatFileName("expanded", currentFrameGroup+1, i));
+		}
+		BufferedOutputStream<OpenNode>* output = new BufferedOutputStream<OpenNode>;
+		output->setWriteBuffer((OpenNode*)ram + expansionChunks*bufferSize, (uint32_t)floor(bufferSize * outbuf_inbuf_ratio));
+		output->open(formatFileName("merging", currentFrameGroup+1));
+		mergeStreams(chunkInput, expansionChunks, output);
+		delete[] chunkInput;
+		output->flush();
+		delete output;
+		renameFile(formatFileName("merging", currentFrameGroup+1), formatFileName("expanded", currentFrameGroup+1));
+		for (unsigned i=0; i<expansionChunks; i++)
+			deleteFile(formatFileName("expanded", currentFrameGroup+1, i));
+	}
+	else
+	if (expansionChunks)
+		renameFile(formatFileName("expanded", currentFrameGroup+1, 0), formatFileName("expanded", currentFrameGroup+1));
+	else
+		OutputStream<OpenNode> output(formatFileName("expanded", currentFrameGroup+1), false); // create zero byte file
+
+	expansionChunks = 0;
+}
+
+template<class NODE>
+void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
+{
+	FRAME_GROUP group = frame/FRAMES_PER_GROUP;
+	if (group >= MAX_FRAME_GROUPS)
+		return;
+	expansionBuffer[threadID][expansionCount[threadID]].state = *state;
+	expansionBuffer[threadID][expansionCount[threadID]].frame = (PACKED_FRAME)frame;
+	expansionCount[threadID]++;
+	if (expansionCount[threadID] == expansionBufferSize)
+		writeExpansionChunk(threadID);
+}
 
 // *********************************************** Cache ************************************************
 
@@ -1358,11 +1330,7 @@ INLINE uint32_t hashState(const CompressedState* state)
 
 void addState(const CompressedState* cs, FRAME frame, THREAD_ID threadID)
 {
-#ifdef MULTITHREADING
-	writeOpenStateWrapper(cs, frame, threadID);
-#else
-	writeOpenState(cs, frame);
-#endif
+	writeOpenState(cs, frame, threadID);
 }
 
 // ******************************************** Exit tracing ********************************************
@@ -1808,9 +1776,9 @@ int search()
 			State s = initialStates[i];
 			CompressedState c;
 			s.compress(&c);
-			writeOpenState(&c, 0);
+			writeOpenState(&c, 0, 0);
 		}
-		writeExpansionChunk();
+		writeExpansionChunk(0);
 		mergedExpanded();
 
 		OutputStream<OpenNode> output(formatFileName("combined", 0), false); // create zero byte file
@@ -1856,8 +1824,9 @@ int search()
 				output.b()->setWriteBuffer((OpenNode*)ram + ALL1_FILE_BUFFER_SIZE + ALL2_FILE_BUFFER_SIZE, ALL3_FILE_BUFFER_SIZE);
 				output.b()->open(formatFileName("combining", currentFrameGroup+1), false);
 
-				expansionBuffer = (OpenNode*)ram + ALL1_FILE_BUFFER_SIZE + ALL2_FILE_BUFFER_SIZE + ALL3_FILE_BUFFER_SIZE;
-				expansionBufferSize = OPENNODE_BUFFER_SIZE - ALL1_FILE_BUFFER_SIZE - ALL2_FILE_BUFFER_SIZE - ALL3_FILE_BUFFER_SIZE;
+				expansionBufferSize = (OPENNODE_BUFFER_SIZE - ALL1_FILE_BUFFER_SIZE - ALL2_FILE_BUFFER_SIZE - ALL3_FILE_BUFFER_SIZE) / WORKERS;
+				for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+					expansionBuffer[threadID] = (OpenNode*)ram + ALL1_FILE_BUFFER_SIZE + ALL2_FILE_BUFFER_SIZE + ALL3_FILE_BUFFER_SIZE + expansionBufferSize * threadID;
 
 #ifdef MULTITHREADING
 				startWorkers<&processState>();
@@ -1867,7 +1836,8 @@ int search()
 				flushProcessingQueue();
 #endif
 
-				writeExpansionChunk();
+				for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+					writeExpansionChunk(threadID);
 				output.b()->flush();
 			}
 
