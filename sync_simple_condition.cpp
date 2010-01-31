@@ -5,7 +5,7 @@ private:
 public:
 	Condition() : x(0) {}
 
-	void wait(ScopedLock& lock)
+	void wait(ScopedLock<false>& lock)
 	{
 		int old = x;
 		do
@@ -16,7 +16,7 @@ public:
 		} while (old == x);
 	}
 	
-	void notify(ScopedLock& lock) // must be synchronized
+	void notify(ScopedLock<false>& lock) // must be synchronized
 	{
 #ifdef DEBUG
 		if (!lock.locked)

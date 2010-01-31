@@ -9,10 +9,15 @@ private:
 public:
     inline CriticalSection() : x(0) {}
 
+	template<bool NICE>
     inline void enter()
     {
         //do;
-        while (InterlockedExchange(&x, 1));
+        while (InterlockedExchange(&x, 1))
+		{
+			if (NICE)
+				SLEEP(1);
+		}
     }
 
 #ifdef DEBUG
@@ -33,6 +38,7 @@ public:
 #define MUTEX CriticalSection
 #define MUTEX_SET_SPIN_COUNT(mutex, spin)
 
+template<bool NICE>
 class ScopedLock
 {
 public:
@@ -53,7 +59,7 @@ public:
 #ifdef DEBUG
 		if (locked) throw "Already locked";
 #endif
-		cs->enter();
+		cs->enter<NICE>();
 		locked = true;
 	}
 	void unlock()
@@ -66,6 +72,7 @@ public:
 	}
 };
 
-#define SCOPED_LOCK ScopedLock
+#define SCOPED_LOCK ScopedLock<false>
+#define SCOPED_LOCK_NICE ScopedLock<true>
 
 #include "sync_simple_condition.cpp"

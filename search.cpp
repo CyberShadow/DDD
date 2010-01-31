@@ -1196,7 +1196,7 @@ void worker(THREAD_ID threadID)
 template<void (*STATE_HANDLER)(const CompressedState*, THREAD_ID threadID)>
 void startWorkers()
 {
-	runningWorkers = WORKERS;
+	runningWorkers += WORKERS;
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 		THREAD_CREATE(worker<STATE_HANDLER>, threadID);
 }
@@ -1227,11 +1227,11 @@ OpenNode* expansionBuffer[WORKERS] = {(OpenNode*)ram};
 size_t expansionBufferSize = RAM_SIZE / sizeof(OpenNode);
 size_t expansionCount[WORKERS] = {0};
 size_t expansionCommitted[WORKERS] = {0};
+bool expansionMoveMe[WORKERS] = {false};
 unsigned expansionChunksCommited = 0;
 unsigned expansionChunks = 0;
 
 MUTEX expansionMutex;
-CONDITION expansionCondition;
 
 template<class NODE>
 class MemoryInputStream
@@ -1255,6 +1255,46 @@ public:
 		pos = start;
 	}
 };
+
+void memoryMergingThread(THREAD_ID threadID)
+{
+	while(1)
+	{
+		{
+			SCOPED_LOCK_NICE lock(processQueueMutex);
+				
+			if (stopWorkers)
+				break;
+		}
+		{
+			SCOPED_LOCK_NICE lock(expansionMutex);
+
+			if (expansionChunksCommited == WORKERS)
+			{
+				BufferedOutputStream<OpenNode> output;
+				output.setWriteBuffer((OpenNode*)ram, MEM_MERGE_BUFFER_SIZE);
+				output.open(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
+
+				MemoryInputStream<OpenNode> inputs[WORKERS];
+				for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+					inputs[threadID].open(expansionBuffer[threadID], expansionBuffer[threadID] + expansionCommitted[threadID]);
+				mergeStreams<OpenNode>(inputs, WORKERS, &output);
+				expansionChunks++;
+
+				for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+					expansionMoveMe[threadID] = true;
+				expansionChunksCommited = 0;
+			}
+		}
+	}
+
+    /* LOCK */
+	{
+		SCOPED_LOCK lock(processQueueMutex);
+		runningWorkers--;
+		CONDITION_NOTIFY(processQueueExitCondition, lock);
+	}
+}
 
 void writeExpansionChunk(THREAD_ID threadID, bool final)
 {
@@ -1292,6 +1332,26 @@ void writeExpansionChunk(THREAD_ID threadID, bool final)
 			expansionCommitted[threadID] = 0;
 			expansionChunksCommited = 0;
 #else
+			for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+			{
+				if (expansionMoveMe[threadID])
+				{
+					if (expansionCommitted[threadID])
+					{
+						memmove(expansionBuffer[threadID], expansionBuffer[threadID] + expansionCommitted[threadID], (expansionCount[threadID] - expansionCommitted[threadID]) * sizeof(OpenNode));
+						expansionCount[threadID] -= expansionCommitted[threadID];
+						expansionCommitted[threadID] = 0;
+					}
+					expansionMoveMe[threadID] = false;
+				}
+				if (expansionCount[threadID] > expansionCommitted[threadID])
+				{
+					std::sort(expansionBuffer[threadID] + expansionCommitted[threadID], expansionBuffer[threadID] + expansionCount[threadID]);
+					size_t records = deduplicate(expansionBuffer[threadID] + expansionCommitted[threadID], expansionCount[threadID] - expansionCommitted[threadID]);
+					expansionCount[threadID] = expansionCommitted[threadID] + records;
+				}
+			}
+
 			BufferedOutputStream<OpenNode> output;
 			output.setWriteBuffer((OpenNode*)ram, MEM_MERGE_BUFFER_SIZE + ALL1_FILE_BUFFER_SIZE + ALL2_FILE_BUFFER_SIZE + ALL3_FILE_BUFFER_SIZE);
 			output.open(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
@@ -1303,81 +1363,40 @@ void writeExpansionChunk(THREAD_ID threadID, bool final)
 				if (expansionCommitted[threadID])
 					inputs[numInputs++].open(expansionBuffer[threadID], expansionBuffer[threadID] + expansionCommitted[threadID]);
 				if (expansionCount[threadID] > expansionCommitted[threadID])
-				{
-					std::sort(expansionBuffer[threadID] + expansionCommitted[threadID], expansionBuffer[threadID] + expansionCount[threadID]);
-					size_t records = deduplicate(expansionBuffer[threadID] + expansionCommitted[threadID], expansionCount[threadID] - expansionCommitted[threadID]);
-					inputs[numInputs++].open(expansionBuffer[threadID] + expansionCommitted[threadID], expansionBuffer[threadID] + expansionCommitted[threadID] + records);
-				}
+					inputs[numInputs++].open(expansionBuffer[threadID] + expansionCommitted[threadID], expansionBuffer[threadID] + expansionCount[threadID]);
 				expansionCount[threadID] = 0;
 				expansionCommitted[threadID] = 0;
 			}
 			expansionChunksCommited = 0;
 
 			mergeStreams<OpenNode>(inputs, numInputs, &output);
-
 			expansionChunks++;
 #endif
 		}
 		else
 		{
-			SCOPED_LOCK lock(expansionMutex);
-
-			if (expansionChunksCommited == WORKERS)
+			while(1)
 			{
-				/*OutputStream<OpenNode> output(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
-				output.write(expansionBuffer[threadID], records);
-				expansionCount[threadID] = 0;
-				expansionChunks++;*/
-
-				/*for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+				bool condition;
 				{
-					OutputStream<OpenNode> output(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
-					output.write(expansionBuffer[threadID], records);
-					expansionCount[threadID] = 0;
-					expansionChunks++;
-				}*/
+					SCOPED_LOCK_NICE lock(expansionMutex);
 
-				BufferedOutputStream<OpenNode> output;
-				output.setWriteBuffer((OpenNode*)ram, MEM_MERGE_BUFFER_SIZE);
-				output.open(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
-
-				MemoryInputStream<OpenNode> inputs[WORKERS];
-				for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-					inputs[threadID].open(expansionBuffer[threadID], expansionBuffer[threadID] + expansionCommitted[threadID]);
-
-				mergeStreams<OpenNode>(inputs, WORKERS, &output);
-				/*size_t pos[WORKERS] = {0};
-				while(1)
-				{
-					unsigned finished=0;
-					for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+					if (expansionMoveMe[threadID])
 					{
-						if (pos[threadID] == expansionCommitted[threadID])
+						if (expansionCommitted[threadID])
 						{
-							finished++;
-							continue;
+							memmove(expansionBuffer[threadID], expansionBuffer[threadID] + expansionCommitted[threadID], (expansionCount[threadID] - expansionCommitted[threadID]) * sizeof(OpenNode));
+							expansionCount[threadID] -= expansionCommitted[threadID];
+							expansionCommitted[threadID] = 0;
 						}
+						expansionMoveMe[threadID] = false;
 					}
-					if (finished == WORKERS)
-						break;
-				}*/
-				expansionChunks++;
 
-				for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-				{
-					memmove(expansionBuffer[threadID], expansionBuffer[threadID] + expansionCommitted[threadID], (expansionCount[threadID] - expansionCommitted[threadID]) * sizeof(OpenNode));
-					expansionCount[threadID] -= expansionCommitted[threadID];
-					expansionCommitted[threadID] = 0;
+					condition = expansionCount[threadID] == expansionBufferSize;
 				}
-				expansionChunksCommited = 0;
-
-				CONDITION_NOTIFY(expansionCondition, lock);
-			}
-			else
-			if (expansionCount[threadID] == expansionBufferSize)
-			{
-				while (expansionChunksCommited)
-					CONDITION_WAIT(expansionCondition, lock);
+				if (!condition)
+					break;
+				SLEEP(1);
 			}
 		}
 	}
@@ -1965,6 +1984,7 @@ int search()
 
 #ifdef MULTITHREADING
 				startWorkers<&processState>();
+				runningWorkers++; THREAD_CREATE(memoryMergingThread, WORKERS);
 #endif
 				mergeStreams<OpenNode>(inputs, 2, &output);
 #ifdef MULTITHREADING
