@@ -1223,6 +1223,8 @@ void flushProcessingQueue()
 uint64_t closedNodesInCurrentFrameGroup;
 uint64_t combinedNodesTotal;
 
+BufferedOutputStream<Node> closedNodeFile;
+
 OpenNode* expansionBuffer[WORKERS] = {(OpenNode*)ram};
 size_t expansionBufferSize = RAM_SIZE / sizeof(OpenNode);
 size_t expansionCount[WORKERS] = {0};
@@ -1286,7 +1288,7 @@ void writeExpansionFinalChunk()
 	}
 
 	BufferedOutputStream<OpenNode> output;
-	output.setWriteBuffer((OpenNode*)ram, MEM_MERGE_BUFFER_SIZE + ALL1_FILE_BUFFER_SIZE + ALL2_FILE_BUFFER_SIZE + ALL3_FILE_BUFFER_SIZE);
+	output.setWriteBuffer((OpenNode*)ram, STANDARD_BUFFER_SIZE);
 	output.open(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
 
 	unsigned numInputs=0;
@@ -1792,7 +1794,7 @@ void processState(const CompressedState* cs, THREAD_ID threadID)
 
 INLINE void processFilteredState(const CompressedState* state)
 {
-	closedNodesInCurrentFrameGroup++;
+	//closedNodesInCurrentFrameGroup++;
 #ifdef MULTITHREADING
 	queueState(state);
 #else
@@ -1816,6 +1818,24 @@ public:
 			(PackedCompressedState&)cs = node->state;
 			cs.subframe = node->frame % FRAMES_PER_GROUP;
 			write(&cs);
+		}
+	}
+	enum { WRITABLE = true };
+};
+
+class ClosedNodeFilterOutput
+{
+public:
+	INLINE static void write(const OpenNode* node, bool verify=false)
+	{
+		combinedNodesTotal++;
+		if (node->frame / FRAMES_PER_GROUP == currentFrameGroup)
+		{
+			CompressedState cs;
+			(PackedCompressedState&)cs = node->state;
+			cs.subframe = node->frame % FRAMES_PER_GROUP;
+			closedNodeFile.write(&cs);
+			closedNodesInCurrentFrameGroup++;
 		}
 	}
 	enum { WRITABLE = true };
@@ -1893,69 +1913,51 @@ int search()
 			closedNodesInCurrentFrameGroup = 0;
 			combinedNodesTotal = 0;
 			
+			printf("Filtering... "); fflush(stdout);
+
+			if (alreadyExpanded < 0)
 			{
-				if (alreadyExpanded < 0)
-					printf("Recovering... ");
-				else
-					printf("Processing... ");
-				fflush(stdout);
+				const size_t ramBaseSize = RAM_SIZE / (1 + 10) / sizeof(OpenNode);
 
-				if (alreadyExpanded < 0)
-				{
-					ProcessStateOutput output;
+				closedNodeFile.setWriteBuffer((Node*)ram, ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node));
+				closedNodeFile.open(formatFileName("closing", currentFrameGroup), false);
 
-					BufferedInputStream<OpenNode> input;
-					input.setReadBuffer((OpenNode*)ram + MEM_MERGE_BUFFER_SIZE, ALL2_FILE_BUFFER_SIZE);
-					input.open(formatFileName("combined", currentFrameGroup+1));
+				ClosedNodeFilterOutput output;
 
-					expansionBufferSize = (OPENNODE_BUFFER_SIZE - MEM_MERGE_BUFFER_SIZE - ALL2_FILE_BUFFER_SIZE) / WORKERS;
-					for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-						expansionBuffer[threadID] = (OpenNode*)ram + MEM_MERGE_BUFFER_SIZE + ALL2_FILE_BUFFER_SIZE + expansionBufferSize * threadID;
+				BufferedInputStream<OpenNode> input;
+				input.setReadBuffer((OpenNode*)ram + ramBaseSize*1, ramBaseSize*10);
+				input.open(formatFileName("combined", currentFrameGroup+1));
 
-#ifdef MULTITHREADING
-					startWorkers<&processState>();
-#endif
-					copyStream<OpenNode>(&input, &output);
-#ifdef MULTITHREADING
-					flushProcessingQueue();
-#endif
-				}
-				else
-				{
-					BufferedInputStream<OpenNode> inputs[2];
-					DoubleOutput<OpenNode, ProcessStateOutput, BufferedOutputStream<OpenNode>> output;
+				copyStream<OpenNode>(&input, &output);
+			}
+			else
+			{
+				const size_t ramBaseSize = RAM_SIZE / (1 + 10 + 14 + 18) / sizeof(OpenNode);
 
-					inputs[1].setReadBuffer((OpenNode*)ram + MEM_MERGE_BUFFER_SIZE, ALL1_FILE_BUFFER_SIZE);
-					inputs[1].open(formatFileName("expanded", currentFrameGroup));
+				closedNodeFile.setWriteBuffer((Node*)ram, ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node));
+				closedNodeFile.open(formatFileName("closing", currentFrameGroup), false);
 
-					inputs[0].setReadBuffer((OpenNode*)ram + MEM_MERGE_BUFFER_SIZE + ALL1_FILE_BUFFER_SIZE, ALL2_FILE_BUFFER_SIZE);
-					inputs[0].open(formatFileName("combined", currentFrameGroup));
+				BufferedInputStream<OpenNode> inputs[2];
+				DoubleOutput<OpenNode, ClosedNodeFilterOutput, BufferedOutputStream<OpenNode>> output;
 
-					output.b()->setWriteBuffer((OpenNode*)ram + MEM_MERGE_BUFFER_SIZE + ALL1_FILE_BUFFER_SIZE + ALL2_FILE_BUFFER_SIZE, ALL3_FILE_BUFFER_SIZE);
-					output.b()->open(formatFileName("combining", currentFrameGroup+1), false);
+				inputs[1].setReadBuffer((OpenNode*)ram + ramBaseSize*1, ramBaseSize*10);
+				inputs[1].open(formatFileName("expanded", currentFrameGroup));
 
-					expansionBufferSize = (OPENNODE_BUFFER_SIZE - MEM_MERGE_BUFFER_SIZE - ALL1_FILE_BUFFER_SIZE - ALL2_FILE_BUFFER_SIZE - ALL3_FILE_BUFFER_SIZE) / WORKERS;
-					for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-						expansionBuffer[threadID] = (OpenNode*)ram + MEM_MERGE_BUFFER_SIZE + ALL1_FILE_BUFFER_SIZE + ALL2_FILE_BUFFER_SIZE + ALL3_FILE_BUFFER_SIZE + expansionBufferSize * threadID;
+				inputs[0].setReadBuffer((OpenNode*)ram + ramBaseSize*(1 + 10), ramBaseSize*14);
+				inputs[0].open(formatFileName("combined", currentFrameGroup));
 
-#ifdef MULTITHREADING
-					startWorkers<&processState>();
-#endif
-					mergeStreams<OpenNode>(inputs, 2, &output);
-#ifdef MULTITHREADING
-					flushProcessingQueue();
-#endif
+				output.b()->setWriteBuffer((OpenNode*)ram + ramBaseSize*(1 + 10 + 14), ramBaseSize*18);
+				output.b()->open(formatFileName("combining", currentFrameGroup+1), false);
 
-					output.b()->flush();
-				}
+				mergeStreams<OpenNode>(inputs, 2, &output);
 
-				writeExpansionFinalChunk();
+				output.b()->flush();
 			}
 
-			{
-				OutputStream<unsigned> resumeInfo(formatFileName("expandedcounting", currentFrameGroup+1), false);
-				resumeInfo.write(&expansionChunks, 1);
-			}
+			closedNodeFile.flush();
+			closedNodeFile.close();
+			renameFile(formatFileName("closing", currentFrameGroup), formatFileName("closed", currentFrameGroup));
+
 			if (alreadyExpanded < 0)
 				alreadyExpanded = 0;
 			else
@@ -1964,12 +1966,40 @@ int search()
 				renameFile(formatFileName("combining", currentFrameGroup+1), formatFileName("combined", currentFrameGroup+1));
 				deleteFile(formatFileName("expanded", currentFrameGroup));
 			}
-			renameFile(formatFileName("expandedcounting", currentFrameGroup+1), formatFileName("expandedcount", currentFrameGroup+1));
 
-			printf("%12llu closed, %12llu combined;  ", closedNodesInCurrentFrameGroup, combinedNodesTotal); fflush(stdout);
+			printf("%12llu closed, %12llu combined; ", closedNodesInCurrentFrameGroup, combinedNodesTotal); fflush(stdout);
 
 			if (checkStop(true))
 				return EXIT_STOP;
+
+			printf("Expanding... "); fflush(stdout);
+			{
+				BufferedInputStream<Node> input;
+				input.setReadBuffer((Node*)ram, STANDARD_BUFFER_SIZE * sizeof(OpenNode) / sizeof(Node));
+				input.open(formatFileName("closed", currentFrameGroup));
+
+				ProcessStateOutput output;
+
+				expansionBufferSize = (OPENNODE_BUFFER_SIZE - STANDARD_BUFFER_SIZE) / WORKERS;
+				for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+					expansionBuffer[threadID] = (OpenNode*)ram + STANDARD_BUFFER_SIZE + expansionBufferSize * threadID;
+
+#ifdef MULTITHREADING
+				startWorkers<&processState>();
+#endif
+				copyStream<Node>(&input, &output);
+#ifdef MULTITHREADING
+				flushProcessingQueue();
+#endif
+
+				writeExpansionFinalChunk();
+			}
+
+			{
+				OutputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup+1), false);
+				resumeInfo.write(&expansionChunks, 1);
+			}
+			deleteFile(formatFileName("closed", currentFrameGroup));
 
 			if (exitFound)
 			{
@@ -1979,6 +2009,9 @@ int search()
 				return EXIT_OK;
 			}
 		}
+
+		if (checkStop(true))
+			return EXIT_STOP;
 
 		printf("Merging... "); fflush(stdout);
 		mergedExpanded();
@@ -3008,7 +3041,7 @@ int run(int argc, const char* argv[])
 	testCompressedState();
 
 	enforce(ram, "RAM allocation failed");
-	printf("Using %lld bytes of RAM for %lld buffer nodes (of which %lld are for expansion)\n", (long long)RAM_SIZE, (long long)OPENNODE_BUFFER_SIZE, (long long)OPENNODE_BUFFER_SIZE - MEM_MERGE_BUFFER_SIZE - ALL1_FILE_BUFFER_SIZE - ALL2_FILE_BUFFER_SIZE - ALL3_FILE_BUFFER_SIZE);
+	printf("Using %lld bytes of RAM for %lld buffer nodes\n", (long long)RAM_SIZE, (long long)OPENNODE_BUFFER_SIZE);
 
 #if defined(DISK_WINFILES)
 	printf("Using Windows API files\n");
