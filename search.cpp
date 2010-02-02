@@ -1956,6 +1956,7 @@ int search()
 			s.compress(&c);
 			writeOpenState(&c, 0, 0);
 		}
+		sortExpansionFinalChunk(0);
 		writeExpansionFinalChunk();
 		mergedExpanded();
 
