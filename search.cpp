@@ -2092,7 +2092,8 @@ int search()
 				OutputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup+1), false);
 				resumeInfo.write(&expansionChunks, 1);
 			}
-			deleteFile(formatFileName("closed", currentFrameGroup));
+			if (closedNodesInCurrentFrameGroup==0)
+				deleteFile(formatFileName("closed", currentFrameGroup));
 
 			if (exitFound)
 			{
