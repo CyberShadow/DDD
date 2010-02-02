@@ -20,6 +20,7 @@ void windowsError(const char* where = NULL)
 		error((LPCSTR)lpMsgBuf);
 }
 
+template<class NODE>
 class Stream
 {
 protected:
@@ -34,7 +35,7 @@ public:
 	{
 		ULARGE_INTEGER li;
 		li.LowPart = GetFileSize(archive, &li.HighPart);
-		return li.QuadPart / sizeof(Node);
+		return li.QuadPart / sizeof(NODE);
 	}
 
 	uint64_t position()
@@ -44,13 +45,13 @@ public:
 		BOOL b = SetFilePointerEx(archive, n, &o, FILE_CURRENT);
 		if (!b)
 			windowsError("Seek error");
-		return o.QuadPart / sizeof(Node);
+		return o.QuadPart / sizeof(NODE);
 	}
 
 	void seek(uint64_t pos)
 	{
 		LARGE_INTEGER li;
-		li.QuadPart = pos * sizeof(Node);
+		li.QuadPart = pos * sizeof(NODE);
 		BOOL b = SetFilePointerEx(archive, li, NULL, FILE_BEGIN);
 		if (!b)
 			windowsError("Seek error");
@@ -72,7 +73,7 @@ public:
 };
 
 template<class NODE>
-class OutputStream : virtual public Stream
+class OutputStream : virtual public Stream<NODE>
 {
 public:
 	OutputStream(){}
@@ -124,7 +125,7 @@ public:
 };
 
 template<class NODE>
-class InputStream : virtual public Stream
+class InputStream : virtual public Stream<NODE>
 {
 public:
 	InputStream(){}
