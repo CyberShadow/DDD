@@ -1957,11 +1957,14 @@ int search()
 			
 			printf("Filtering... "); fflush(stdout);
 
+			uint32_t closedNodeFileBufferSize;
+
 			if (alreadyExpanded < 0)
 			{
 				const size_t ramBaseSize = RAM_SIZE / (1 + 10) / sizeof(OpenNode);
 
-				closedNodeFile.setWriteBuffer((Node*)ram, ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node));
+				closedNodeFileBufferSize = ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node);
+				closedNodeFile.setWriteBuffer((Node*)ram, closedNodeFileBufferSize);
 				closedNodeFile.open(formatFileName("closing", currentFrameGroup), false);
 
 				ClosedNodeFilterOutput output;
@@ -1976,7 +1979,8 @@ int search()
 			{
 				const size_t ramBaseSize = RAM_SIZE / (1 + 10 + 14 + 18) / sizeof(OpenNode);
 
-				closedNodeFile.setWriteBuffer((Node*)ram, ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node));
+				closedNodeFileBufferSize = ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node);
+				closedNodeFile.setWriteBuffer((Node*)ram, closedNodeFileBufferSize);
 				closedNodeFile.open(formatFileName("closing", currentFrameGroup), false);
 
 				BufferedInputStream<OpenNode> inputs[2];
@@ -1999,6 +2003,8 @@ int search()
 			closedNodeFile.flush();
 			closedNodeFile.close();
 			renameFile(formatFileName("closing", currentFrameGroup), formatFileName("closed", currentFrameGroup));
+
+			memset(ram, 0, closedNodeFileBufferSize * sizeof(Node)); // prevent bytes from Nodes from becoming junk inside OpenNode padding
 
 			if (alreadyExpanded < 0)
 				alreadyExpanded = 0;
@@ -2036,6 +2042,8 @@ int search()
 
 				writeExpansionFinalChunk();
 			}
+
+			memset(ram, 0, STANDARD_BUFFER_SIZE * sizeof(OpenNode) / sizeof(Node) * sizeof(Node)); // prevent bytes from Nodes from becoming junk inside OpenNode padding
 
 			{
 				OutputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup+1), false);
