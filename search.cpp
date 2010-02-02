@@ -1222,7 +1222,7 @@ void flushProcessingQueue()
 
 // ************************************** Disk queue (open nodes) ***************************************
 
-#define MAX_FRAME_GROUPS ((MAX_FRAMES+(FRAMES_PER_GROUP-1))/FRAMES_PER_GROUP)
+#define MAX_FRAME_GROUPS (MAX_FRAMES/FRAMES_PER_GROUP)
 
 uint64_t closedNodesInCurrentFrameGroup;
 uint64_t combinedNodesTotal;
@@ -1364,9 +1364,9 @@ void mergedExpanded()
 template<class NODE>
 void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 {
-	FRAME_GROUP group = frame/FRAMES_PER_GROUP;
-	if (group >= MAX_FRAME_GROUPS)
+	if (frame > MAX_FRAMES)
 		return;
+	FRAME_GROUP group = frame/FRAMES_PER_GROUP;
 	expansionBuffer[threadID][expansionCount[threadID]].state = *state;
 	expansionBuffer[threadID][expansionCount[threadID]].frame = (PACKED_FRAME)frame;
 	expansionCount[threadID]++;
@@ -1847,7 +1847,6 @@ public:
 
 int search()
 {
-	firstFrameGroup = -1;
 
 	if (fileExists(formatFileName("solution")))
 	{
@@ -1856,7 +1855,9 @@ int search()
 		return EXIT_OK;
 	}
 
-	for (FRAME_GROUP g=MAX_FRAME_GROUPS; g>=0; g--)
+	firstFrameGroup = -1;
+
+	for (FRAME_GROUP g=MAX_FRAME_GROUPS+1; g>=0; g--)
 		if (fileExists(formatFileName("combined", g)))
 		{
 			printf("Resuming from frame" GROUP_STR " " GROUP_FORMAT "\n", g);
@@ -2901,7 +2902,7 @@ void parseFrameRange(int argc, const char* argv[])
 {
 	if (argc==0)
 		firstFrameGroup = 0, 
-		maxFrameGroups  = MAX_FRAME_GROUPS;
+		maxFrameGroups  = MAX_FRAME_GROUPS+1;
 	else
 	if (argc==1)
 		firstFrameGroup = parseInt(argv[0]),
@@ -3074,7 +3075,7 @@ int run(int argc, const char* argv[])
 		printf(" %s", argv[i]);
 	printf("\n");
 
-	maxFrameGroups = MAX_FRAME_GROUPS;
+	maxFrameGroups = MAX_FRAME_GROUPS+1;
 
 	ftime(&startTime);
 	atexit(&printExecutionTime);
