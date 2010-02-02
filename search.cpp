@@ -380,8 +380,6 @@ FRAME_GROUP currentFrameGroup;
 
 // ************************************************ Disk ************************************************
 
-typedef CompressedState Node;
-
 #if defined(DISK_WINFILES)
 #include "disk_file_windows.cpp"
 #elif defined(DISK_POSIX)
@@ -424,6 +422,20 @@ struct PackedCompressedState
 
 typedef PackedCompressedState BareNode;
 
+struct Node
+{
+	PackedCompressedState state;
+#if COMPRESSED_BYTES%4 == 1
+	uint8_t _align1;
+#endif
+	uint8_t subframe;
+#if (COMPRESSED_BYTES+(COMPRESSED_BYTES%4==1?1:0)+1)%4 != 0
+	uint8_t _align2[4-(COMPRESSED_BYTES+(COMPRESSED_BYTES%4==1?1:0)+1)%4];
+#endif
+
+	CompressedState& getState() const { return (CompressedState&)state; }
+};
+
 struct OpenNode
 {
 	PackedCompressedState state;
@@ -431,6 +443,13 @@ struct OpenNode
 
 	CompressedState& getState() const { return (CompressedState&)state; }
 };
+
+INLINE bool operator==(const Node& a, const Node& b) { return a.getState() == b.getState(); }
+INLINE bool operator!=(const Node& a, const Node& b) { return a.getState() != b.getState(); }
+INLINE bool operator< (const Node& a, const Node& b) { return a.getState() <  b.getState(); }
+INLINE bool operator<=(const Node& a, const Node& b) { return a.getState() <= b.getState(); }
+INLINE bool operator> (const Node& a, const Node& b) { return a.getState() >  b.getState(); }
+INLINE bool operator>=(const Node& a, const Node& b) { return a.getState() >= b.getState(); }
 
 INLINE bool operator==(const OpenNode& a, const OpenNode& b) { return a.getState() == b.getState(); }
 INLINE bool operator!=(const OpenNode& a, const OpenNode& b) { return a.getState() != b.getState(); }
@@ -440,10 +459,10 @@ INLINE bool operator> (const OpenNode& a, const OpenNode& b) { return a.getState
 INLINE bool operator>=(const OpenNode& a, const OpenNode& b) { return a.getState() >= b.getState(); }
 
 // For deduplication
-INLINE unsigned     getFrame(const CompressedState* state) { return state->subframe; }
-INLINE PACKED_FRAME getFrame(const OpenNode* node)         { return  node->frame; }
-INLINE void setFrame(CompressedState* state, unsigned     frame) { state->subframe = frame; }
-INLINE void setFrame(OpenNode* node,         PACKED_FRAME frame) {  node->frame    = frame; }
+INLINE unsigned     getFrame(const     Node* node) { return node->subframe; }
+INLINE PACKED_FRAME getFrame(const OpenNode* node) { return node->frame;    }
+INLINE void setFrame(    Node* node, uint8_t      frame)  { node->subframe = frame; }
+INLINE void setFrame(OpenNode* node, PACKED_FRAME frame)  { node->frame    = frame; }
 
 const size_t BUFFER_SIZE = RAM_SIZE / sizeof(Node);
 const size_t OPENNODE_BUFFER_SIZE = RAM_SIZE / sizeof(OpenNode);
@@ -1146,7 +1165,7 @@ const char* formatFileName(const char* name, FRAME_GROUP g, unsigned chunk)
 
 #define WORKERS (THREADS-1)
 #define PROCESS_QUEUE_SIZE 0x100000
-CompressedState processQueue[PROCESS_QUEUE_SIZE]; // circular buffer
+Node processQueue[PROCESS_QUEUE_SIZE]; // circular buffer
 size_t processQueueHead=0, processQueueTail=0;
 MUTEX processQueueMutex; // for head/tail
 CONDITION processQueueReadCondition, processQueueWriteCondition, processQueueExitCondition;
@@ -1155,7 +1174,7 @@ bool stopWorkers = false;
 
 void sortExpansionFinalChunk(THREAD_ID threadID);
 
-void queueState(const CompressedState* state)
+void queueState(const Node* state)
 {
 	SCOPED_LOCK lock(processQueueMutex);
 
@@ -1165,7 +1184,7 @@ void queueState(const CompressedState* state)
 	CONDITION_NOTIFY(processQueueWriteCondition, lock);
 }
 
-bool dequeueState(CompressedState* state)
+bool dequeueState(Node* state)
 {
 	SCOPED_LOCK lock(processQueueMutex);
 		
@@ -1180,10 +1199,10 @@ bool dequeueState(CompressedState* state)
 	return true;
 }
 
-template<void (*STATE_HANDLER)(const CompressedState*, THREAD_ID threadID)>
+template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID)>
 void worker(THREAD_ID threadID)
 {
-	CompressedState cs;
+	Node cs;
 	while (dequeueState(&cs))
 		STATE_HANDLER(&cs, threadID);
 
@@ -1197,7 +1216,7 @@ void worker(THREAD_ID threadID)
 	}
 }
 
-template<void (*STATE_HANDLER)(const CompressedState*, THREAD_ID threadID)>
+template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID)>
 void startWorkers()
 {
 	runningWorkers += WORKERS;
@@ -1457,10 +1476,10 @@ public:
 	}
 };
 
-INLINE void processExitState(const CompressedState* cs, THREAD_ID threadID)
+INLINE void processExitState(const Node* cs, THREAD_ID threadID)
 {
 	State state;
-	state.decompress(cs);
+	state.decompress(&cs->getState());
 	FRAME frame = GET_FRAME(exitSearchFrameGroup, *cs);
 	expandChildren<FinishCheckChildHandler>(frame, &state, threadID);
 
@@ -1532,7 +1551,7 @@ void traceExit(const State* exitState, FRAME exitFrame)
 #endif
 
 			BufferedInputStream<Node> input(formatFileName("closed", exitSearchFrameGroup));
-			const CompressedState *cs;
+			const Node *cs;
 			DEBUG_ONLY(statesQueued = statesDequeued = 0);
 			while (cs = input.read())
 			{
@@ -1764,10 +1783,10 @@ INLINE bool finishCheck(const State* s, FRAME frame)
 	return false;
 }
 
-void processState(const CompressedState* cs, THREAD_ID threadID)
+void processState(const Node* cs, THREAD_ID threadID)
 {
 	State s;
-	s.decompress(cs);
+	s.decompress(&cs->getState());
 #ifdef DEBUG
 	CompressedState test;
 	s.compress(&test);
@@ -1809,7 +1828,7 @@ void processState(const CompressedState* cs, THREAD_ID threadID)
 	assert(currentFrame/FRAMES_PER_GROUP == currentFrameGroup, format("Run-away currentFrameGroup: currentFrame=%u, currentFrameGroup=%u", currentFrame, currentFrameGroup));
 }
 
-INLINE void processFilteredState(const CompressedState* state)
+INLINE void processFilteredState(const Node* state)
 {
 	//closedNodesInCurrentFrameGroup++;
 #ifdef MULTITHREADING
@@ -1822,7 +1841,7 @@ INLINE void processFilteredState(const CompressedState* state)
 class ProcessStateOutput
 {
 public:
-	INLINE static void write(const CompressedState* state, bool verify=false)
+	INLINE static void write(const Node* state, bool verify=false)
 	{
 		processFilteredState(state);
 	}
@@ -1831,7 +1850,7 @@ public:
 		combinedNodesTotal++;
 		if (node->frame / FRAMES_PER_GROUP == currentFrameGroup)
 		{
-			CompressedState cs;
+			Node cs;
 			(PackedCompressedState&)cs = node->state;
 			cs.subframe = node->frame % FRAMES_PER_GROUP;
 			write(&cs);
@@ -1848,7 +1867,7 @@ public:
 		combinedNodesTotal++;
 		if (node->frame / FRAMES_PER_GROUP == currentFrameGroup)
 		{
-			CompressedState cs;
+			Node cs;
 			(PackedCompressedState&)cs = node->state;
 			cs.subframe = node->frame % FRAMES_PER_GROUP;
 			closedNodeFile.write(&cs);
@@ -2267,14 +2286,14 @@ int dump(FRAME_GROUP g)
 		error(format("Can't find neither open nor closed node file for frame" GROUP_STR " " GROUP_FORMAT, g));
 	
 	BufferedInputStream<Node> in(fn);
-	const CompressedState* cs;
+	const Node* cs;
 	while (cs = in.read())
 	{
 #ifdef GROUP_FRAMES
 		printf("Frame %u:\n", GET_FRAME(g, *cs));
 #endif
 		State s;
-		s.decompress(cs);
+		s.decompress(&cs->getState());
 		puts(s.toString());
 	}
 	return EXIT_OK;
@@ -2294,13 +2313,13 @@ int sample(FRAME_GROUP g)
 	InputStream<Node> in(fn);
 	srand((unsigned)time(NULL));
 	in.seek(((uint64_t)rand() + ((uint64_t)rand()<<32)) % in.size());
-	CompressedState cs;
+	Node cs;
 	in.read(&cs, 1);
 #ifdef GROUP_FRAMES
 	printf("Frame %u:\n", GET_FRAME(g, cs));
 #endif
 	State s;
-	s.decompress(&cs);
+	s.decompress(&cs.getState());
 	puts(s.toString());
 	return EXIT_OK;
 }
@@ -2311,7 +2330,7 @@ int compare(const char* fn1, const char* fn2)
 {
 	BufferedInputStream<Node> i1(fn1), i2(fn2);
 	printf("%s: %llu states\n%s: %llu states\n", fn1, i1.size(), fn2, i2.size());
-	const CompressedState *cs1, *cs2;
+	const Node *cs1, *cs2;
 	cs1 = i1.read();
 	cs2 = i2.read();
 	uint64_t dups = 0;
@@ -2357,13 +2376,13 @@ void convertMerge(BufferedInputStream<Node> inputs[], int inputCount, BufferedOu
 	//for (int i=0; i<inputCount; i++)
 	//	positions[i] = 0;
 
-	CompressedState cs = *heap.read();
+	Node cs = *heap.read();
 	debug_assert(heap.getHeadInput() >= inputs && heap.getHeadInput() < inputs+FRAMES_PER_GROUP);
-	cs.subframe = heap.getHeadInput() - inputs;
+	cs.subframe = (uint8_t)(heap.getHeadInput() - inputs);
 	bool oooFound = false, equalFound = false;
 	while (heap.next())
 	{
-		CompressedState cs2 = *heap.getHead();
+		Node cs2 = *heap.getHead();
 		debug_assert(heap.getHeadInput() >= inputs && heap.getHeadInput() < inputs+FRAMES_PER_GROUP);
 		uint8_t subframe = (uint8_t)(heap.getHeadInput() - inputs);
 		//positions[subframe]++;
@@ -2439,10 +2458,10 @@ int unpack()
 			BufferedOutputStream<Node> outputs[FRAMES_PER_GROUP];
 			for (int i=0; i<FRAMES_PER_GROUP; i++)
 				outputs[i].open(formatProblemFileName("closed", format("%u", g*FRAMES_PER_GROUP+i), "bin"));
-			const CompressedState* cs;
+			const Node* cs;
 			while (cs = input.read())
 			{
-				CompressedState cs2 = *cs;
+				Node cs2 = *cs;
 				cs2.subframe = 0;
 				outputs[cs->subframe].write(&cs2, true);
 			}
@@ -2459,7 +2478,7 @@ int count()
 		{
 			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT ":\n", g);
 			BufferedInputStream<Node> input(formatFileName("closed", g));
-			const CompressedState* cs;
+			const Node* cs;
 			uint64_t counts[FRAMES_PER_GROUP] = {0};
 			while (cs = input.read())
 				counts[cs->subframe]++;
@@ -2478,12 +2497,12 @@ int count()
 int verify(const char* filename)
 {
 	BufferedInputStream<Node> input(filename);
-	CompressedState cs = *input.read();
+	Node cs = *input.read();
 	bool equalFound=false, oooFound=false;
 	uint64_t pos = 0;
 	while (1)
 	{
-		const CompressedState* cs2 = input.read();
+		const Node* cs2 = input.read();
 		pos++;
 		if (cs2==NULL)
 			return EXIT_OK;
@@ -2764,11 +2783,11 @@ int findExit()
 		{
 			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 			BufferedInputStream<Node> input(fn);
-			const CompressedState* cs;
+			const Node* cs;
 			while (cs = input.read())
 			{
 				State s;
-				s.decompress(cs);
+				s.decompress(&cs->getState());
 				if (s.isFinish())
 				{
 					FRAME exitFrame = GET_FRAME(currentFrameGroup, *cs);
@@ -2867,42 +2886,42 @@ void printExecutionTime()
 // Test the CompressedState comparison operators.
 void testCompressedState()
 {
-	enforce(sizeof(CompressedState)%4 == 0);
+	enforce(sizeof(Node)%4 == 0);
 #ifdef GROUP_FRAMES
-	enforce(COMPRESSED_BITS <= (sizeof(CompressedState)-1)*8);
+	enforce(COMPRESSED_BITS <= (sizeof(Node)-1)*8);
 #else
-	enforce(COMPRESSED_BITS <= sizeof(CompressedState)*8);
-	enforce((COMPRESSED_BITS+31)/8 >= sizeof(CompressedState));
+	enforce(COMPRESSED_BITS <= sizeof(Node)*8);
+	enforce((COMPRESSED_BITS+31)/8 >= sizeof(Node));
 #endif
 
-	CompressedState c1, c2;
+	Node c1, c2;
 	uint8_t *p1 = (uint8_t*)&c1, *p2 = (uint8_t*)&c2;
-	memset(p1, 0, sizeof(CompressedState));
-	memset(p2, 0, sizeof(CompressedState));
+	memset(p1, 0, sizeof(Node));
+	memset(p2, 0, sizeof(Node));
 	
 #ifdef GROUP_FRAMES
 	int subframe;
 
 	switch (COMPRESSED_BYTES % 4)
 	{
-		case 0: subframe = sizeof(CompressedState)-4; break;
+		case 0: subframe = sizeof(Node)-4; break;
 		case 1: // align to word - fall through
-		case 2: subframe = sizeof(CompressedState)-2; break;
-		case 3: subframe = sizeof(CompressedState)-1; break;
+		case 2: subframe = sizeof(Node)-2; break;
+		case 3: subframe = sizeof(Node)-1; break;
 	}
 
 	p1[subframe] = 0xFF;
 	enforce(c1 == c2, "Different subframe causes inequality");
 	c2.subframe = 0xFF;
-	enforce(c1.subframe == 0xFF && p2[subframe] == 0xFF && memcmp(p1, p2, sizeof(CompressedState))==0, format("Misaligned subframe!\n%s\n%s", hexDump(p1, sizeof(CompressedState)), hexDump(p2, sizeof(CompressedState))));
+	enforce(c1.subframe == 0xFF && p2[subframe] == 0xFF && memcmp(p1, p2, sizeof(Node))==0, format("Misaligned subframe!\n%s\n%s", hexDump(p1, sizeof(Node)), hexDump(p2, sizeof(Node))));
 #endif
 	
 	for (int i=0; i<COMPRESSED_BITS; i++)
 	{
 		p1[i/8] |= (1<<(i%8));
-		enforce(c1 != c2, format("Inequality expected!\n%s\n%s", hexDump(p1, sizeof(CompressedState)), hexDump(p2, sizeof(CompressedState))));
+		enforce(c1 != c2, format("Inequality expected!\n%s\n%s", hexDump(p1, sizeof(Node)), hexDump(p2, sizeof(Node))));
 		p2[i/8] |= (1<<(i%8));
-		enforce(c1 == c2, format(  "Equality expected!\n%s\n%s", hexDump(p1, sizeof(CompressedState)), hexDump(p2, sizeof(CompressedState))));
+		enforce(c1 == c2, format(  "Equality expected!\n%s\n%s", hexDump(p1, sizeof(Node)), hexDump(p2, sizeof(Node))));
 	}
 }
 
@@ -3057,7 +3076,7 @@ int run(int argc, const char* argv[])
 #endif
 #endif // MULTITHREADING
 	
-	printf("Compressed state is %u bits (%u bytes data, %u bytes total)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(CompressedState));
+	printf("Compressed state is %u bits (%u bytes data, %u bytes with subframe, %u bytes with full frame)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(Node), sizeof(OpenNode));
 #ifdef SLOW_COMPARE
 	printf("Using memcmp for CompressedState comparison\n");
 #endif
