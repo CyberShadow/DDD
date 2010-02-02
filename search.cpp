@@ -1153,6 +1153,8 @@ CONDITION processQueueReadCondition, processQueueWriteCondition, processQueueExi
 int runningWorkers = 0;
 bool stopWorkers = false;
 
+void sortExpansionFinalChunk(THREAD_ID threadID);
+
 void queueState(const CompressedState* state)
 {
 	SCOPED_LOCK lock(processQueueMutex);
@@ -1184,6 +1186,8 @@ void worker(THREAD_ID threadID)
 	CompressedState cs;
 	while (dequeueState(&cs))
 		STATE_HANDLER(&cs, threadID);
+
+	sortExpansionFinalChunk(threadID);
 
     /* LOCK */
 	{
@@ -1255,6 +1259,16 @@ public:
 	}
 };
 
+void sortExpansionFinalChunk(THREAD_ID threadID)
+{
+	if (expansionCount[threadID])
+	{
+		std::sort(expansionBuffer[threadID], expansionBuffer[threadID] + expansionCount[threadID]);
+		size_t records = deduplicate(expansionBuffer[threadID], expansionCount[threadID]);
+		expansionCount[threadID] = records;
+	}
+}
+
 void writeExpansionFinalChunk()
 {
 #if 0
@@ -1277,16 +1291,6 @@ void writeExpansionFinalChunk()
 	expansionCount[0] = 0;
 	expansionChunks++;
 #else
-	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-	{
-		if (expansionCount[threadID])
-		{
-			std::sort(expansionBuffer[threadID], expansionBuffer[threadID] + expansionCount[threadID]);
-			size_t records = deduplicate(expansionBuffer[threadID], expansionCount[threadID]);
-			expansionCount[threadID] = records;
-		}
-	}
-
 	BufferedOutputStream<OpenNode> output;
 	output.setWriteBuffer((OpenNode*)ram, STANDARD_BUFFER_SIZE);
 	output.open(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
