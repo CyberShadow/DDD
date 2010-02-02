@@ -1473,6 +1473,16 @@ INLINE void processExitState(const CompressedState* cs, THREAD_ID threadID)
 #endif
 }
 
+void saveExitTrace(Step *steps, int stepNr)
+{
+	FILE* f = fopen(formatFileName("solution"), "wb");
+	fwrite(&exitSearchFrameGroup, sizeof(exitSearchFrameGroup), 1, f);
+	fwrite(&exitSearchState     , sizeof(exitSearchState)     , 1, f);
+	fwrite(&stepNr              , sizeof(stepNr)              , 1, f);
+	fwrite(steps, sizeof(Step), stepNr, f);
+	fclose(f);
+}
+
 void traceExit(const State* exitState, FRAME exitFrame)
 {
 	Step steps[MAX_STEPS];
@@ -1487,6 +1497,9 @@ void traceExit(const State* exitState, FRAME exitFrame)
 		fread(&stepNr              , sizeof(stepNr)              , 1, f);
 		fread(steps, sizeof(Step), stepNr, f);
 		fclose(f);
+
+		if (exitSearchFrameGroup < 0)
+			goto found;
 	}
 	else
 	if (exitState)
@@ -1502,17 +1515,12 @@ void traceExit(const State* exitState, FRAME exitFrame)
 	{
 		exitSearchFrameGroup--;
 
+		if (exitSearchFrameGroup < 0)
+			goto found;
+
 		if (fileExists(formatFileName("closed", exitSearchFrameGroup)))
 		{
-			// save trace-exit progress
-			{
-				FILE* f = fopen(formatFileName("solution"), "wb");
-				fwrite(&exitSearchFrameGroup, sizeof(exitSearchFrameGroup), 1, f);
-				fwrite(&exitSearchState     , sizeof(exitSearchState)     , 1, f);
-				fwrite(&stepNr              , sizeof(stepNr)              , 1, f);
-				fwrite(steps, sizeof(Step), stepNr, f);
-				fclose(f);
-			}
+			saveExitTrace(steps, stepNr);
 
 			printf("Frame" GROUP_STR " " GROUP_FORMAT "... \r", exitSearchFrameGroup);
 
@@ -1550,15 +1558,20 @@ void traceExit(const State* exitState, FRAME exitFrame)
 				exitSearchState      = exitSearchStateParent;
 				exitSearchStateFrame = exitSearchStateParentFrame;
 				if (exitSearchFrameGroup == 0)
+				{
+					exitSearchFrameGroup--;
+					saveExitTrace(steps, stepNr);
 					goto found;
+				}
 			}
 		}
 	}
 	error("Lost parent node!");
 found:
     
+	printf("Transcribing solution.\n");
 	writeSolution(&exitSearchState, steps, stepNr);
-    deleteFile(formatFileName("solution"));
+    //deleteFile(formatFileName("solution"));
 }
 
 // **************************************** Common runmode code *****************************************
@@ -1847,6 +1860,11 @@ public:
 
 int search()
 {
+	if (fileExists(formatProblemFileName(NULL, NULL, "txt")))
+	{
+		printf("Solution already found.\n");
+		return EXIT_OK;
+	}
 
 	if (fileExists(formatFileName("solution")))
 	{
