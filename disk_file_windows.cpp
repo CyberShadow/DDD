@@ -231,12 +231,13 @@ class InputStream : virtual public Stream<NODE>
 private:
 	BYTE sectorBuffer[512]; // currently assumes 512 byte sectors; maybe use GetDiskFreeSpace() in the future for increased portability
 	unsigned sectorBufferPos;
+	bool endOfFileReached;
 	uint64_t filePosition;
 
 public:
-	InputStream() : sectorBufferPos(0), filePosition(0) {}
+	InputStream() : sectorBufferPos(0), endOfFileReached(false), filePosition(0) {}
 
-	InputStream(const char* filename) : sectorBufferPos(0), filePosition(0)
+	InputStream(const char* filename) : sectorBufferPos(0), endOfFileReached(false), filePosition(0)
 	{
 		open(filename);
 	}
@@ -260,16 +261,19 @@ public:
 
 		LARGE_INTEGER li;
 		DWORD error;
-		li.QuadPart = filePosition & -(int)sizeof(sectorBuffer);
+		li.QuadPart = filePosition & -(int64_t)sizeof(sectorBuffer);
 		li.LowPart = SetFilePointer(archive, li.LowPart, &li.HighPart, FILE_BEGIN);
 		if (li.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
 			windowsError("Seek error");
+		endOfFileReached = false;
 
 		if (sectorBufferPos)
 		{
 			DWORD r;
 			BOOL b = ReadFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
-			if (!b || r<sectorBufferPos)
+			if (b && r<sectorBufferPos)
+				endOfFileReached = true;
+			if (!b || r==0)
 				windowsError(format("Read error %d", GetLastError()));
 		}
 	}
@@ -282,6 +286,8 @@ public:
 		char* data = (char*)p;
 		while (bytes < total) // read in 256 KB chunks
 		{
+			if (endOfFileReached)
+				error("Read error, end of file");
 			size_t left = total-bytes;
 			DWORD chunk = left > 256*1024 ? 256*1024 : (DWORD)left;
 			DWORD r = 0;
@@ -305,17 +311,30 @@ public:
 				else
 				{
 					b = ReadFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
-					if (!b || r<chunk)
+					if (b && r!=sizeof(sectorBuffer))
+					{
+						endOfFileReached = true;
+						if (r<chunk)
+						{
+							memcpy(data + bytes, sectorBuffer, r);
+							bytes += r;
+							assert(bytes % sizeof(NODE) == 0, "Unaligned EOF");
+							return bytes / sizeof(NODE);
+						}
+					}
+					if (!b || r==0)
 						windowsError(format("Read error %d", GetLastError()));
 					memcpy(data + bytes, sectorBuffer, chunk);
 					sectorBufferPos = (WORD)chunk;
 					filePosition += chunk;
-					return bytes + chunk;
+					return n;
 				}
 			}
 			b = ReadFile(archive, data + bytes, chunk, &r, NULL);
-			if ((!b && GetLastError() == ERROR_HANDLE_EOF) || (b && r==0))
+			if (b && r<chunk)
 			{
+				endOfFileReached = true;
+				bytes += r;
 				assert(bytes % sizeof(NODE) == 0, "Unaligned EOF");
 				return bytes / sizeof(NODE);
 			}
