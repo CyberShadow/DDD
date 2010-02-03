@@ -172,43 +172,56 @@ public:
 
 	void flush(bool reopen=true)
 	{
-		if (archive && sectorBufferFlushed < sectorBufferUse)
+		if (!archive)
+			return;
+
+		if (sectorBufferFlushed == sectorBufferUse) // nothing to flush?
 		{
-			BOOL b;
-			DWORD r;
-			LARGE_INTEGER size;
-
-			GetFileSizeEx(archive, &size);
-
-			b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
-			if (!b)
-				windowsError("Write error");
-			if (r != sizeof(sectorBuffer))
-				windowsError("Out of disk space?");
-			CloseHandle(archive);
-
-			archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_WRITE_THROUGH, NULL);
-			if (archive == INVALID_HANDLE_VALUE)
-				windowsError(format("File creation failure upon reopening (%s) buffered", filenameOpened));
-			b = SetFilePointer(archive, sectorBufferUse - sizeof(sectorBuffer), NULL, FILE_END);
-			if (!b)
-				windowsError("SetFilePointer() #1 error");
-			b = SetEndOfFile(archive);
-			if (!b)
-				windowsError("SetEndOfFile() error");
-			CloseHandle(archive);
-			sectorBufferFlushed = sectorBufferUse;
 			if (!reopen)
-				return;
-
-			archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
-			if (archive == INVALID_HANDLE_VALUE)
-				windowsError(format("File creation failure upon reopening (%s) unbuffered", filenameOpened));
-			b = SetFilePointerEx(archive, size, NULL, FILE_BEGIN);
-			if (!b)
-				windowsError("SetFilePointer() #2 error");
+			{
+				CloseHandle(archive);
+				archive = 0;
+			}
+			return;
 		}
+		assert(sectorBufferFlushed < sectorBufferUse);
+
+		BOOL b;
+		DWORD r;
+		ULARGE_INTEGER size;
+		size.LowPart = GetFileSize(archive, &size.HighPart);
+
+		b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
+		if (!b)
+			windowsError("Write error");
+		if (r != sizeof(sectorBuffer))
+			windowsError("Out of disk space?");
+		CloseHandle(archive);
+
+		archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_WRITE_THROUGH, NULL);
+		if (archive == INVALID_HANDLE_VALUE)
+			windowsError(format("File creation failure upon reopening (%s) buffered", filenameOpened));
+		b = SetFilePointer(archive, sectorBufferUse - sizeof(sectorBuffer), NULL, FILE_END);
+		if (!b)
+			windowsError("SetFilePointer() #1 error");
+		b = SetEndOfFile(archive);
+		if (!b)
+			windowsError("SetEndOfFile() error");
 		//FlushFileBuffers(archive);
+		CloseHandle(archive);
+		sectorBufferFlushed = sectorBufferUse;
+		if (!reopen)
+		{
+			archive = 0;
+			return;
+		}
+
+		archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
+		if (archive == INVALID_HANDLE_VALUE)
+			windowsError(format("File creation failure upon reopening (%s) unbuffered", filenameOpened));
+		b = SetFilePointerEx(archive, (LARGE_INTEGER&)size, NULL, FILE_BEGIN);
+		if (!b)
+			windowsError("SetFilePointer() #2 error");
 	}
 };
 
@@ -218,11 +231,12 @@ class InputStream : virtual public Stream<NODE>
 private:
 	BYTE sectorBuffer[512]; // currently assumes 512 byte sectors; maybe use GetDiskFreeSpace() in the future for increased portability
 	unsigned sectorBufferPos;
+	uint64_t filePosition;
 
 public:
-	InputStream() : sectorBufferPos(0) {}
+	InputStream() : sectorBufferPos(0), filePosition(0) {}
 
-	InputStream(const char* filename) : sectorBufferPos(0)
+	InputStream(const char* filename) : sectorBufferPos(0), filePosition(0)
 	{
 		open(filename);
 	}
@@ -232,6 +246,32 @@ public:
 		archive = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File open failure (%s)", filename));
+	}
+
+	uint64_t position()
+	{
+		return filePosition / sizeof(NODE);
+	}
+
+	void seek(uint64_t pos)
+	{
+		filePosition = pos * sizeof(NODE);
+		sectorBufferPos = (unsigned)(pos % sizeof(sectorBuffer));
+
+		LARGE_INTEGER li;
+		DWORD error;
+		li.QuadPart = filePosition & -(int)sizeof(sectorBuffer);
+		li.LowPart = SetFilePointer(archive, li.LowPart, &li.HighPart, FILE_BEGIN);
+		if (li.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
+			windowsError("Seek error");
+
+		if (sectorBufferPos)
+		{
+			DWORD r;
+			BOOL b = ReadFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
+			if (!b || r<sectorBufferPos)
+				windowsError(format("Read error %d", GetLastError()));
+		}
 	}
 
 	size_t read(NODE* p, size_t n)
@@ -254,6 +294,7 @@ public:
 				sectorBufferPos += (WORD)chunk;
 				if (sectorBufferPos == sizeof(sectorBuffer))
 					sectorBufferPos = 0;
+				filePosition += chunk;
 				bytes += chunk;
 				continue;
 			}
@@ -268,6 +309,7 @@ public:
 						windowsError(format("Read error %d", GetLastError()));
 					memcpy(data + bytes, sectorBuffer, chunk);
 					sectorBufferPos = (WORD)chunk;
+					filePosition += chunk;
 					return bytes + chunk;
 				}
 			}
@@ -279,6 +321,7 @@ public:
 			}
 			if (!b || r==0)
 				windowsError(format("Read error %d", GetLastError()));
+			filePosition += r;
 			bytes += r;
 		}
 		return n;
