@@ -40,20 +40,22 @@ public:
 
 	uint64_t position()
 	{
-		LARGE_INTEGER n, o;
+		LARGE_INTEGER n;
+		DWORD error;
 		n.QuadPart = 0;
-		BOOL b = SetFilePointerEx(archive, n, &o, FILE_CURRENT);
-		if (!b)
+		n.LowPart = SetFilePointer(archive, n.LowPart, &n.HighPart, FILE_CURRENT);
+		if (n.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
 			windowsError("Seek error");
-		return o.QuadPart / sizeof(NODE);
+		return n.QuadPart / sizeof(NODE);
 	}
 
 	void seek(uint64_t pos)
 	{
 		LARGE_INTEGER li;
+		DWORD error;
 		li.QuadPart = pos * sizeof(NODE);
-		BOOL b = SetFilePointerEx(archive, li, NULL, FILE_BEGIN);
-		if (!b)
+		li.LowPart = SetFilePointer(archive, li.LowPart, &li.HighPart, FILE_BEGIN);
+		if (li.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
 			windowsError("Seek error");
 	}
 
