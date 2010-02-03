@@ -1829,6 +1829,10 @@ void processState(const Node* cs, THREAD_ID threadID)
 {
 	State s;
 	s.decompress(&cs->getState());
+#ifdef HAVE_VALIDATOR
+	if (!s.validate())
+		return;
+#endif
 #ifdef DEBUG
 	CompressedState test;
 	s.compress(&test);
