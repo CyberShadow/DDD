@@ -104,6 +104,9 @@ public:
 
 	void open(const char* filename, bool resume=false)
 	{
+		assert(archive==0);
+		sectorBufferUse = 0;
+		sectorBufferFlushed = 0;
 		strcpy(filenameOpened, filename);
 		archive = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING , NULL);
 		if (archive == INVALID_HANDLE_VALUE)
@@ -244,6 +247,10 @@ public:
 
 	void open(const char* filename)
 	{
+		assert(archive==0);
+		sectorBufferPos = 0;
+		endOfFileReached = false;
+		filePosition = 0;
 		archive = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File open failure (%s)", filename));
@@ -316,6 +323,8 @@ public:
 						endOfFileReached = true;
 						if (r<chunk)
 						{
+							sectorBufferPos = (WORD)r;
+							filePosition += r;
 							memcpy(data + bytes, sectorBuffer, r);
 							bytes += r;
 							assert(bytes % sizeof(NODE) == 0, "Unaligned EOF");
@@ -334,6 +343,8 @@ public:
 			if (b && r<chunk)
 			{
 				endOfFileReached = true;
+				sectorBufferPos = (WORD)(r % sizeof(sectorBuffer));
+				filePosition += r;
 				bytes += r;
 				assert(bytes % sizeof(NODE) == 0, "Unaligned EOF");
 				return bytes / sizeof(NODE);
