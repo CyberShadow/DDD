@@ -75,18 +75,41 @@ public:
 template<class NODE>
 class OutputStream : virtual public Stream<NODE>
 {
-public:
-	OutputStream(){}
+private:
+	HANDLE archive_buffered;
+	BYTE sectorBuffer[512]; // currently assumes 512 byte sectors; maybe use GetDiskFreeSpace() in the future for increased portability
+	WORD sectorBufferUse;
+	WORD sectorBufferFlushed;
 
-	OutputStream(const char* filename, bool resume=false)
+public:
+	OutputStream() : archive_buffered(0), sectorBufferUse(0), sectorBufferFlushed(0) {}
+
+	OutputStream(const char* filename, bool resume=false) : archive_buffered(0), sectorBufferUse(0), sectorBufferFlushed(0)
 	{
 		open(filename, resume);
 	}
 
+	~OutputStream()
+	{
+		close();
+	}
+
+	void close()
+	{
+		flush();
+		Stream::close();
+		if (archive_buffered)
+		{
+			CloseHandle(archive_buffered);
+			archive_buffered = 0;
+		}
+	}
+
 	void open(const char* filename, bool resume=false)
 	{
-		archive = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-		if (archive == INVALID_HANDLE_VALUE)
+		archive          = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
+		archive_buffered = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,          OPEN_ALWAYS               , FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN                         , NULL);
+		if (archive == INVALID_HANDLE_VALUE || archive_buffered == INVALID_HANDLE_VALUE)
 			windowsError(format("File creation failure (%s)", filename));
 		if (resume)
 		{
@@ -103,13 +126,45 @@ public:
 		assert(archive, "File not open");
 		size_t total = n * sizeof(NODE);
 		size_t bytes = 0;
-		const char* data = (const char*)p;
-		while (bytes < total) // write in 1GB chunks
+		const BYTE* data = (const BYTE*)p;
+		while (bytes < total) // write in 256 KB chunks
 		{
 			size_t left = total-bytes;
-			DWORD chunk = left > 0x40000000 ? 0x40000000 : (DWORD)left;
+			DWORD chunk = left > 256*1024 ? 256*1024 : (DWORD)left;
 			DWORD r;
-			BOOL b = WriteFile(archive, data + bytes, chunk, &r, NULL);
+			BOOL b;
+			if (sectorBufferUse)
+			{
+				if (chunk > sizeof(sectorBuffer) - sectorBufferUse)
+					chunk = sizeof(sectorBuffer) - sectorBufferUse;
+				memcpy(sectorBuffer + sectorBufferUse, data, chunk);
+				sectorBufferUse += (WORD)chunk;
+				if (sectorBufferUse == sizeof(sectorBuffer))
+				{
+					b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
+					if (!b)
+						windowsError("Write error");
+					if (r != sizeof(sectorBuffer))
+						windowsError("Out of disk space?");
+					sectorBufferUse = 0;
+					sectorBufferFlushed = 0;
+				}
+				bytes += chunk;
+				continue;
+			}
+			if (chunk % sizeof(sectorBuffer) != 0)
+			{
+				if (chunk > sizeof(sectorBuffer))
+					chunk &= -(int)sizeof(sectorBuffer);
+				else
+				{
+					memset(sectorBuffer, 0, sizeof(sectorBuffer));
+					memcpy(sectorBuffer, data + bytes, chunk);
+					sectorBufferUse = (WORD)chunk;
+					return;
+				}
+			}
+			b = WriteFile(archive, data + bytes, chunk, &r, NULL);
 			if (!b)
 				windowsError("Write error");
 			if (r == 0)
@@ -117,10 +172,26 @@ public:
 			bytes += r;
 		}
 	}
-																
+
 	void flush()
 	{
-		FlushFileBuffers(archive);
+		if (archive_buffered && sectorBufferFlushed < sectorBufferUse)
+		{
+			DWORD r;
+			BOOL b;
+			b = WriteFile(archive_buffered, sectorBuffer, sectorBufferUse, &r, NULL);
+			if (!b)
+				windowsError("Write error");
+			if (r != sectorBufferUse)
+				windowsError("Out of disk space?");
+			FlushFileBuffers(archive_buffered);
+			sectorBufferFlushed = sectorBufferUse;
+			//b = SetFilePointer(archive_buffered, -sectorBufferUse, NULL, FILE_END);
+			/*b = SetFilePointer(archive_buffered, 0, NULL, FILE_BEGIN);
+			if (!b)
+				windowsError("SetFilePointer() error");*/
+		}
+		//FlushFileBuffers(archive);
 	}
 };
 
@@ -137,7 +208,7 @@ public:
 
 	void open(const char* filename)
 	{
-		archive = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+		archive = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File open failure (%s)", filename));
 	}
@@ -148,10 +219,10 @@ public:
 		size_t total = n * sizeof(NODE);
 		size_t bytes = 0;
 		char* data = (char*)p;
-		while (bytes < total) // read in 1GB chunks
+		while (bytes < total) // read in 256 KB chunks
 		{
 			size_t left = total-bytes;
-			DWORD chunk = left > 0x40000000 ? 0x40000000 : (DWORD)left;
+			DWORD chunk = left > 256*1024 ? 256*1024 : (DWORD)left;
 			DWORD r = 0;
 			BOOL b = ReadFile(archive, data + bytes, chunk, &r, NULL);
 			if ((!b && GetLastError() == ERROR_HANDLE_EOF) || (b && r==0))
