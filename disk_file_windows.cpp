@@ -114,9 +114,10 @@ public:
 		if (resume)
 		{
 			LARGE_INTEGER li;
+			DWORD error;
 			li.QuadPart = 0;
-			BOOL b = SetFilePointerEx(archive, li, NULL, FILE_END);
-			if (!b)
+			li.LowPart = SetFilePointer(archive, li.LowPart, &li.HighPart, FILE_END);
+			if (li.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
 				windowsError("Append error");
 		}
 	}
@@ -193,6 +194,7 @@ public:
 		DWORD r;
 		ULARGE_INTEGER size;
 		size.LowPart = GetFileSize(archive, &size.HighPart);
+		size.QuadPart += sectorBufferUse;
 
 		b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
 		if (!b)
@@ -204,9 +206,14 @@ public:
 		archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_WRITE_THROUGH, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File creation failure upon reopening (%s) buffered", filenameOpened));
-		b = SetFilePointer(archive, sectorBufferUse - sizeof(sectorBuffer), NULL, FILE_END);
-		if (!b)
+		
+		ULARGE_INTEGER seekPos = size;
+		DWORD seek_error;
+		seekPos.LowPart = SetFilePointer(archive, seekPos.LowPart, (LONG*)&seekPos.HighPart, FILE_BEGIN);
+		if (seekPos.LowPart == INVALID_SET_FILE_POINTER && (seek_error=GetLastError()) != NO_ERROR)
 			windowsError("SetFilePointer() #1 error");
+		if (seekPos.QuadPart != size.QuadPart)
+			error("Error setting file size");
 		b = SetEndOfFile(archive);
 		if (!b)
 			windowsError("SetEndOfFile() error");
@@ -222,8 +229,10 @@ public:
 		archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File creation failure upon reopening (%s) unbuffered", filenameOpened));
-		b = SetFilePointerEx(archive, (LARGE_INTEGER&)size, NULL, FILE_BEGIN);
-		if (!b)
+		size.QuadPart -= sectorBufferUse;
+		seekPos.QuadPart = size.QuadPart;
+		seekPos.LowPart = SetFilePointer(archive, seekPos.LowPart, (LONG*)&seekPos.HighPart, FILE_BEGIN);
+		if (seekPos.QuadPart != size.QuadPart)
 			windowsError("SetFilePointer() #2 error");
 	}
 };
@@ -264,7 +273,7 @@ public:
 	void seek(uint64_t pos)
 	{
 		filePosition = pos * sizeof(NODE);
-		sectorBufferPos = (unsigned)(pos % sizeof(sectorBuffer));
+		sectorBufferPos = (unsigned)pos % sizeof(sectorBuffer);
 
 		LARGE_INTEGER li;
 		DWORD error;
