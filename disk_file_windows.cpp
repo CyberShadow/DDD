@@ -96,8 +96,8 @@ public:
 
 	void close()
 	{
-		flush();
-		Stream::close();
+		flush(false);
+		//Stream::close();
 	}
 
 	void open(const char* filename, bool resume=false)
@@ -132,7 +132,7 @@ public:
 			{
 				if (chunk > sizeof(sectorBuffer) - sectorBufferUse)
 					chunk = sizeof(sectorBuffer) - sectorBufferUse;
-				memcpy(sectorBuffer + sectorBufferUse, data, chunk);
+				memcpy(sectorBuffer + sectorBufferUse, data + bytes, chunk);
 				sectorBufferUse += (WORD)chunk;
 				if (sectorBufferUse == sizeof(sectorBuffer))
 				{
@@ -168,7 +168,7 @@ public:
 		}
 	}
 
-	void flush()
+	void flush(bool reopen=true)
 	{
 		if (archive && sectorBufferFlushed < sectorBufferUse)
 		{
@@ -190,19 +190,21 @@ public:
 				windowsError(format("File creation failure upon reopening (%s) buffered", filenameOpened));
 			b = SetFilePointer(archive, sectorBufferUse - sizeof(sectorBuffer), NULL, FILE_END);
 			if (!b)
-				windowsError("SetFilePointer() error #1");
+				windowsError("SetFilePointer() #1 error");
 			b = SetEndOfFile(archive);
 			if (!b)
 				windowsError("SetEndOfFile() error");
 			CloseHandle(archive);
 			sectorBufferFlushed = sectorBufferUse;
+			if (!reopen)
+				return;
 
 			archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
 			if (archive == INVALID_HANDLE_VALUE)
 				windowsError(format("File creation failure upon reopening (%s) unbuffered", filenameOpened));
 			b = SetFilePointerEx(archive, size, NULL, FILE_BEGIN);
 			if (!b)
-				windowsError("SetFilePointer() error #2");
+				windowsError("SetFilePointer() #2 error");
 		}
 		//FlushFileBuffers(archive);
 	}
@@ -211,10 +213,14 @@ public:
 template<class NODE>
 class InputStream : virtual public Stream<NODE>
 {
-public:
-	InputStream(){}
+private:
+	BYTE sectorBuffer[512]; // currently assumes 512 byte sectors; maybe use GetDiskFreeSpace() in the future for increased portability
+	unsigned sectorBufferPos;
 
-	InputStream(const char* filename)
+public:
+	InputStream() : sectorBufferPos(0) {}
+
+	InputStream(const char* filename) : sectorBufferPos(0)
 	{
 		open(filename);
 	}
@@ -237,7 +243,33 @@ public:
 			size_t left = total-bytes;
 			DWORD chunk = left > 256*1024 ? 256*1024 : (DWORD)left;
 			DWORD r = 0;
-			BOOL b = ReadFile(archive, data + bytes, chunk, &r, NULL);
+			BOOL b;
+			if (sectorBufferPos)
+			{
+				if (chunk > sizeof(sectorBuffer) - sectorBufferPos)
+					chunk = sizeof(sectorBuffer) - sectorBufferPos;
+				memcpy(data + bytes, sectorBuffer + sectorBufferPos, chunk);
+				sectorBufferPos += (WORD)chunk;
+				if (sectorBufferPos == sizeof(sectorBuffer))
+					sectorBufferPos = 0;
+				bytes += chunk;
+				continue;
+			}
+			if (chunk % sizeof(sectorBuffer) != 0)
+			{
+				if (chunk > sizeof(sectorBuffer))
+					chunk &= -(int)sizeof(sectorBuffer);
+				else
+				{
+					b = ReadFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
+					if (!b || r<chunk)
+						windowsError(format("Read error %d", GetLastError()));
+					memcpy(data + bytes, sectorBuffer, chunk);
+					sectorBufferPos = (WORD)chunk;
+					return bytes + chunk;
+				}
+			}
+			b = ReadFile(archive, data + bytes, chunk, &r, NULL);
 			if ((!b && GetLastError() == ERROR_HANDLE_EOF) || (b && r==0))
 			{
 				assert(bytes % sizeof(NODE) == 0, "Unaligned EOF");
