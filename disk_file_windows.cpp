@@ -76,15 +76,15 @@ template<class NODE>
 class OutputStream : virtual public Stream<NODE>
 {
 private:
-	HANDLE archive_buffered;
 	BYTE sectorBuffer[512]; // currently assumes 512 byte sectors; maybe use GetDiskFreeSpace() in the future for increased portability
 	WORD sectorBufferUse;
 	WORD sectorBufferFlushed;
+	char filenameOpened[MAX_PATH];
 
 public:
-	OutputStream() : archive_buffered(0), sectorBufferUse(0), sectorBufferFlushed(0) {}
+	OutputStream() : sectorBufferUse(0), sectorBufferFlushed(0) {}
 
-	OutputStream(const char* filename, bool resume=false) : archive_buffered(0), sectorBufferUse(0), sectorBufferFlushed(0)
+	OutputStream(const char* filename, bool resume=false) : sectorBufferUse(0), sectorBufferFlushed(0)
 	{
 		open(filename, resume);
 	}
@@ -98,18 +98,13 @@ public:
 	{
 		flush();
 		Stream::close();
-		if (archive_buffered)
-		{
-			CloseHandle(archive_buffered);
-			archive_buffered = 0;
-		}
 	}
 
 	void open(const char* filename, bool resume=false)
 	{
-		archive          = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
-		archive_buffered = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,          OPEN_ALWAYS               , FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN                         , NULL);
-		if (archive == INVALID_HANDLE_VALUE || archive_buffered == INVALID_HANDLE_VALUE)
+		strcpy(filenameOpened, filename);
+		archive = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING , NULL);
+		if (archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File creation failure (%s)", filename));
 		if (resume)
 		{
@@ -175,21 +170,39 @@ public:
 
 	void flush()
 	{
-		if (archive_buffered && sectorBufferFlushed < sectorBufferUse)
+		if (archive && sectorBufferFlushed < sectorBufferUse)
 		{
-			DWORD r;
 			BOOL b;
-			b = WriteFile(archive_buffered, sectorBuffer, sectorBufferUse, &r, NULL);
+			DWORD r;
+			LARGE_INTEGER size;
+
+			GetFileSizeEx(archive, &size);
+
+			b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
 			if (!b)
 				windowsError("Write error");
-			if (r != sectorBufferUse)
+			if (r != sizeof(sectorBuffer))
 				windowsError("Out of disk space?");
-			FlushFileBuffers(archive_buffered);
-			sectorBufferFlushed = sectorBufferUse;
-			//b = SetFilePointer(archive_buffered, -sectorBufferUse, NULL, FILE_END);
-			/*b = SetFilePointer(archive_buffered, 0, NULL, FILE_BEGIN);
+			CloseHandle(archive);
+
+			archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_WRITE_THROUGH, NULL);
+			if (archive == INVALID_HANDLE_VALUE)
+				windowsError(format("File creation failure upon reopening (%s) buffered", filenameOpened));
+			b = SetFilePointer(archive, sectorBufferUse - sizeof(sectorBuffer), NULL, FILE_END);
 			if (!b)
-				windowsError("SetFilePointer() error");*/
+				windowsError("SetFilePointer() error #1");
+			b = SetEndOfFile(archive);
+			if (!b)
+				windowsError("SetEndOfFile() error");
+			CloseHandle(archive);
+			sectorBufferFlushed = sectorBufferUse;
+
+			archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
+			if (archive == INVALID_HANDLE_VALUE)
+				windowsError(format("File creation failure upon reopening (%s) unbuffered", filenameOpened));
+			b = SetFilePointerEx(archive, size, NULL, FILE_BEGIN);
+			if (!b)
+				windowsError("SetFilePointer() error #2");
 		}
 		//FlushFileBuffers(archive);
 	}
