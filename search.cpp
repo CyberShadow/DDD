@@ -1357,7 +1357,10 @@ void worker(THREAD_ID threadID)
 template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID)>
 void startWorkers()
 {
-	runningWorkers += WORKERS;
+	{
+		SCOPED_LOCK lock(processQueueMutex);
+		runningWorkers += WORKERS;
+	}
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 		THREAD_CREATE(worker<STATE_HANDLER>, threadID);
 }
