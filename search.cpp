@@ -814,23 +814,26 @@ public:
 };
 
 template<class NODE>
-class SplitInputStream
+class SplitInputStream : public InputStream<NODE>
 {
 private:
-	InputStream<NODE>* stream;
 	uint64_t start, end;
 	uint64_t pos;
 public:
-	SplitInputStream() : stream(NULL), start(0), end(0), pos(0) {}
+	SplitInputStream() : InputStream(), start(0), end(0), pos(0) {}
 
-	SplitInputStream(InputStream<NODE>& _stream, uint64_t _start, uint64_t _end) : stream(&_stream), start(_start), end(_end), pos(_start) {}
+	SplitInputStream(InputStream<NODE>& _stream, uint64_t _start, uint64_t _end) : InputStream(filename), start(_start), end(_end), pos(_start) {}
 
-	void open(InputStream<NODE>& _stream, uint64_t _start, uint64_t _end)
+	void open(const char* filename, uint64_t _start, uint64_t _end)
 	{
-		stream = &_stream;
 		start = _start;
 		end = _end;
 		pos = _start;
+
+		InputStream::open(filename);
+		assert(end <= InputStream::size());
+		if (start != 0)
+			InputStream::seek(start);
 	}
 
 	uint64_t size()
@@ -848,12 +851,14 @@ public:
 		pos = start + _pos;
 		if (pos > end)
 			pos = end;
+		InputStream::seek(pos);
 	}
 
 	size_t read(NODE* p, size_t n)
 	{
-		stream->seek(pos);
-		n = stream->read(p, n);
+		if (n > end - pos)
+			n = end - pos;
+		n = InputStream::read(p, n);
 		pos += n;
 		return n;
 	}
@@ -865,15 +870,14 @@ class BufferedSplitInputStream : public ReadBuffer<SplitInputStream<NODE>, NODE>
 public:
 	BufferedSplitInputStream(uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer(size) {}
 	BufferedSplitInputStream(InputStream<NODE>& stream, uint64_t start, uint64_t end, uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer(size) { open(stream, start, end); }
-	void open(InputStream<NODE>& stream, uint64_t start, uint64_t end) { s.open(stream, start, end); buffer.allocate(); }
+	void open(const char* filename, uint64_t start, uint64_t end) { s.open(filename, start, end); buffer.allocate(); }
 };
 
 template<class NODE, unsigned PIECES>
 class BufferedSplitInputStreamSet
 {
 private:
-	InputStream<NODE> inputStream;
-	BufferedSplitInputStream<NODE> bufferedStreams[PIECES];
+	BufferedSplitInputStream<NODE> bufferedStream[PIECES];
 public:
 	void setReadBuffer(NODE* buf, uint32_t size)
 	{
@@ -883,34 +887,38 @@ public:
 		for (i=0, numerator=size; i<PIECES; i++, numerator+=size)
 		{
 			uint32_t endPos = numerator / PIECES;
-			bufferedStreams[i].setReadBuffer(buf + pos, endPos - pos);
+			bufferedStream[i].setReadBuffer(buf + pos, endPos - pos);
 			pos = endPos;
 		}
 	}
 
 	void open(const char* filename)
 	{
-		inputStream.open(filename);
-		uint64_t fileSize = inputStream.size();
+		uint64_t fileSize;
+		{
+			InputStream<NODE> getSize(filename);
+			fileSize = getSize.size();
+		}
 		uint64_t pos = 0;
 		uint64_t numerator;
 		unsigned i;
 		for (i=0, numerator=fileSize; i<PIECES; i++, numerator+=fileSize)
 		{
 			uint64_t endPos = numerator / PIECES;
-			bufferedStreams[i].open(inputStream, pos, endPos);
+			bufferedStream[i].open(filename, pos, endPos);
 			pos = endPos;
 		}
 	}
 
 	void close()
 	{
-		inputStream.close();
+		for (unsigned i=0; i<PIECES; i++)
+			bufferedStream[i].close();
 	}
 
 	BufferedSplitInputStream<NODE>& stream(unsigned n)
 	{
-		return bufferedStreams[n];
+		return bufferedStream[n];
 	}
 };
 
@@ -1401,17 +1409,14 @@ MUTEX runningExpansionThreadsMutex;
 template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID)>
 void expansionWorker(THREAD_ID threadID)
 {
-	while (true)
+	while (const Node* node = closedNodeFileSplit.stream((unsigned)threadID).read())
+		STATE_HANDLER(node, threadID);
+
+	sortExpansionFinalChunk(threadID);
+
 	{
-		const Node* node = closedNodeFileSplit.stream((unsigned)threadID).read();
-		if (node)
-			STATE_HANDLER(node, threadID);
-		else
-		{
-			SCOPED_LOCK lock(runningExpansionThreadsMutex);
-			runningExpansionThreads--;
-			break;
-		}
+		SCOPED_LOCK lock(runningExpansionThreadsMutex);
+		runningExpansionThreads--;
 	}
 }
 
@@ -2215,20 +2220,20 @@ int search()
 
 			printf("Expanding... "); fflush(stdout);
 
-			closedNodeFileSplit.setReadBuffer((Node*)ram, SPLIT_INPUT_BUFFER_SIZE * WORKERS / sizeof(Node));
+			const size_t splitBufferSize = SPLIT_INPUT_BUFFER_SIZE / sizeof(Node) * WORKERS;
+			closedNodeFileSplit.setReadBuffer((Node*)ram, splitBufferSize);
 			closedNodeFileSplit.open(formatFileName("closed", currentFrameGroup));
-
-			expansionBufferSize = (OPENNODE_BUFFER_SIZE - (SPLIT_INPUT_BUFFER_SIZE * WORKERS + sizeof(OpenNode)-1) / sizeof(OpenNode)) / WORKERS;
+			
+			const size_t splitBufferSizeInOpenNodes = (splitBufferSize * sizeof(Node) + sizeof(OpenNode)-1) / sizeof(OpenNode);
+			expansionBufferSize = (OPENNODE_BUFFER_SIZE - splitBufferSizeInOpenNodes) / WORKERS;
 			for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-				expansionBuffer[threadID] = (OpenNode*)ram + (SPLIT_INPUT_BUFFER_SIZE * WORKERS + sizeof(OpenNode)-1) / sizeof(OpenNode) + expansionBufferSize * threadID;
+				expansionBuffer[threadID] = (OpenNode*)ram + splitBufferSizeInOpenNodes + expansionBufferSize * threadID;
 
 			runWorkersOnClosedNodeFileSplit<&processState>();
-
 			closedNodeFileSplit.close();
-
 			writeExpansionFinalChunk();
 
-			memset(ram, 0, SPLIT_INPUT_BUFFER_SIZE * WORKERS); // prevent bytes from Nodes from becoming junk inside OpenNode padding
+			memset(ram, 0, splitBufferSize * sizeof(Node)); // prevent bytes from Nodes from becoming junk inside OpenNode padding
 
 			{
 				OutputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup+1), false);
