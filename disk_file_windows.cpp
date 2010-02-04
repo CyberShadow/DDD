@@ -273,7 +273,7 @@ public:
 	void seek(uint64_t pos)
 	{
 		filePosition = pos * sizeof(NODE);
-		sectorBufferPos = (unsigned)pos % sizeof(sectorBuffer);
+		sectorBufferPos = (unsigned)filePosition % sizeof(sectorBuffer);
 
 		LARGE_INTEGER li;
 		DWORD error;
