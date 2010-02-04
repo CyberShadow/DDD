@@ -814,6 +814,102 @@ public:
 };
 
 template<class NODE>
+class SplitInputStream
+{
+private:
+	InputStream<NODE>* stream;
+	uint64_t start, end;
+	uint64_t pos;
+public:
+	SplitInputStream() : stream(NULL), start(0), end(0), pos(0) {}
+
+	SplitInputStream(InputStream<NODE>& _stream, uint64_t _start, uint64_t _end) : stream(&_stream), start(_start), end(_end), pos(_start) {}
+
+	void open(InputStream<NODE>& _stream, uint64_t _start, uint64_t _end)
+	{
+		stream = &_stream;
+		start = _start;
+		end = _end;
+		pos = _start;
+	}
+
+	uint64_t size()
+	{
+		return end - start;
+	}
+	
+	uint64_t position()
+	{
+		return pos - start;
+	}
+
+	void seek(uint64_t _pos)
+	{
+		pos = start + _pos;
+		if (pos > end)
+			pos = end;
+	}
+
+	size_t read(NODE* p, size_t n)
+	{
+		stream->seek(pos);
+		n = stream->read(p, n);
+		pos += n;
+		return n;
+	}
+};
+
+template<class NODE>
+class BufferedSplitInputStream : public ReadBuffer<SplitInputStream<NODE>, NODE>
+{
+public:
+	BufferedSplitInputStream(uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer(size) {}
+	BufferedSplitInputStream(InputStream<NODE>& stream, uint64_t start, uint64_t end, uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer(size) { open(stream, start, end); }
+	void open(InputStream<NODE>& stream, uint64_t start, uint64_t end) { s.open(stream, start, end); buffer.allocate(); }
+};
+
+template<class NODE, unsigned PIECES>
+class BufferedSplitInputStreamSet
+{
+private:
+	InputStream<NODE> inputStream;
+	BufferedSplitInputStream<NODE> bufferedStreams[PIECES];
+public:
+	void setReadBuffer(NODE* buf, uint32_t size)
+	{
+		uint32_t pos = 0;
+		uint32_t numerator;
+		unsigned i;
+		for (i=0, numerator=size; i<PIECES; i++, numerator+=size)
+		{
+			uint32_t endPos = numerator / PIECES;
+			bufferedStreams[i].setReadBuffer(buf + pos, endPos - pos);
+			pos = endPos;
+		}
+	}
+
+	void open(const char* filename)
+	{
+		inputStream.open(filename);
+		uint64_t fileSize = inputStream.size();
+		uint64_t pos = 0;
+		uint64_t numerator;
+		unsigned i;
+		for (i=0, numerator=fileSize; i<PIECES; i++, numerator+=fileSize)
+		{
+			uint64_t endPos = numerator / PIECES;
+			bufferedStreams[i].open(inputStream, pos, endPos);
+			pos = endPos;
+		}
+	}
+
+	BufferedSplitInputStream<NODE>& stream(unsigned n)
+	{
+		return bufferedStreams[n];
+	}
+};
+
+template<class NODE>
 void copyFile(const char* from, const char* to)
 {
 	InputStream<NODE> input(from);
