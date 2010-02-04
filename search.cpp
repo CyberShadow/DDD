@@ -903,6 +903,11 @@ public:
 		}
 	}
 
+	void close()
+	{
+		inputStream.close();
+	}
+
 	BufferedSplitInputStream<NODE>& stream(unsigned n)
 	{
 		return bufferedStreams[n];
@@ -1389,11 +1394,53 @@ uint64_t combinedNodesTotal;
 
 BufferedOutputStream<Node> closedNodeFile;
 
+BufferedSplitInputStreamSet<Node, WORKERS> closedNodeFileSplit;
+unsigned runningExpansionThreads;
+MUTEX runningExpansionThreadsMutex;
+
+template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID)>
+void expansionWorker(THREAD_ID threadID)
+{
+	while (true)
+	{
+		const Node* node = closedNodeFileSplit.stream((unsigned)threadID).read();
+		if (node)
+			STATE_HANDLER(node, threadID);
+		else
+		{
+			SCOPED_LOCK lock(runningExpansionThreadsMutex);
+			runningExpansionThreads--;
+			break;
+		}
+	}
+}
+
+template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID)>
+void runWorkersOnClosedNodeFileSplit()
+{
+	{
+		SCOPED_LOCK lock(runningExpansionThreadsMutex);
+		runningExpansionThreads = WORKERS;
+	}
+
+	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+		THREAD_CREATE(expansionWorker<STATE_HANDLER>, threadID);
+
+	while (true)
+	{
+		SLEEP(16);
+		{
+			SCOPED_LOCK lock(runningExpansionThreadsMutex);
+			if (runningExpansionThreads == 0)
+				break;
+		}
+	}
+}
+
 OpenNode* expansionBuffer[WORKERS] = {(OpenNode*)ram};
 size_t expansionBufferSize = RAM_SIZE / sizeof(OpenNode);
 size_t expansionCount[WORKERS] = {0};
 unsigned expansionChunks = 0;
-
 MUTEX expansionMutex;
 
 template<class NODE>
@@ -2167,29 +2214,21 @@ int search()
 				return EXIT_STOP;
 
 			printf("Expanding... "); fflush(stdout);
-			{
-				BufferedInputStream<Node> input;
-				input.setReadBuffer((Node*)ram, STANDARD_BUFFER_SIZE * sizeof(OpenNode) / sizeof(Node));
-				input.open(formatFileName("closed", currentFrameGroup));
 
-				ProcessStateOutput output;
+			closedNodeFileSplit.setReadBuffer((Node*)ram, SPLIT_INPUT_BUFFER_SIZE * WORKERS / sizeof(Node));
+			closedNodeFileSplit.open(formatFileName("closed", currentFrameGroup));
 
-				expansionBufferSize = (OPENNODE_BUFFER_SIZE - STANDARD_BUFFER_SIZE) / WORKERS;
-				for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-					expansionBuffer[threadID] = (OpenNode*)ram + STANDARD_BUFFER_SIZE + expansionBufferSize * threadID;
+			expansionBufferSize = (OPENNODE_BUFFER_SIZE - (SPLIT_INPUT_BUFFER_SIZE * WORKERS + sizeof(OpenNode)-1) / sizeof(OpenNode)) / WORKERS;
+			for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+				expansionBuffer[threadID] = (OpenNode*)ram + (SPLIT_INPUT_BUFFER_SIZE * WORKERS + sizeof(OpenNode)-1) / sizeof(OpenNode) + expansionBufferSize * threadID;
 
-#ifdef MULTITHREADING
-				startWorkers<&processState>();
-#endif
-				copyStream<Node>(&input, &output);
-#ifdef MULTITHREADING
-				flushProcessingQueue();
-#endif
+			runWorkersOnClosedNodeFileSplit<&processState>();
 
-				writeExpansionFinalChunk();
-			}
+			closedNodeFileSplit.close();
 
-			memset(ram, 0, STANDARD_BUFFER_SIZE * sizeof(OpenNode) / sizeof(Node) * sizeof(Node)); // prevent bytes from Nodes from becoming junk inside OpenNode padding
+			writeExpansionFinalChunk();
+
+			memset(ram, 0, SPLIT_INPUT_BUFFER_SIZE * WORKERS); // prevent bytes from Nodes from becoming junk inside OpenNode padding
 
 			{
 				OutputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup+1), false);
