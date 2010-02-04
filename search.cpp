@@ -1558,7 +1558,6 @@ void mergedExpanded()
 		output->open(formatFileName("merging", currentFrameGroup+1));
 		mergeStreams<OpenNode>(chunkInput, expansionChunks, output);
 		delete[] chunkInput;
-		output->flush();
 		delete output;
 		renameFile(formatFileName("merging", currentFrameGroup+1), formatFileName("expanded", currentFrameGroup+1));
 		for (unsigned i=0; i<expansionChunks; i++)
@@ -1834,7 +1833,6 @@ void sortAndMerge(FRAME_GROUP g)
 		output->open(formatFileName("merging", g));
 		mergeStreams(chunkInput, chunks, output);
 		delete[] chunkInput;
-		output->flush();
 		delete output;
 		renameFile(formatFileName("merging", g), formatFileName("merged", g));
 		//for (int i=0; i<chunks; i++)
@@ -2844,7 +2842,6 @@ int seqFilterOpen()
 				InputHeap<BufferedInputStream> input(inputs, inputCount);
 				BufferedOutputStream output(formatFileName("filtering", currentFrameGroup));
 				filterStream(source, &input, &output, &nullOutput);
-				output.flush(); // force disk flush
 			}
 			delete source;
 			delete[] inputs;

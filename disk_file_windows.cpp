@@ -99,7 +99,11 @@ public:
 	void close()
 	{
 		flush(false);
-		//Stream::close();
+	}
+
+	void flush()
+	{
+		flush(true);
 	}
 
 	void open(const char* filename, bool resume=false)
@@ -174,14 +178,17 @@ public:
 		}
 	}
 
-	void flush(bool reopen=true)
+private:
+	void flush(bool reopen)
 	{
 		if (!archive)
 			return;
 
 		if (sectorBufferFlushed == sectorBufferUse) // nothing to flush?
 		{
-			if (!reopen)
+			if (reopen)
+				FlushFileBuffers(archive);
+			else
 			{
 				CloseHandle(archive);
 				archive = 0;
@@ -217,7 +224,6 @@ public:
 		b = SetEndOfFile(archive);
 		if (!b)
 			windowsError("SetEndOfFile() error");
-		//FlushFileBuffers(archive);
 		CloseHandle(archive);
 		sectorBufferFlushed = sectorBufferUse;
 		if (!reopen)
