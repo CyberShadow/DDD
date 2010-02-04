@@ -2159,7 +2159,7 @@ int search()
 		currentFrameGroup--;
 		searchPrintHeader();
 
-		printf("Expanded already, skipping to next step;  "); fflush(stdout);
+		printf("(Resuming)   "); fflush(stdout);
 
 		InputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup+1));
 		resumeInfo.read(&expansionChunks, 1);
@@ -2183,6 +2183,13 @@ int search()
 		}
 		else
 		{
+			searchPrintHeader();
+
+			closedNodesInCurrentFrameGroup = 0;
+			combinedNodesTotal = 0;
+			
+			printf("Filtering... "); fflush(stdout);
+
 			const size_t ramBaseSize = RAM_SIZE / (1 + 10) / sizeof(OpenNode);
 
 			closedNodeFile.setWriteBuffer((Node*)ram, ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node));
@@ -2252,6 +2259,31 @@ int search()
 
 		printf("Expanding... "); fflush(stdout);
 
+#if 0
+		{
+			BufferedInputStream<Node> input;
+			input.setReadBuffer((Node*)ram, STANDARD_BUFFER_SIZE * sizeof(OpenNode) / sizeof(Node));
+			input.open(formatFileName("closed", currentFrameGroup));
+
+			ProcessStateOutput output;
+
+			expansionBufferSize = (OPENNODE_BUFFER_SIZE - STANDARD_BUFFER_SIZE) / WORKERS;
+			for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+				expansionBuffer[threadID] = (OpenNode*)ram + STANDARD_BUFFER_SIZE + expansionBufferSize * threadID;
+
+#ifdef MULTITHREADING
+			startWorkers<&processState>();
+#endif
+			copyStream<Node>(&input, &output);
+#ifdef MULTITHREADING
+			flushProcessingQueue();
+#endif
+
+			writeExpansionFinalChunk();
+		}
+
+		memset(ram, 0, STANDARD_BUFFER_SIZE * sizeof(OpenNode) / sizeof(Node) * sizeof(Node)); // prevent bytes from Nodes from becoming junk inside OpenNode padding
+#else
 		const size_t splitBufferSize = SPLIT_INPUT_BUFFER_SIZE / sizeof(Node) * WORKERS;
 		closedNodeFileSplit.setReadBuffer((Node*)ram, splitBufferSize);
 		closedNodeFileSplit.open(formatFileName("closed", currentFrameGroup));
@@ -2266,6 +2298,7 @@ int search()
 		writeExpansionFinalChunk();
 
 		memset(ram, 0, splitBufferSize * sizeof(Node)); // prevent bytes from Nodes from becoming junk inside OpenNode padding
+#endif
 
 		{
 			OutputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup+1), false);
