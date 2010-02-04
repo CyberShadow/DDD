@@ -424,9 +424,10 @@ void deleteFile(const char* filename)
 		windowsError(format("Error deleting file %s", filename));
 }
 
-void renameFile(const char* from, const char* to)
+void renameFile(const char* from, const char* to, bool replaceExisting=false)
 {
-	DeleteFile(to); // ignore error
+	if (replaceExisting)
+		DeleteFile(to); // ignore error
 	BOOL b = MoveFile(from, to);
 	if (!b)
 		windowsError(format("Error moving file from %s to %s", from, to));

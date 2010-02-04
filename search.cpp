@@ -2090,6 +2090,24 @@ void searchPrintHeader()
 	fflush(stdout);
 }
 
+void searchPrintNodeCounts()
+{
+	printf("%12llu closed, %12llu combined; ", closedNodesInCurrentFrameGroup, combinedNodesTotal);
+	fflush(stdout);
+}
+
+void searchRecalculateNodeCounts()
+{
+	{
+		InputStream<Node> getSize(formatFileName("closed", currentFrameGroup));
+		closedNodesInCurrentFrameGroup = getSize.size();
+	}
+	{
+		InputStream<OpenNode> getSize(formatFileName("combined", currentFrameGroup+1));
+		combinedNodesTotal = getSize.size();
+	}
+}
+
 int search()
 {
 	if (fileExists(formatProblemFileName(NULL, NULL, "txt")))
@@ -2105,19 +2123,21 @@ int search()
 		return EXIT_OK;
 	}
 
-	firstFrameGroup = -1;
+	currentFrameGroup = -1;
 
 	for (FRAME_GROUP g=MAX_FRAME_GROUPS+1; g>=0; g--)
 		if (fileExists(formatFileName("combined", g)))
 		{
-			printf("Resuming from frame" GROUP_STR " " GROUP_FORMAT "\n", g);
-			firstFrameGroup = g;
+			//printf("Resuming from frame" GROUP_STR " " GROUP_FORMAT "\n", g);
+			currentFrameGroup = g;
 			break;
 	    }
 
-	if (firstFrameGroup == -1)
+	timeb time0;
+	ftime(&time0);
+
+	if (currentFrameGroup == -1)
 	{
-		currentFrameGroup = -1;
 		for (int i=0; i<initialStateCount; i++)
 		{
 			State s = initialStates[i];
@@ -2131,12 +2151,12 @@ int search()
 
 		OutputStream<OpenNode> output(formatFileName("combined", 0), false); // create zero byte file
 
-		firstFrameGroup = 0;
+		currentFrameGroup = 0;
 	}
 	else
-	if (fileExists(formatFileName("expandedcount", firstFrameGroup)))
+	if (fileExists(formatFileName("expandedcount", currentFrameGroup)))
 	{
-		firstFrameGroup--;
+		currentFrameGroup--;
 		searchPrintHeader();
 
 		printf("Expanded already, skipping to next step;  "); fflush(stdout);
@@ -2144,20 +2164,25 @@ int search()
 		InputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup+1));
 		resumeInfo.read(&expansionChunks, 1);
 
+		searchRecalculateNodeCounts();
+		searchPrintNodeCounts();
+
 		goto skipToMerging;
 	}
 	else
-	if (!fileExists(formatFileName("expanded", firstFrameGroup)))
+	if (!fileExists(formatFileName("expanded", currentFrameGroup)))
 	{
-		if (fileExists(formatFileName("closed", firstFrameGroup-1)))
+		currentFrameGroup--;
+
+		if (fileExists(formatFileName("closed", currentFrameGroup)))
 		{
 			searchPrintHeader();
+			printf("(Resuming)   "); fflush(stdout);
+			searchRecalculateNodeCounts();
 			goto skipToExpanding;
 		}
 		else
 		{
-			firstFrameGroup--;
-
 			const size_t ramBaseSize = RAM_SIZE / (1 + 10) / sizeof(OpenNode);
 
 			closedNodeFile.setWriteBuffer((Node*)ram, ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node));
@@ -2180,10 +2205,7 @@ int search()
 		}
 	}
 
-	timeb time0;
-	ftime(&time0);
-
-	for (currentFrameGroup=firstFrameGroup; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
+	for (; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
 	{
 		searchPrintHeader();
 
@@ -2223,7 +2245,7 @@ int search()
 
 	skipToExpanding:
 
-		printf("%12llu closed, %12llu combined; ", closedNodesInCurrentFrameGroup, combinedNodesTotal); fflush(stdout);
+		searchPrintNodeCounts();
 
 		if (checkStop(true))
 			return EXIT_STOP;
