@@ -1439,7 +1439,7 @@ BufferedOutputStream<Node> closedNodeFile;
 
 #define EXPANSION_BUFFER_SLOTS (RAM_SIZE / sizeof(OpenNode) / EXPANSION_QUEUE_SIZE)
 #define EXPANSION_BUFFER_SIZE (EXPANSION_BUFFER_SLOTS * EXPANSION_QUEUE_SIZE)
-#define EXPANSION_BUFFER_FILL_THRESHOLD ((size_t)(EXPANSION_BUFFER_SIZE * EXPANSION_BUFFER_FILL_RATIO))
+#define EXPANSION_BUFFER_FILL_THRESHOLD ((unsigned)(EXPANSION_BUFFER_SLOTS * EXPANSION_BUFFER_FILL_RATIO))
 
 OpenNode* const expansionBuffer    = (OpenNode*)ram;
 OpenNode* const expansionBufferEnd = (OpenNode*)ram + EXPANSION_BUFFER_SIZE;
@@ -1477,13 +1477,14 @@ struct
 
 void dumpExpansionDebug()
 {
+	return;
 	/*for (unsigned x=0; x<EXPANSION_BUFFER_SLOTS; x++)
 		fputc('!', expansionDebug);
 	fputc('\n', expansionDebug);
 	return;*/
 
-	std::list<expansionBufferRegion>::iterator endy = expansionBufferRegions.end(); --endy;
-	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=endy; i++)
+	//std::list<expansionBufferRegion>::iterator endy = expansionBufferRegions.end(); --endy;
+	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
 	{
 		for (unsigned x=0; x<i->length; x++)
 		{
@@ -1498,6 +1499,7 @@ void dumpExpansionDebug()
 		}
 	}
 	fputc('\n', expansionDebug);
+	fflush(expansionDebug);
 }
 
 void initExpansion()
@@ -1530,8 +1532,8 @@ void initExpansion()
 
 	expansionChunks = 0;
 
-	expansionDebug = fopen("debug.log", "at");
-	fprintf(expansionDebug, "Frame group %u\n", currentFrameGroup);
+	//expansionDebug = fopen("debug.log", "at");
+	//fprintf(expansionDebug, "Frame group %u\n", currentFrameGroup);
 	dumpExpansionDebug();
 }
 
@@ -1551,6 +1553,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 
 		dumpExpansionDebug();
 
+		expansionThread[threadID].count = 0;
 		{
 			std::list<expansionBufferRegion>::iterator before = expansionThreadIter[threadID];
 			std::list<expansionBufferRegion>::iterator after  = expansionThreadIter[threadID]; ++after;
@@ -1588,7 +1591,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 			{
 				if (i->type == EXPANSION_BUFFER_REGION_EMPTY)
 				{
-					if (shortestEmptyLength < i->length)
+					if (shortestEmptyLength > i->length)
 					{
 						shortestEmptyLength = i->length;
 						shortestEmptyRegion = i;
@@ -1685,7 +1688,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 				region.pos = shortestEmptyRegion->pos;
 				region.length = 1;
 				region.type = EXPANSION_BUFFER_REGION_FILLING;
-				expansionBufferRegions.insert(shortestEmptyRegion, region);
+				expansionThreadIter[threadID] = expansionBufferRegions.insert(shortestEmptyRegion, region);
 				if (--shortestEmptyRegion->length == 0)
 					expansionBufferRegions.erase(shortestEmptyRegion);
 				else
@@ -1695,13 +1698,13 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 			}
 			else
 			{
-				lock.unlock();
-				SLEEP(16);
 				{
 					SCOPED_LOCK lock(processQueueMutex);
 					if (stopWorkers)
 						return;
 				}
+				lock.unlock();
+				SLEEP(16);
 				lock.lock();
 			}
 		}
@@ -1767,7 +1770,7 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 
 void expansionWriteFinalChunk()
 {
-	fclose(expansionDebug);
+	//fclose(expansionDebug);
 
 	expansionBufferRegions.clear();
 
