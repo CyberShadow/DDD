@@ -1468,7 +1468,7 @@ struct expansionBufferSortedRegion
 std::queue<expansionBufferSortedRegion> expansionBufferRegionsToMerge;
 //#define DEBUG_EXPANSION
 #ifdef DEBUG_EXPANSION
-FILE *expansionDebug;
+//FILE *expansionDebug;
 #endif
 
 struct
@@ -1480,9 +1480,13 @@ struct
 #ifdef DEBUG_EXPANSION
 void dumpExpansionDebug()
 {
+	unsigned pos=0;
 	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
 	{
-		for (unsigned x=0; x<i->length; x++)
+		if (i->pos != pos)
+			__debugbreak();
+		pos += i->length;
+		/*for (unsigned x=0; x<i->length; x++)
 		{
 			switch (i->type)
 			{
@@ -1492,10 +1496,10 @@ void dumpExpansionDebug()
 			case EXPANSION_BUFFER_REGION_SORTING: fputc('$', expansionDebug); break;
 			case EXPANSION_BUFFER_REGION_WRITING: fputc('^', expansionDebug); break;
 			}
-		}
+		}*/
 	}
-	fputc('\n', expansionDebug);
-	fflush(expansionDebug);
+	//fputc('\n', expansionDebug);
+	//fflush(expansionDebug);
 }
 #endif
 
@@ -1529,8 +1533,8 @@ void initExpansion()
 	expansionChunks = 0;
 
 #ifdef DEBUG_EXPANSION
-	expansionDebug = fopen("debug.log", "at");
-	fprintf(expansionDebug, "Frame group %u\n", currentFrameGroup);
+	//expansionDebug = fopen("debug.log", "at");
+	//fprintf(expansionDebug, "Frame group %u\n", currentFrameGroup);
 	dumpExpansionDebug();
 #endif
 }
@@ -1562,7 +1566,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 				if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_FILLED)
 				{
 					before->length += 1 + after->length;
-					expansionBufferRegions.erase(expansionThreadIter[threadID], after);
+					expansionBufferRegions.erase(expansionThreadIter[threadID], ++after);
 				}
 				else
 				{
@@ -1590,8 +1594,16 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 			std::list<expansionBufferRegion>::iterator longestFilledRegion = expansionBufferRegions.end(); unsigned longestFilledLength = 0;
 			std::list<expansionBufferRegion>::iterator shortestEmptyRegion = expansionBufferRegions.end(); unsigned shortestEmptyLength = EXPANSION_BUFFER_SLOTS+1;
 
+#ifdef DEBUG_EXPANSION
+			unsigned pos = 0;
+#endif
 			for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
 			{
+#ifdef DEBUG_EXPANSION
+				if (i->pos != pos)
+					__debugbreak();
+				pos += i->length;
+#endif
 				if (i->type == EXPANSION_BUFFER_REGION_EMPTY)
 				{
 					if (shortestEmptyLength > i->length)
@@ -1665,7 +1677,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 					if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_EMPTY)
 					{
 						before->length += newLength + after->length;
-						expansionBufferRegions.erase(regionToSort, after);
+						expansionBufferRegions.erase(regionToSort, ++after);
 					}
 					else
 					{
@@ -1737,8 +1749,16 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 		dumpExpansionDebug();
 #endif
 
+#ifdef DEBUG_EXPANSION
+		unsigned pos = 0;
+#endif
 		for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
 		{
+#ifdef DEBUG_EXPANSION
+			if (i->pos != pos)
+				__debugbreak();
+			pos += i->length;
+#endif
 			if (i->type == EXPANSION_BUFFER_REGION_FILLED)
 			{
 				i->type = EXPANSION_BUFFER_REGION_SORTING;
@@ -1771,6 +1791,8 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 		}
 	}
 
+	// TODO: combine EXPANSION_BUFFER_REGION_FILLING with EXPANSION_BUFFER_REGION_FILLED during sort/dedup instead of expansionWriteFinalChunk()
+
 	if (expansionThread[threadID].count)
 	{
 		std::sort(expansionThread[threadID].buffer, expansionThread[threadID].buffer + expansionThread[threadID].count);
@@ -1794,7 +1816,7 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 void expansionWriteFinalChunk()
 {
 #ifdef DEBUG_EXPANSION
-	fclose(expansionDebug);
+	//fclose(expansionDebug);
 #endif
 
 	expansionBufferRegions.clear();
@@ -1811,7 +1833,7 @@ void expansionWriteFinalChunk()
 		expansionBufferRegionsToMerge.pop();
 	}
 
-	BufferedOutputStream<OpenNode> output(STANDARD_BUFFER_SIZE);
+	BufferedOutputStream<OpenNode> output(STANDARD_BUFFER_SIZE); // allocate buffer outside of "ram"; reserve "ram" exclusively for expansion
 	output.open(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
 
 	mergeStreams<OpenNode>(inputs, numInputs, &output);
@@ -3760,7 +3782,24 @@ int run(int argc, const char* argv[])
 // define main() in another file and #include "search.cpp"
 #elif defined(PROBLEM_RELATED)
 #include STRINGIZE(PROBLEM/PROBLEM_RELATED.cpp)
-int main(int argc, const char* argv[]) { try { return run_related(argc, argv); } catch(const char* s) { printf("\n%s\n", s); return EXIT_ERROR; } }
+int main(int argc, const char* argv[])
+{
+	try {
+		return run_related(argc, argv);
+	}
+	catch(const char* s) {
+		printf("\n%s\n", s);
+		return EXIT_ERROR;
+	}
+}
 #else
-int main(int argc, const char* argv[]) { try { return run        (argc, argv); } catch(const char* s) { printf("\n%s\n", s); return EXIT_ERROR; } }
+int main(int argc, const char* argv[]) {
+	try {
+		return run(argc, argv);
+	}
+	catch(const char* s) {
+		printf("\n%s\n", s);
+		return EXIT_ERROR;
+	}
+}
 #endif
