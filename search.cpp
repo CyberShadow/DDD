@@ -1573,6 +1573,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 			else
 			if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_FILLED)
 			{
+				after->pos--;
 				after->length++;
 				expansionBufferRegions.erase(expansionThreadIter[threadID]);
 			}
@@ -1675,6 +1676,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 				else
 				if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_EMPTY)
 				{
+					after->pos    -= newLength;
 					after->length += newLength;
 					expansionBufferRegions.erase(regionToSort);
 				}
@@ -1689,6 +1691,11 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 			if (shortestEmptyLength != EXPANSION_BUFFER_SLOTS+1)
 			{
 				expansionThread[threadID].buffer = expansionBuffer + shortestEmptyRegion->pos * EXPANSION_QUEUE_SIZE;
+
+#ifdef DEBUG_EXPANSION
+				if (expansionThread[threadID].buffer >= expansionBufferEnd)
+					__debugbreak();
+#endif
 			
 				expansionBufferRegion region;
 				region.pos = shortestEmptyRegion->pos;
@@ -1708,7 +1715,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 			{
 				{
 					SCOPED_LOCK lock(processQueueMutex);
-					if (stopWorkers)
+					if (processQueueHead == processQueueTail && stopWorkers)
 						return;
 				}
 				lock.unlock();
