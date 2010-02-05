@@ -1468,7 +1468,7 @@ struct expansionBufferSortedRegion
 std::queue<expansionBufferSortedRegion> expansionBufferRegionsToMerge;
 //#define DEBUG_EXPANSION
 #ifdef DEBUG_EXPANSION
-//FILE *expansionDebug;
+FILE *expansionDebug;
 #endif
 
 struct
@@ -1486,7 +1486,7 @@ void dumpExpansionDebug()
 		if (i->pos != pos)
 			__debugbreak();
 		pos += i->length;
-		/*for (unsigned x=0; x<i->length; x++)
+		for (unsigned x=0; x<i->length; x++)
 		{
 			switch (i->type)
 			{
@@ -1496,10 +1496,10 @@ void dumpExpansionDebug()
 			case EXPANSION_BUFFER_REGION_SORTING: fputc('$', expansionDebug); break;
 			case EXPANSION_BUFFER_REGION_WRITING: fputc('^', expansionDebug); break;
 			}
-		}*/
+		}
 	}
-	//fputc('\n', expansionDebug);
-	//fflush(expansionDebug);
+	fputc('\n', expansionDebug);
+	fflush(expansionDebug);
 }
 #endif
 
@@ -1533,8 +1533,8 @@ void initExpansion()
 	expansionChunks = 0;
 
 #ifdef DEBUG_EXPANSION
-	//expansionDebug = fopen("debug.log", "at");
-	//fprintf(expansionDebug, "Frame group %u\n", currentFrameGroup);
+	expansionDebug = fopen("debug.log", "at");
+	fprintf(expansionDebug, "Frame group %u\n", currentFrameGroup);
 	dumpExpansionDebug();
 #endif
 }
@@ -1626,6 +1626,17 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 			if (longestFilledLength >= EXPANSION_BUFFER_FILL_THRESHOLD)
 			{
 				std::list<expansionBufferRegion>::iterator& regionToSort = longestFilledRegion;
+
+				__assume(regionToSort->length == longestFilledLength);
+				if (regionToSort->length > EXPANSION_BUFFER_FILL_THRESHOLD)
+				{
+					expansionBufferRegion region;
+					region.pos = regionToSort->pos + EXPANSION_BUFFER_FILL_THRESHOLD;
+					region.length = regionToSort->length - EXPANSION_BUFFER_FILL_THRESHOLD;
+					region.type = EXPANSION_BUFFER_REGION_FILLED;
+					expansionBufferRegions.insert(++longestFilledRegion, region);
+					regionToSort->length = EXPANSION_BUFFER_FILL_THRESHOLD;
+				}
 
 				regionToSort->type = EXPANSION_BUFFER_REGION_SORTING;
 				OpenNode *bufferToSort = expansionBuffer + regionToSort->pos * EXPANSION_QUEUE_SIZE;
@@ -1731,7 +1742,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 						return;
 				}
 				lock.unlock();
-				SLEEP(16);
+				SLEEP(1);
 				lock.lock();
 			}
 		}
@@ -1816,7 +1827,7 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 void expansionWriteFinalChunk()
 {
 #ifdef DEBUG_EXPANSION
-	//fclose(expansionDebug);
+	fclose(expansionDebug);
 #endif
 
 	expansionBufferRegions.clear();
