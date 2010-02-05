@@ -9,15 +9,17 @@ private:
 public:
     inline CriticalSection() : x(0) {}
 
-	template<bool NICE>
     inline void enter()
     {
         //do;
+		while (InterlockedExchange(&x, 1)) {}
+    }
+
+    inline void enter_nice()
+    {
+        //do;
         while (InterlockedExchange(&x, 1))
-		{
-			if (NICE)
-				SLEEP(1);
-		}
+			SLEEP(1);
     }
 
 #ifdef DEBUG
@@ -59,7 +61,10 @@ public:
 #ifdef DEBUG
 		if (locked) throw "Already locked";
 #endif
-		cs->enter<NICE>();
+		if (NICE)
+			cs->enter_nice();
+		else
+			cs->enter();
 		locked = true;
 	}
 	void unlock()
