@@ -2530,9 +2530,9 @@ int search()
 #endif
 
 			expansionWriteFinalChunk();
-		}
 
-		memset(ram, 0, STANDARD_BUFFER_SIZE * sizeof(OpenNode) / sizeof(Node) * sizeof(Node)); // prevent bytes from Nodes from becoming junk inside OpenNode padding
+			//input.clearBuffer(); // prevent bytes from Nodes from becoming junk inside OpenNode padding
+		}
 
 		{
 			OutputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup+1), false);
