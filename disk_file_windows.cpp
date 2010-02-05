@@ -249,22 +249,27 @@ class InputStream : virtual public Stream<NODE>
 private:
 	BYTE sectorBuffer[512]; // currently assumes 512 byte sectors; maybe use GetDiskFreeSpace() in the future for increased portability
 	unsigned sectorBufferPos;
-	bool endOfFileReached;
+	unsigned sectorBufferEnd;
 	uint64_t filePosition;
+#ifdef DEBUG
+	char filenameOpened[MAX_PATH];
+#endif
 
 public:
-	InputStream() : sectorBufferPos(0), endOfFileReached(false), filePosition(0) {}
+	InputStream() : sectorBufferPos(0), filePosition(0) {}
 
-	InputStream(const char* filename) : sectorBufferPos(0), endOfFileReached(false), filePosition(0)
+	InputStream(const char* filename) : sectorBufferPos(0), filePosition(0)
 	{
 		open(filename);
 	}
 
 	void open(const char* filename)
 	{
+#ifdef DEBUG
+		strcpy(filenameOpened, filename);
+#endif
 		assert(archive==0);
 		sectorBufferPos = 0;
-		endOfFileReached = false;
 		filePosition = 0;
 		archive = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
@@ -287,14 +292,13 @@ public:
 		li.LowPart = SetFilePointer(archive, li.LowPart, &li.HighPart, FILE_BEGIN);
 		if (li.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
 			windowsError("Seek error");
-		endOfFileReached = false;
 
 		if (sectorBufferPos)
 		{
 			DWORD r;
 			BOOL b = ReadFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
-			if (b && r<sectorBufferPos)
-				endOfFileReached = true;
+			if (b)
+				sectorBufferEnd = r;
 			if (!b || r==0)
 				windowsError(format("Read error %d", GetLastError()));
 		}
@@ -308,18 +312,23 @@ public:
 		char* data = (char*)p;
 		while (bytes < total) // read in 256 KB chunks
 		{
-			if (endOfFileReached)
-				error("Read error, end of file");
 			size_t left = total-bytes;
 			DWORD chunk = left > 256*1024 ? 256*1024 : (DWORD)left;
 			DWORD r = 0;
 			BOOL b;
 			if (sectorBufferPos)
 			{
-				if (chunk > sizeof(sectorBuffer) - sectorBufferPos)
-					chunk = sizeof(sectorBuffer) - sectorBufferPos;
+				if (chunk > sectorBufferEnd - sectorBufferPos)
+				{
+					chunk = sectorBufferEnd - sectorBufferPos;
+					if (chunk == 0)
+					{
+						assert(bytes % sizeof(NODE) == 0, "Unaligned EOF");
+						return bytes / sizeof(NODE);
+					}
+				}
 				memcpy(data + bytes, sectorBuffer + sectorBufferPos, chunk);
-				sectorBufferPos += (WORD)chunk;
+				sectorBufferPos += chunk;
 				if (sectorBufferPos == sizeof(sectorBuffer))
 					sectorBufferPos = 0;
 				filePosition += chunk;
@@ -333,12 +342,12 @@ public:
 				else
 				{
 					b = ReadFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
+					sectorBufferEnd = r;
 					if (b && r!=sizeof(sectorBuffer))
 					{
-						endOfFileReached = true;
 						if (r<chunk)
 						{
-							sectorBufferPos = (WORD)r;
+							sectorBufferPos = r;
 							filePosition += r;
 							memcpy(data + bytes, sectorBuffer, r);
 							bytes += r;
@@ -349,7 +358,7 @@ public:
 					if (!b || r==0)
 						windowsError(format("Read error %d", GetLastError()));
 					memcpy(data + bytes, sectorBuffer, chunk);
-					sectorBufferPos = (WORD)chunk;
+					sectorBufferPos = chunk;
 					filePosition += chunk;
 					return n;
 				}
@@ -357,8 +366,9 @@ public:
 			b = ReadFile(archive, data + bytes, chunk, &r, NULL);
 			if (b && r<chunk)
 			{
-				endOfFileReached = true;
-				sectorBufferPos = (WORD)(r % sizeof(sectorBuffer));
+				sectorBufferEnd = r % sizeof(sectorBuffer);
+				sectorBufferPos = sectorBufferEnd;
+				memcpy(sectorBuffer, data + bytes + r - sectorBufferEnd, sectorBufferEnd);
 				filePosition += r;
 				bytes += r;
 				assert(bytes % sizeof(NODE) == 0, "Unaligned EOF");
