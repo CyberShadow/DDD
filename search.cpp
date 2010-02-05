@@ -1482,7 +1482,8 @@ void dumpExpansionDebug()
 	fputc('\n', expansionDebug);
 	return;*/
 
-	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
+	std::list<expansionBufferRegion>::iterator endy = expansionBufferRegions.end(); --endy;
+	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=endy; i++)
 	{
 		for (unsigned x=0; x<i->length; x++)
 		{
@@ -1529,7 +1530,8 @@ void initExpansion()
 
 	expansionChunks = 0;
 
-	expansionDebug = fopen("debug.log", "wt");
+	expansionDebug = fopen("debug.log", "at");
+	fprintf(expansionDebug, "Frame group %u\n", currentFrameGroup);
 	dumpExpansionDebug();
 }
 
@@ -1550,9 +1552,9 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 		dumpExpansionDebug();
 
 		{
-			std::list<expansionBufferRegion>::iterator before = expansionThreadIter[threadID]; --before;
+			std::list<expansionBufferRegion>::iterator before = expansionThreadIter[threadID];
 			std::list<expansionBufferRegion>::iterator after  = expansionThreadIter[threadID]; ++after;
-			if (before != expansionBufferRegions.begin() && before->type == EXPANSION_BUFFER_REGION_FILLED)
+			if (before != expansionBufferRegions.begin() && (--before)->type == EXPANSION_BUFFER_REGION_FILLED)
 			{
 				if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_FILLED)
 				{
@@ -1648,9 +1650,9 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 
 				lock.lock();
 
-				std::list<expansionBufferRegion>::iterator before = regionToSort; --before;
+				std::list<expansionBufferRegion>::iterator before = regionToSort;
 				std::list<expansionBufferRegion>::iterator after  = regionToSort; ++after;
-				if (before != expansionBufferRegions.begin() && before->type == EXPANSION_BUFFER_REGION_EMPTY)
+				if (before != expansionBufferRegions.begin() && (--before)->type == EXPANSION_BUFFER_REGION_EMPTY)
 				{
 					if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_EMPTY)
 					{
@@ -1695,6 +1697,11 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 			{
 				lock.unlock();
 				SLEEP(16);
+				{
+					SCOPED_LOCK lock(processQueueMutex);
+					if (stopWorkers)
+						return;
+				}
 				lock.lock();
 			}
 		}
