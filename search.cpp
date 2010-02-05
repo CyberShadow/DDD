@@ -1800,7 +1800,7 @@ void mergeExpanded()
 	if (expansionChunks>1)
 	{
 		double outbuf_inbuf_ratio = sqrt(EXPECTED_MERGING_RATIO * expansionChunks);
-		size_t bufferSize = (size_t)floor(RAM_SIZE / ((expansionChunks + outbuf_inbuf_ratio) * sizeof(Node)));
+		size_t bufferSize = (size_t)floor(RAM_SIZE / ((expansionChunks + outbuf_inbuf_ratio) * sizeof(OpenNode)));
 		
 		BufferedInputStream<OpenNode>* chunkInput = new BufferedInputStream<OpenNode>[expansionChunks];
 		for (unsigned i=0; i<expansionChunks; i++)
