@@ -1467,6 +1467,7 @@ struct expansionBufferSortedRegion
 	OpenNode *start, *end;
 };
 std::queue<expansionBufferSortedRegion> expansionBufferRegionsToMerge;
+FILE *expansionDebug;
 
 struct
 {
@@ -1474,10 +1475,34 @@ struct
 	unsigned count;
 } expansionThread[WORKERS];
 
+void dumpExpansionDebug()
+{
+	/*for (unsigned x=0; x<EXPANSION_BUFFER_SLOTS; x++)
+		fputc('!', expansionDebug);
+	fputc('\n', expansionDebug);
+	return;*/
+
+	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
+	{
+		for (unsigned x=0; x<i->length; x++)
+		{
+			switch (i->type)
+			{
+			case EXPANSION_BUFFER_REGION_EMPTY:   fputc('.', expansionDebug); break;
+			case EXPANSION_BUFFER_REGION_FILLING: fputc('_', expansionDebug); break;
+			case EXPANSION_BUFFER_REGION_FILLED:  fputc('#', expansionDebug); break;
+			case EXPANSION_BUFFER_REGION_SORTING: fputc('$', expansionDebug); break;
+			case EXPANSION_BUFFER_REGION_WRITING: fputc('^', expansionDebug); break;
+			}
+		}
+	}
+	fputc('\n', expansionDebug);
+}
+
 void initExpansion()
 {
-	expansionBufferRegions.empty();
-	expansionBufferRegionsToMerge.empty();
+	expansionBufferRegions.clear();
+	expansionBufferRegionsToMerge.c.clear();
 	OpenNode* slot = expansionBuffer;
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 	{
@@ -1503,6 +1528,9 @@ void initExpansion()
 	}
 
 	expansionChunks = 0;
+
+	expansionDebug = fopen("debug.log", "wt");
+	dumpExpansionDebug();
 }
 
 template<class NODE>
@@ -1518,6 +1546,8 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 	if (expansionThread[threadID].count == EXPANSION_QUEUE_SIZE)
 	{
 		SCOPED_LOCK lock(expansionMutex);
+
+		dumpExpansionDebug();
 
 		{
 			std::list<expansionBufferRegion>::iterator before = expansionThreadIter[threadID]; --before;
@@ -1544,6 +1574,8 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 			else
 				expansionThreadIter[threadID]->type = EXPANSION_BUFFER_REGION_FILLED;
 		}
+
+		dumpExpansionDebug();
 
 		while (true)
 		{
@@ -1605,6 +1637,8 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 					expansionBufferRegions.insert(nextRegion, region);
 				}
 
+				dumpExpansionDebug();
+
 				unsigned chunk = expansionChunks++;
 
 				lock.unlock();
@@ -1637,6 +1671,8 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 				}
 				else
 					regionToSort->type = EXPANSION_BUFFER_REGION_EMPTY;
+
+				dumpExpansionDebug();
 			}
 			else
 			if (shortestEmptyLength != EXPANSION_BUFFER_SLOTS+1)
@@ -1652,6 +1688,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 					expansionBufferRegions.erase(shortestEmptyRegion);
 				else
 					shortestEmptyRegion->pos++;
+				dumpExpansionDebug();
 				break;
 			}
 			else
@@ -1671,11 +1708,15 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 
 	sortNextFilledRegion:
 
+		dumpExpansionDebug();
+
 		for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
 		{
 			if (i->type == EXPANSION_BUFFER_REGION_FILLED)
 			{
 				i->type = EXPANSION_BUFFER_REGION_SORTING;
+				dumpExpansionDebug();
+
 				OpenNode* bufferToSort = expansionBuffer + i->pos * EXPANSION_QUEUE_SIZE;
 				size_t count = i->length * EXPANSION_QUEUE_SIZE;
 				
@@ -1690,6 +1731,10 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 				region.start = bufferToSort;
 				region.end   = bufferToSort + count;
 				expansionBufferRegionsToMerge.push(region);
+
+				i->type = EXPANSION_BUFFER_REGION_WRITING;
+				dumpExpansionDebug();
+
 				goto sortNextFilledRegion;
 			}
 		}
@@ -1706,13 +1751,18 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 		{
 			SCOPED_LOCK lock(expansionMutex);
 			expansionBufferRegionsToMerge.push(region);
+
+			expansionThreadIter[threadID]->type = EXPANSION_BUFFER_REGION_WRITING;
+			dumpExpansionDebug();
 		}
 	}
 }
 
 void expansionWriteFinalChunk()
 {
-	expansionBufferRegions.empty();
+	fclose(expansionDebug);
+
+	expansionBufferRegions.clear();
 
 	if (expansionBufferRegionsToMerge.empty())
 		return;
@@ -1735,7 +1785,7 @@ void expansionWriteFinalChunk()
 	expansionChunks++;
 }
 
-void mergedExpanded()
+void mergeExpanded()
 {
 	if (expansionChunks>1)
 	{
@@ -2309,31 +2359,39 @@ int search()
 
 	if (currentFrameGroup == -1)
 	{
-		OpenNode* initialCompressedStates = (OpenNode*)ram;
-		for (int i=0; i<initialStateCount; i++)
-		{
-			initialCompressedStates[i].frame = 0;
-			initialStates[i].compress(&initialCompressedStates[i].getState());
-		}
-		std::sort(initialCompressedStates, initialCompressedStates + initialStateCount);
-		size_t records = deduplicate(initialCompressedStates, initialStateCount);
-
 		currentFrameGroup = 0;
+
 		{
+			OpenNode* initialCompressedStates = (OpenNode*)ram;
+			for (int i=0; i<initialStateCount; i++)
+			{
+				initialCompressedStates[i].frame = 0;
+				initialStates[i].compress(&initialCompressedStates[i].getState());
+			}
+			std::sort(initialCompressedStates, initialCompressedStates + initialStateCount);
+			combinedNodesTotal = deduplicate(initialCompressedStates, initialStateCount);
+
 			OutputStream<OpenNode> output(formatFileName("combining", currentFrameGroup+1), false);
-			output.write(initialCompressedStates, records);
+			output.write(initialCompressedStates, combinedNodesTotal);
 		}
 		{
-			OutputStream<OpenNode> output(formatFileName("closing", currentFrameGroup), false);
-			output.write(initialCompressedStates, records);
+			Node* initialCompressedStates = (Node*)ram;
+			for (int i=0; i<initialStateCount; i++)
+			{
+				initialCompressedStates[i].subframe = 0;
+				initialStates[i].compress(&initialCompressedStates[i].getState());
+			}
+			std::sort(initialCompressedStates, initialCompressedStates + initialStateCount);
+			closedNodesInCurrentFrameGroup = deduplicate(initialCompressedStates, initialStateCount);
+
+			OutputStream<Node> output(formatFileName("closing", currentFrameGroup), false);
+			output.write(initialCompressedStates, closedNodesInCurrentFrameGroup);
 		}
 		renameFile(formatFileName("combining", currentFrameGroup+1), formatFileName("combined", currentFrameGroup+1));
 		renameFile(formatFileName("closing", currentFrameGroup), formatFileName("closed", currentFrameGroup));
 
+		searchPrintHeader();
 		printf("(Starting)   "); fflush(stdout);
-
-		closedNodesInCurrentFrameGroup = records;
-		combinedNodesTotal = records;
 
 		goto skipToExpanding;
 	}
@@ -2487,7 +2545,7 @@ int search()
 	skipToMerging:
 
 		printf("Merging... "); fflush(stdout);
-		mergedExpanded();
+		mergeExpanded();
 
 		deleteFile(formatFileName("expandedcount", currentFrameGroup+1));
 
