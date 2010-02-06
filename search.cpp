@@ -2632,6 +2632,20 @@ int search()
 		renameFile(formatFileName("closing", currentFrameGroup), formatFileName("closed", currentFrameGroup));
 	}
 	else
+	if (fileExists(formatFileName("expanded", currentFrameGroup)))
+	{
+		searchRecalculateNodeCounts();
+
+		searchPrintHeader();
+		searchPrintNodeCounts();
+
+		printf("; (Resuming)                                                 "); fflush(stdout);
+
+		time2 = time0;
+
+		goto skipToCombining;
+	}
+	else
 	if (fileExists(formatFileName("expandedcount", currentFrameGroup)))
 	{
 		searchRecalculateNodeCounts();
@@ -2647,20 +2661,6 @@ int search()
 		time1 = time0;
 
 		goto skipToMerging;
-	}
-	else
-	if (fileExists(formatFileName("expanded", currentFrameGroup)))
-	{
-		searchRecalculateNodeCounts();
-
-		searchPrintHeader();
-		searchPrintNodeCounts();
-
-		printf("; (Resuming)                                                 "); fflush(stdout);
-
-		time2 = time0;
-
-		goto skipToCombining;
 	}
 	else	
 	if (fileExists(formatFileName("closed", currentFrameGroup)))
