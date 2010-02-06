@@ -2763,7 +2763,9 @@ int search()
 		closedNodeFile.close();
 		closedNodeFile.clearBuffer(); // prevent bytes from Nodes from becoming junk inside OpenNode padding
 		renameFile(formatFileName("closing", currentFrameGroup+1), formatFileName("closed", currentFrameGroup+1));
+#ifndef KEEP_PAST_FILES
 		deleteFile(formatFileName("combined", currentFrameGroup));
+#endif
 		renameFile(formatFileName("combining", currentFrameGroup+1), formatFileName("combined", currentFrameGroup+1));
 #ifndef KEEP_PAST_FILES
 		deleteFile(formatFileName("expanded", currentFrameGroup));
