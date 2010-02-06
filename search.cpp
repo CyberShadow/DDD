@@ -2629,7 +2629,7 @@ int search()
 			closedNodesInCurrentFrameGroup = 0;
 			combinedNodesTotal = 0;
 			
-			printf("Filtering... "); fflush(stdout);
+			printf("Combining... "); fflush(stdout);
 
 			const size_t ramBaseSize = RAM_SIZE / (1 + 10) / sizeof(OpenNode);
 
@@ -2660,7 +2660,7 @@ int search()
 		closedNodesInCurrentFrameGroup = 0;
 		combinedNodesTotal = 0;
 		
-		printf("Filtering... "); fflush(stdout);
+		printf("Combining... "); fflush(stdout);
 
 		const size_t ramBaseSize = RAM_SIZE / (1 + 10 + 14 + 18) / sizeof(OpenNode);
 
