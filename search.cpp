@@ -1499,6 +1499,9 @@ void dumpExpansionDebug(THREAD_ID threadID)
 
 	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
 	{
+		if (i->type == EXPANSION_BUFFER_REGION_EMPTY && i->length==0)
+			__debugbreak();
+
 		for (unsigned x=0; x<i->length; x++)
 		{
 			switch (i->type)
@@ -1727,6 +1730,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 					nextRegion->length += oldLength - newLength;
 				}
 				else
+				if (oldLength > newLength)
 				{
 					expansionBufferRegion region;
 					region.pos = regionToSort->pos + newLength;
