@@ -1990,21 +1990,31 @@ void mergeExpanded()
 {
 	if (expansionChunks>1)
 	{
-		double outbuf_inbuf_ratio = sqrt(EXPECTED_MERGING_RATIO * expansionChunks);
-		size_t bufferSize = (size_t)floor(RAM_SIZE / ((expansionChunks + outbuf_inbuf_ratio) * sizeof(OpenNode)));
-		
-		BufferedInputStream<OpenNode>* chunkInput = new BufferedInputStream<OpenNode>[expansionChunks];
-		for (unsigned i=0; i<expansionChunks; i++)
-		{
-			chunkInput[i].setReadBuffer((OpenNode*)ram + i*bufferSize, (uint32_t)bufferSize);
-			chunkInput[i].open(formatFileName("expanded", currentFrameGroup, i));
-		}
 		BufferedOutputStream<OpenNode>* output = new BufferedOutputStream<OpenNode>;
-		output->setWriteBuffer((OpenNode*)ram + expansionChunks*bufferSize, (uint32_t)floor(bufferSize * outbuf_inbuf_ratio));
+		BufferedInputStream<OpenNode>* inputs = new BufferedInputStream<OpenNode>[expansionChunks];
+		
+		double outbuf_inbuf_ratio = sqrt(EXPECTED_MERGING_RATIO * expansionChunks);
+		uint32_t bufferSize = (uint32_t)floor(OPENNODE_BUFFER_SIZE / (expansionChunks + outbuf_inbuf_ratio));
+		
+		if (expansionChunks <= OPENNODE_BUFFER_SIZE && bufferSize && (expansionChunks+1)*bufferSize <= OPENNODE_BUFFER_SIZE)
+		{
+			output->setWriteBuffer((OpenNode*)ram + expansionChunks*bufferSize, OPENNODE_BUFFER_SIZE - expansionChunks*bufferSize);
+			for (unsigned i=0; i<expansionChunks; i++)
+				inputs[i].setReadBuffer((OpenNode*)ram + i*bufferSize, (uint32_t)bufferSize);
+		}
+		else
+			output->setWriteBuffer((OpenNode*)ram, OPENNODE_BUFFER_SIZE);
+
+		for (unsigned i=0; i<expansionChunks; i++)
+			inputs[i].open(formatFileName("expanded", currentFrameGroup, i));
+		
 		output->open(formatFileName("merging", currentFrameGroup));
-		mergeStreams<OpenNode>(chunkInput, expansionChunks, output);
-		delete[] chunkInput;
+
+		mergeStreams<OpenNode>(inputs, expansionChunks, output);
+		
+		delete[] inputs;
 		delete output;
+
 		renameFile(formatFileName("merging", currentFrameGroup), formatFileName("expanded", currentFrameGroup));
 #ifndef KEEP_PAST_FILES
 		for (unsigned i=0; i<expansionChunks; i++)
