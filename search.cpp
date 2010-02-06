@@ -2743,22 +2743,34 @@ int search()
 		
 		printf("Combining..."); fflush(stdout);
 
-		const size_t ramBaseSize = RAM_SIZE / (1 + 10 + 14 + 18) / sizeof(OpenNode);
+		const size_t relativeSizeClosed      = 1;
+		const size_t relativeSizeExpanded    = 10;
+		const size_t relativeSizeCombined    = 14;
+		const size_t relativeSizeCombinedNew = 18;
+		
+		const size_t sizeClosed   =    (OPENNODE_BUFFER_SIZE                                           ) * relativeSizeClosed      / (relativeSizeClosed + relativeSizeExpanded + relativeSizeCombined + relativeSizeCombinedNew) ?
+		                               (OPENNODE_BUFFER_SIZE                                           ) * relativeSizeClosed      / (relativeSizeClosed + relativeSizeExpanded + relativeSizeCombined + relativeSizeCombinedNew) : 1;
+		const size_t sizeExpanded =    (OPENNODE_BUFFER_SIZE - sizeClosed                              ) * relativeSizeExpanded    / (                     relativeSizeExpanded + relativeSizeCombined + relativeSizeCombinedNew) ?
+		                               (OPENNODE_BUFFER_SIZE - sizeClosed                              ) * relativeSizeExpanded    / (                     relativeSizeExpanded + relativeSizeCombined + relativeSizeCombinedNew) : 1;
+		const size_t sizeCombined =    (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded               ) * relativeSizeCombined    / (                                            relativeSizeCombined + relativeSizeCombinedNew) ?
+		                               (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded               ) * relativeSizeCombined    / (                                            relativeSizeCombined + relativeSizeCombinedNew) : 1;
+		const size_t sizeCombinedNew = (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded - sizeCombined) * relativeSizeCombinedNew / (                                                                   relativeSizeCombinedNew) ?
+		                               (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded - sizeCombined) * relativeSizeCombinedNew / (                                                                   relativeSizeCombinedNew) : 1;
 
-		closedNodeFile.setWriteBuffer((Node*)ram, ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node));
+		closedNodeFile.setWriteBuffer((Node*)ram, sizeClosed * sizeof(OpenNode) / sizeof(Node));
 		closedNodeFile.open(formatFileName("closing", currentFrameGroup+1), false);
 
 		{
 			BufferedInputStream<OpenNode> inputs[2];
 			DoubleOutput<OpenNode, ClosedNodeFilterOutput, BufferedOutputStream<OpenNode>> output;
 
-			inputs[1].setReadBuffer((OpenNode*)ram + ramBaseSize*1, ramBaseSize*10);
+			inputs[1].setReadBuffer((OpenNode*)ram + sizeClosed, sizeExpanded);
 			inputs[1].open(formatFileName("expanded", currentFrameGroup));
 
-			inputs[0].setReadBuffer((OpenNode*)ram + ramBaseSize*(1 + 10), ramBaseSize*14);
+			inputs[0].setReadBuffer((OpenNode*)ram + sizeClosed + sizeExpanded, sizeCombined);
 			inputs[0].open(formatFileName("combined", currentFrameGroup));
 
-			output.b()->setWriteBuffer((OpenNode*)ram + ramBaseSize*(1 + 10 + 14), ramBaseSize*18);
+			output.b()->setWriteBuffer((OpenNode*)ram + sizeClosed + sizeExpanded + sizeCombined, sizeCombinedNew);
 			output.b()->open(formatFileName("combining", currentFrameGroup+1), false);
 
 			mergeStreams<OpenNode>(inputs, 2, &output);
