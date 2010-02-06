@@ -1743,7 +1743,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 
 				lock.unlock();
 
-				OutputStream<OpenNode> output(formatFileName("expanded", currentFrameGroup+1, chunk), false);
+				OutputStream<OpenNode> output(formatFileName("expanded", currentFrameGroup, chunk), false);
 				output.write(bufferToSort, count);
 
 				lock.lock();
@@ -1975,7 +1975,7 @@ void expansionWriteFinalChunk()
 	}
 
 	BufferedOutputStream<OpenNode> output(STANDARD_BUFFER_SIZE); // allocate buffer outside of "ram"; reserve "ram" exclusively for expansion
-	output.open(formatFileName("expanded", currentFrameGroup+1, expansionChunks));
+	output.open(formatFileName("expanded", currentFrameGroup, expansionChunks));
 
 	mergeStreams<OpenNode>(inputs, numInputs, &output);
 
@@ -1993,23 +1993,23 @@ void mergeExpanded()
 		for (unsigned i=0; i<expansionChunks; i++)
 		{
 			chunkInput[i].setReadBuffer((OpenNode*)ram + i*bufferSize, (uint32_t)bufferSize);
-			chunkInput[i].open(formatFileName("expanded", currentFrameGroup+1, i));
+			chunkInput[i].open(formatFileName("expanded", currentFrameGroup, i));
 		}
 		BufferedOutputStream<OpenNode>* output = new BufferedOutputStream<OpenNode>;
 		output->setWriteBuffer((OpenNode*)ram + expansionChunks*bufferSize, (uint32_t)floor(bufferSize * outbuf_inbuf_ratio));
-		output->open(formatFileName("merging", currentFrameGroup+1));
+		output->open(formatFileName("merging", currentFrameGroup));
 		mergeStreams<OpenNode>(chunkInput, expansionChunks, output);
 		delete[] chunkInput;
 		delete output;
-		renameFile(formatFileName("merging", currentFrameGroup+1), formatFileName("expanded", currentFrameGroup+1));
+		renameFile(formatFileName("merging", currentFrameGroup), formatFileName("expanded", currentFrameGroup));
 		for (unsigned i=0; i<expansionChunks; i++)
-			deleteFile(formatFileName("expanded", currentFrameGroup+1, i));
+			deleteFile(formatFileName("expanded", currentFrameGroup, i));
 	}
 	else
 	if (expansionChunks)
-		renameFile(formatFileName("expanded", currentFrameGroup+1, 0), formatFileName("expanded", currentFrameGroup+1));
+		renameFile(formatFileName("expanded", currentFrameGroup, 0), formatFileName("expanded", currentFrameGroup));
 	else
-		OutputStream<OpenNode> output(formatFileName("expanded", currentFrameGroup+1), false); // create zero byte file
+		OutputStream<OpenNode> output(formatFileName("expanded", currentFrameGroup), false); // create zero byte file
 
 	expansionChunks = 0;
 }
@@ -2472,7 +2472,7 @@ public:
 	INLINE static void write(const OpenNode* node, bool verify=false)
 	{
 		combinedNodesTotal++;
-		if (node->frame / FRAMES_PER_GROUP == currentFrameGroup)
+		if (node->frame / FRAMES_PER_GROUP == currentFrameGroup+1)
 		{
 			Node cs;
 			(PackedCompressedState&)cs = node->state;
@@ -2489,7 +2489,7 @@ public:
 	INLINE static void write(const OpenNode* node, bool verify=false)
 	{
 		combinedNodesTotal++;
-		if (node->frame / FRAMES_PER_GROUP == currentFrameGroup)
+		if (node->frame / FRAMES_PER_GROUP == currentFrameGroup+1)
 		{
 			Node cs;
 			(PackedCompressedState&)cs = node->state;
@@ -2510,7 +2510,7 @@ void searchPrintHeader()
 
 void searchPrintNodeCounts()
 {
-	printf("%12llu closed, %12llu combined; ", closedNodesInCurrentFrameGroup, combinedNodesTotal);
+	printf("%11llu closed, %12llu combined", closedNodesInCurrentFrameGroup, combinedNodesTotal);
 	fflush(stdout);
 }
 
@@ -2521,7 +2521,7 @@ void searchRecalculateNodeCounts()
 		closedNodesInCurrentFrameGroup = getSize.size();
 	}
 	{
-		InputStream<OpenNode> getSize(formatFileName("combined", currentFrameGroup+1));
+		InputStream<OpenNode> getSize(formatFileName("combined", currentFrameGroup));
 		combinedNodesTotal = getSize.size();
 	}
 }
@@ -2541,17 +2541,16 @@ int search()
 		return EXIT_OK;
 	}
 
-	currentFrameGroup = -1;
-
-	for (FRAME_GROUP g=MAX_FRAME_GROUPS+1; g>=0; g--)
-		if (fileExists(formatFileName("combined", g)))
+	for (currentFrameGroup=MAX_FRAME_GROUPS; currentFrameGroup>=0; currentFrameGroup--)
+		if (fileExists(formatFileName("combined", currentFrameGroup)))
 		{
-			//printf("Resuming from frame" GROUP_STR " " GROUP_FORMAT "\n", g);
-			currentFrameGroup = g;
+			printf("Resuming from frame" GROUP_STR " " GROUP_FORMAT "\n", currentFrameGroup);
 			break;
 	    }
 
 	timeb time0;
+	timeb time1;
+	timeb time2;
 	ftime(&time0);
 
 	if (currentFrameGroup == -1)
@@ -2568,7 +2567,7 @@ int search()
 			std::sort(initialCompressedStates, initialCompressedStates + initialStateCount);
 			combinedNodesTotal = deduplicate(initialCompressedStates, initialStateCount);
 
-			OutputStream<OpenNode> output(formatFileName("combining", currentFrameGroup+1), false);
+			OutputStream<OpenNode> output(formatFileName("combining", currentFrameGroup), false);
 			output.write(initialCompressedStates, combinedNodesTotal);
 		}
 		{
@@ -2584,121 +2583,84 @@ int search()
 			OutputStream<Node> output(formatFileName("closing", currentFrameGroup), false);
 			output.write(initialCompressedStates, closedNodesInCurrentFrameGroup);
 		}
-		renameFile(formatFileName("combining", currentFrameGroup+1), formatFileName("combined", currentFrameGroup+1));
+		renameFile(formatFileName("combining", currentFrameGroup), formatFileName("combined", currentFrameGroup));
 		renameFile(formatFileName("closing", currentFrameGroup), formatFileName("closed", currentFrameGroup));
-
-		searchPrintHeader();
-		printf("(Starting)   "); fflush(stdout);
-
-		goto skipToExpanding;
 	}
 	else
 	if (fileExists(formatFileName("expandedcount", currentFrameGroup)))
 	{
-		currentFrameGroup--;
-		searchPrintHeader();
-
-		printf("(Resuming)   "); fflush(stdout);
-
-		InputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup+1));
-		resumeInfo.read(&expansionChunks, 1);
-
 		searchRecalculateNodeCounts();
+		
+		searchPrintHeader();
 		searchPrintNodeCounts();
 
-		printf("(Resuming)   "); fflush(stdout);
+		printf("; (Resuming)             "); fflush(stdout);
+
+		InputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup));
+		resumeInfo.read(&expansionChunks, 1);
+
+		time1 = time0;
 
 		goto skipToMerging;
 	}
 	else
-	if (!fileExists(formatFileName("expanded", currentFrameGroup)))
+	if (fileExists(formatFileName("expanded", currentFrameGroup)))
 	{
-		currentFrameGroup--;
+		searchRecalculateNodeCounts();
 
-		if (fileExists(formatFileName("closed", currentFrameGroup)))
-		{
-			searchPrintHeader();
-			printf("(Resuming)   "); fflush(stdout);
-			searchRecalculateNodeCounts();
-			goto skipToExpanding;
-		}
-		else
-		{
-			searchPrintHeader();
+		searchPrintHeader();
+		searchPrintNodeCounts();
 
-			closedNodesInCurrentFrameGroup = 0;
-			combinedNodesTotal = 0;
-			
-			printf("Combining... "); fflush(stdout);
+		printf("; (Resuming)                                    "); fflush(stdout);
 
-			const size_t ramBaseSize = RAM_SIZE / (1 + 10) / sizeof(OpenNode);
+		time2 = time0;
 
-			closedNodeFile.setWriteBuffer((Node*)ram, ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node));
-			closedNodeFile.open(formatFileName("closing", currentFrameGroup), false);
-
-			ClosedNodeFilterOutput output;
-
-			BufferedInputStream<OpenNode> input;
-			input.setReadBuffer((OpenNode*)ram + ramBaseSize*1, ramBaseSize*10);
-			input.open(formatFileName("combined", currentFrameGroup+1));
-
-			copyStream<OpenNode>(&input, &output);
-
-			closedNodeFile.flush();
-			closedNodeFile.close();
-			closedNodeFile.clearBuffer(); // prevent bytes from Nodes from becoming junk inside OpenNode padding
-			renameFile(formatFileName("closing", currentFrameGroup), formatFileName("closed", currentFrameGroup));
-
-			goto skipToExpanding;
-		}
+		goto skipToCombining;
 	}
-
-	for (; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
+	else	
+	if (fileExists(formatFileName("closed", currentFrameGroup)))
+	{
+		searchRecalculateNodeCounts();
+	}
+	else
 	{
 		searchPrintHeader();
 
 		closedNodesInCurrentFrameGroup = 0;
 		combinedNodesTotal = 0;
 		
-		printf("Combining... "); fflush(stdout);
+		printf("Extracting..."); fflush(stdout);
 
-		const size_t ramBaseSize = RAM_SIZE / (1 + 10 + 14 + 18) / sizeof(OpenNode);
+		const size_t ramBaseSize = RAM_SIZE / (1 + 10) / sizeof(OpenNode);
 
 		closedNodeFile.setWriteBuffer((Node*)ram, ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node));
 		closedNodeFile.open(formatFileName("closing", currentFrameGroup), false);
 
-		{
-			BufferedInputStream<OpenNode> inputs[2];
-			DoubleOutput<OpenNode, ClosedNodeFilterOutput, BufferedOutputStream<OpenNode>> output;
+		ClosedNodeFilterOutput output;
 
-			inputs[1].setReadBuffer((OpenNode*)ram + ramBaseSize*1, ramBaseSize*10);
-			inputs[1].open(formatFileName("expanded", currentFrameGroup));
+		BufferedInputStream<OpenNode> input;
+		input.setReadBuffer((OpenNode*)ram + ramBaseSize*1, ramBaseSize*10);
+		input.open(formatFileName("combined", currentFrameGroup));
 
-			inputs[0].setReadBuffer((OpenNode*)ram + ramBaseSize*(1 + 10), ramBaseSize*14);
-			inputs[0].open(formatFileName("combined", currentFrameGroup));
+		copyStream<OpenNode>(&input, &output);
 
-			output.b()->setWriteBuffer((OpenNode*)ram + ramBaseSize*(1 + 10 + 14), ramBaseSize*18);
-			output.b()->open(formatFileName("combining", currentFrameGroup+1), false);
-
-			mergeStreams<OpenNode>(inputs, 2, &output);
-		}
-
+		closedNodeFile.flush();
 		closedNodeFile.close();
 		closedNodeFile.clearBuffer(); // prevent bytes from Nodes from becoming junk inside OpenNode padding
 		renameFile(formatFileName("closing", currentFrameGroup), formatFileName("closed", currentFrameGroup));
 
-		deleteFile(formatFileName("combined", currentFrameGroup));
-		renameFile(formatFileName("combining", currentFrameGroup+1), formatFileName("combined", currentFrameGroup+1));
-		deleteFile(formatFileName("expanded", currentFrameGroup));
+		putchar('\n');
+	}
 
-	skipToExpanding:
-
+	for (; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
+	{
+		searchPrintHeader();
 		searchPrintNodeCounts();
 
 		if (checkStop(true))
 			return EXIT_STOP;
 
-		printf("Expanding... "); fflush(stdout);
+		printf("; Expanding..."); fflush(stdout);
 
 		{
 			BufferedInputStream<Node> input(STANDARD_BUFFER_SIZE); // allocate buffer outside of "ram"; reserve "ram" exclusively for expansion
@@ -2722,7 +2684,7 @@ int search()
 		}
 
 		{
-			OutputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup+1), false);
+			OutputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup), false);
 			resumeInfo.write(&expansionChunks, 1);
 		}
 		if (closedNodesInCurrentFrameGroup==0)
@@ -2736,28 +2698,80 @@ int search()
 			return EXIT_OK;
 		}
 
+		ftime(&time1);
+		{
+			time_t ms = (time1.time - time0.time)*1000 + (time1.millitm - time0.millitm);
+			printf("%4d.%03d s", ms/1000, ms%1000);
+		}
+
 		if (checkStop(true))
 			return EXIT_STOP;
 
+		printf("; ");
+
 	skipToMerging:
 
-		printf("Merging... "); fflush(stdout);
+		printf("Merging..."); fflush(stdout);
 		mergeExpanded();
 
-		deleteFile(formatFileName("expandedcount", currentFrameGroup+1));
+		deleteFile(formatFileName("expandedcount", currentFrameGroup));
 
-#if 0
-		printf("Done.\n");
-#else
-		timeb time1;
-		ftime(&time1);
-		time_t ms = (time1.time - time0.time)*1000 + (time1.millitm - time0.millitm);
-		printf("Done in %d.%03d seconds.\n", ms/1000, ms%1000);
-		time0 = time1;
-#endif
+		ftime(&time2);
+		{
+			time_t ms = (time2.time - time1.time)*1000 + (time2.millitm - time1.millitm);
+			printf("%4d.%03d s", ms/1000, ms%1000);
+		}
 
-		if (checkStop())
+		if (checkStop(true))
 			return EXIT_STOP;
+
+		printf("; ");
+
+	skipToCombining:
+
+		closedNodesInCurrentFrameGroup = 0;
+		combinedNodesTotal = 0;
+		
+		printf("Combining..."); fflush(stdout);
+
+		const size_t ramBaseSize = RAM_SIZE / (1 + 10 + 14 + 18) / sizeof(OpenNode);
+
+		closedNodeFile.setWriteBuffer((Node*)ram, ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node));
+		closedNodeFile.open(formatFileName("closing", currentFrameGroup+1), false);
+
+		{
+			BufferedInputStream<OpenNode> inputs[2];
+			DoubleOutput<OpenNode, ClosedNodeFilterOutput, BufferedOutputStream<OpenNode>> output;
+
+			inputs[1].setReadBuffer((OpenNode*)ram + ramBaseSize*1, ramBaseSize*10);
+			inputs[1].open(formatFileName("expanded", currentFrameGroup));
+
+			inputs[0].setReadBuffer((OpenNode*)ram + ramBaseSize*(1 + 10), ramBaseSize*14);
+			inputs[0].open(formatFileName("combined", currentFrameGroup));
+
+			output.b()->setWriteBuffer((OpenNode*)ram + ramBaseSize*(1 + 10 + 14), ramBaseSize*18);
+			output.b()->open(formatFileName("combining", currentFrameGroup+1), false);
+
+			mergeStreams<OpenNode>(inputs, 2, &output);
+		}
+
+		closedNodeFile.close();
+		closedNodeFile.clearBuffer(); // prevent bytes from Nodes from becoming junk inside OpenNode padding
+		renameFile(formatFileName("closing", currentFrameGroup+1), formatFileName("closed", currentFrameGroup+1));
+		deleteFile(formatFileName("combined", currentFrameGroup));
+		renameFile(formatFileName("combining", currentFrameGroup+1), formatFileName("combined", currentFrameGroup+1));
+		deleteFile(formatFileName("expanded", currentFrameGroup));
+
+		timeb time3;
+		ftime(&time3);
+		{
+			time_t ms       = (time3.time - time2.time)*1000 + (time3.millitm - time2.millitm);
+			time_t ms_total = (time3.time - time0.time)*1000 + (time3.millitm - time0.millitm);
+			printf("%4d.%03d s (%4d.%03d s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000);
+		}
+		time0 = time3;
+
+		putchar('\n');
 	}
 	
 	printf("Exit not found.\n");
