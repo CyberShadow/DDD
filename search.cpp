@@ -1473,7 +1473,6 @@ struct expansionBufferSortedRegion
 	OpenNode *start, *end;
 };
 std::queue<expansionBufferSortedRegion> expansionBufferRegionsToMerge;
-#define DEBUG_EXPANSION
 #ifdef DEBUG_EXPANSION
 FILE *expansionDebug;
 #endif
