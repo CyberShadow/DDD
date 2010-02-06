@@ -1440,8 +1440,8 @@ uint64_t combinedNodesTotal;
 
 BufferedOutputStream<Node> closedNodeFile;
 
-#define EXPANSION_BUFFER_SLOTS (RAM_SIZE / sizeof(OpenNode) / EXPANSION_QUEUE_SIZE)
-#define EXPANSION_BUFFER_SIZE (EXPANSION_BUFFER_SLOTS * EXPANSION_QUEUE_SIZE)
+#define EXPANSION_BUFFER_SLOTS (RAM_SIZE / sizeof(OpenNode) / EXPANSION_NODES_PER_QUEUE_ELEMENT)
+#define EXPANSION_BUFFER_SIZE (EXPANSION_BUFFER_SLOTS * EXPANSION_NODES_PER_QUEUE_ELEMENT)
 #define EXPANSION_BUFFER_FILL_THRESHOLD ((unsigned)(EXPANSION_BUFFER_SLOTS * EXPANSION_BUFFER_FILL_RATIO))
 
 OpenNode* const expansionBuffer    = (OpenNode*)ram;
@@ -1452,11 +1452,13 @@ unsigned expansionChunks;
 enum expansionBufferRegionType
 {
 	EXPANSION_BUFFER_REGION_EMPTY,
-	EXPANSION_BUFFER_REGION_FILLING,
-	EXPANSION_BUFFER_REGION_FILLED,
-//	EXPANSION_BUFFER_REGION_FILLED+1 is an FILLED   which has been divided by multiplying it by (WORKERS-1)/(WORKERS  )
-//	EXPANSION_BUFFER_REGION_FILLED+2 is an FILLED+1 which has been divided by multiplying it by (WORKERS-2)/(WORKERS-1)
-//	EXPANSION_BUFFER_REGION_FILLED+3 is an FILLED+2 which has been divided by multiplying it by (WORKERS-3)/(WORKERS-2) etc...
+	EXPANSION_BUFFER_REGION_FILLING,  // threadID==0
+//	EXPANSION_BUFFER_REGION_FILLING+1 is threadID==1
+//	EXPANSION_BUFFER_REGION_FILLING+2 is threadID==2, etc...
+	EXPANSION_BUFFER_REGION_FILLED = EXPANSION_BUFFER_REGION_FILLING + WORKERS,
+//	EXPANSION_BUFFER_REGION_FILLED+1 is a FILLED   which has been divided by multiplying it by (WORKERS-1)/(WORKERS  )
+//	EXPANSION_BUFFER_REGION_FILLED+2 is a FILLED+1 which has been divided by multiplying it by (WORKERS-2)/(WORKERS-1)
+//	EXPANSION_BUFFER_REGION_FILLED+3 is a FILLED+2 which has been divided by multiplying it by (WORKERS-3)/(WORKERS-2) etc...
 	EXPANSION_BUFFER_REGION_SORTING = EXPANSION_BUFFER_REGION_FILLED + WORKERS,
 	EXPANSION_BUFFER_REGION_WRITING,
 	EXPANSION_BUFFER_REGION_MERGING,
@@ -1480,7 +1482,8 @@ FILE *expansionDebug;
 struct
 {
 	OpenNode* buffer;
-	unsigned count;
+	int count;
+	int increment;
 } expansionThread[WORKERS];
 
 #ifdef DEBUG_EXPANSION
@@ -1501,9 +1504,15 @@ void dumpExpansionDebug(THREAD_ID threadID)
 			switch (i->type)
 			{
 			case EXPANSION_BUFFER_REGION_EMPTY:   fputc('.', expansionDebug); break;
-			case EXPANSION_BUFFER_REGION_FILLING: fputc('_', expansionDebug); break;
 			case EXPANSION_BUFFER_REGION_FILLED:  fputc('#', expansionDebug); break;
-			default:                              fputc((x==0?'A':'a')+i->type-EXPANSION_BUFFER_REGION_FILLED, expansionDebug); break;
+			default:
+				if (INRANGEX(i->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLING+WORKERS))
+				{
+					fputc('1'+i->type-EXPANSION_BUFFER_REGION_FILLING, expansionDebug);
+					break;
+				}
+				fputc((x==0?'A':'a')+i->type-EXPANSION_BUFFER_REGION_FILLED, expansionDebug);
+				break;
 			case EXPANSION_BUFFER_REGION_SORTING: fputc(x==0?'S':'s', expansionDebug); break;
 			case EXPANSION_BUFFER_REGION_WRITING: fputc(x==0?'W':'w', expansionDebug); break;
 			case EXPANSION_BUFFER_REGION_MERGING: fputc(x==0?'M':'m', expansionDebug); break;
@@ -1523,13 +1532,14 @@ void initExpansion()
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 	{
 		expansionThread[threadID].buffer = slot;
-		slot += EXPANSION_QUEUE_SIZE;
+		slot += EXPANSION_NODES_PER_QUEUE_ELEMENT;
 		expansionThread[threadID].count = 0;
+		expansionThread[threadID].increment = +1;
 
 		expansionBufferRegion region;
 		region.pos = (unsigned)threadID;
 		region.length = 1;
-		region.type = EXPANSION_BUFFER_REGION_FILLING;
+		region.type = (expansionBufferRegionType)(EXPANSION_BUFFER_REGION_FILLING + threadID);
 		expansionBufferRegions.push_back(region);
 		expansionThreadIter[threadID] = expansionBufferRegions.end();
 		expansionThreadIter[threadID]--;
@@ -1560,8 +1570,8 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 
 	expansionThread[threadID].buffer[expansionThread[threadID].count].state = *state;
 	expansionThread[threadID].buffer[expansionThread[threadID].count].frame = (PACKED_FRAME)frame;
-	expansionThread[threadID].count++;
-	if (expansionThread[threadID].count == EXPANSION_QUEUE_SIZE)
+	expansionThread[threadID].count += expansionThread[threadID].increment;
+	if (expansionThread[threadID].count == (expansionThread[threadID].increment<0 ? -1 : EXPANSION_NODES_PER_QUEUE_ELEMENT))
 	{
 		SCOPED_LOCK lock(expansionMutex);
 
@@ -1569,7 +1579,6 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 		dumpExpansionDebug(threadID);
 #endif
 
-		expansionThread[threadID].count = 0;
 		{
 			std::list<expansionBufferRegion>::iterator before = expansionThreadIter[threadID];
 			std::list<expansionBufferRegion>::iterator after  = expansionThreadIter[threadID]; ++after;
@@ -1693,8 +1702,8 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 				*/
 
 				regionToSort->type = EXPANSION_BUFFER_REGION_SORTING;
-				OpenNode *bufferToSort = expansionBuffer + regionToSort->pos * EXPANSION_QUEUE_SIZE;
-				size_t count = regionToSort->length * EXPANSION_QUEUE_SIZE;
+				OpenNode *bufferToSort = expansionBuffer + regionToSort->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+				size_t count = regionToSort->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 				
 #ifdef DEBUG_EXPANSION
 				dumpExpansionDebug(threadID);
@@ -1708,7 +1717,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 				lock.lock();
 
 				unsigned oldLength = regionToSort->length;
-				unsigned newLength = (unsigned)((count + EXPANSION_QUEUE_SIZE-1) / EXPANSION_QUEUE_SIZE);
+				unsigned newLength = (unsigned)((count + EXPANSION_NODES_PER_QUEUE_ELEMENT-1) / EXPANSION_NODES_PER_QUEUE_ELEMENT);
 				regionToSort->length = newLength;
 				regionToSort->type = EXPANSION_BUFFER_REGION_WRITING;
 				std::list<expansionBufferRegion>::iterator nextRegion = regionToSort; ++nextRegion;
@@ -1773,7 +1782,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 			{
 				expansionBufferRegion region;
 				region.length = 1;
-				region.type = EXPANSION_BUFFER_REGION_FILLING;
+				region.type = (expansionBufferRegionType)(EXPANSION_BUFFER_REGION_FILLING + threadID);
 				if (fillRightFlank)
 				{
 					region.pos = bestRegionToFill->pos + bestRegionToFill->length - 1;
@@ -1781,6 +1790,9 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 					expansionThreadIter[threadID] = expansionBufferRegions.insert(++insert, region);
 					if (--bestRegionToFill->length == 0)
 						expansionBufferRegions.erase(bestRegionToFill);
+
+					expansionThread[threadID].count = EXPANSION_NODES_PER_QUEUE_ELEMENT-1;
+					expansionThread[threadID].increment = -1;
 				}
 				else
 				{
@@ -1790,8 +1802,11 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 						expansionBufferRegions.erase(bestRegionToFill);
 					else
 						bestRegionToFill->pos++;
+
+					expansionThread[threadID].count = 0;
+					expansionThread[threadID].increment = +1;
 				}
-				expansionThread[threadID].buffer = expansionBuffer + region.pos * EXPANSION_QUEUE_SIZE;
+				expansionThread[threadID].buffer = expansionBuffer + region.pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 #ifdef DEBUG_EXPANSION
 				dumpExpansionDebug(threadID);
 #endif
@@ -1814,83 +1829,125 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 
 void expansionSortFinalRegions(THREAD_ID threadID)
 {
+	SCOPED_LOCK lock(expansionMutex);
+
+sortNextFilledRegion:
+
+#ifdef DEBUG_EXPANSION
+	dumpExpansionDebug(threadID);
+#endif
+
+	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
 	{
-		SCOPED_LOCK lock(expansionMutex);
+		if (!INRANGEX(i->type, EXPANSION_BUFFER_REGION_FILLED, EXPANSION_BUFFER_REGION_FILLED+WORKERS))
+			continue;
 
-	sortNextFilledRegion:
+		size_t bufferOffset = 0;
+		fpos_t countOffset = 0;
 
+		if (i->type != EXPANSION_BUFFER_REGION_FILLED+WORKERS-1)
+		{
+			unsigned oldLength = i->length;
+			unsigned denominator = EXPANSION_BUFFER_REGION_FILLED+WORKERS - i->type;
+			i->length = (i->length + denominator-1) / denominator;
+			expansionBufferRegion region;
+			region.pos = i->pos + i->length;
+			region.length = oldLength - i->length;
+			region.type = (expansionBufferRegionType)(i->type + 1);
+			std::list<expansionBufferRegion>::iterator insert = i;
+			expansionBufferRegions.insert(++insert, region);
+		}
+		else
+		{
+			std::list<expansionBufferRegion>::iterator after = i; ++after;
+			if (after != expansionBufferRegions.end() && INRANGEX(after->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLING+WORKERS))
+			{
+				THREAD_ID threadID = after->type - EXPANSION_BUFFER_REGION_FILLING;
+				if (expansionThread[threadID].increment == +1)
+				{
+					after->length = 0;
+					i->length++;
+
+					countOffset = expansionThread[threadID].count - EXPANSION_NODES_PER_QUEUE_ELEMENT;
+				}
+			}
+		}
+		if (i->type == EXPANSION_BUFFER_REGION_FILLED)
+		{
+			std::list<expansionBufferRegion>::iterator before = i;
+			if (before != expansionBufferRegions.begin() && INRANGEX((--before)->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLING+WORKERS))
+			{
+				THREAD_ID threadID = before->type - EXPANSION_BUFFER_REGION_FILLING;
+				if (expansionThread[threadID].increment == -1)
+				{
+					before->length = 0;
+					i->pos--;
+					i->length++;
+
+					bufferOffset = EXPANSION_NODES_PER_QUEUE_ELEMENT - expansionThread[threadID].count;
+					countOffset -= bufferOffset;
+				}
+			}
+		}
+
+		i->type = EXPANSION_BUFFER_REGION_SORTING;
 #ifdef DEBUG_EXPANSION
 		dumpExpansionDebug(threadID);
 #endif
 
-		for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
-		{
-			if (!INRANGEX(i->type, EXPANSION_BUFFER_REGION_FILLED, EXPANSION_BUFFER_REGION_FILLED+WORKERS))
-				continue;
+		OpenNode* bufferToSort = expansionBuffer + i->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT + bufferOffset;
+		size_t count = i->length * EXPANSION_NODES_PER_QUEUE_ELEMENT + countOffset;
+		
+		lock.unlock();
 
-			if (i->type != EXPANSION_BUFFER_REGION_FILLED+WORKERS-1)
-			{
-				unsigned oldLength = i->length;
-				unsigned denominator = EXPANSION_BUFFER_REGION_FILLED+WORKERS - i->type;
-				i->length = (i->length + denominator-1) / denominator;
-				expansionBufferRegion region;
-				region.pos = i->pos + i->length;
-				region.length = oldLength - i->length;
-				region.type = (expansionBufferRegionType)(i->type + 1);
-				std::list<expansionBufferRegion>::iterator insert = i;
-				expansionBufferRegions.insert(++insert, region);
-			}
+		std::sort(bufferToSort, bufferToSort + count);
+		//count = deduplicate(bufferToSort, count);
 
-			i->type = EXPANSION_BUFFER_REGION_SORTING;
+		lock.lock();
+
+		expansionBufferSortedRegion region;
+		region.start = bufferToSort;
+		region.end   = bufferToSort + count;
+		expansionBufferRegionsToMerge.push(region);
+
 #ifdef DEBUG_EXPANSION
+		i->type = EXPANSION_BUFFER_REGION_MERGING;
+		dumpExpansionDebug(threadID);
+#endif
+
+		goto sortNextFilledRegion;
+	}
+
+	if (expansionThreadIter[threadID]->length)
+	{
+		if (expansionThread[threadID].count)
+		{
+#ifdef DEBUG_EXPANSION
+			expansionThreadIter[threadID]->type = EXPANSION_BUFFER_REGION_SORTING;
 			dumpExpansionDebug(threadID);
 #endif
 
-			OpenNode* bufferToSort = expansionBuffer + i->pos * EXPANSION_QUEUE_SIZE;
-			size_t count = i->length * EXPANSION_QUEUE_SIZE;
-			
 			lock.unlock();
 
-			std::sort(bufferToSort, bufferToSort + count);
-			count = deduplicate(bufferToSort, count);
+			std::sort(expansionThread[threadID].buffer, expansionThread[threadID].buffer + expansionThread[threadID].count);
+			//size_t count = deduplicate(expansionThread[threadID].buffer, expansionThread[threadID].count);
+			size_t count = expansionThread[threadID].count;
+			
+			expansionBufferSortedRegion region;
+			region.start = expansionThread[threadID].buffer;
+			region.end = expansionThread[threadID].buffer + count;
 
 			lock.lock();
 
-			expansionBufferSortedRegion region;
-			region.start = bufferToSort;
-			region.end   = bufferToSort + count;
 			expansionBufferRegionsToMerge.push(region);
-
-			i->type = EXPANSION_BUFFER_REGION_MERGING;
 #ifdef DEBUG_EXPANSION
-			dumpExpansionDebug(threadID);
-#endif
-
-			goto sortNextFilledRegion;
-		}
-	}
-
-	// TODO: combine EXPANSION_BUFFER_REGION_FILLING with EXPANSION_BUFFER_REGION_FILLED during sort/dedup instead of expansionWriteFinalChunk()
-
-	if (expansionThread[threadID].count)
-	{
-#ifdef DEBUG_EXPANSION
-		expansionThreadIter[threadID]->type = EXPANSION_BUFFER_REGION_SORTING;
-		dumpExpansionDebug(threadID);
-#endif
-		std::sort(expansionThread[threadID].buffer, expansionThread[threadID].buffer + expansionThread[threadID].count);
-		size_t count = deduplicate(expansionThread[threadID].buffer, expansionThread[threadID].count);
-		
-		expansionBufferSortedRegion region;
-		region.start = expansionThread[threadID].buffer;
-		region.end = expansionThread[threadID].buffer + count;
-		{
-			SCOPED_LOCK lock(expansionMutex);
-			expansionBufferRegionsToMerge.push(region);
-
 			expansionThreadIter[threadID]->type = EXPANSION_BUFFER_REGION_MERGING;
+#endif
+		}
+		else
+		{
 #ifdef DEBUG_EXPANSION
-			dumpExpansionDebug(threadID);
+			expansionThreadIter[threadID]->type = EXPANSION_BUFFER_REGION_EMPTY;
 #endif
 		}
 	}
@@ -1899,6 +1956,7 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 void expansionWriteFinalChunk()
 {
 #ifdef DEBUG_EXPANSION
+	dumpExpansionDebug(0);
 	fclose(expansionDebug);
 #endif
 
