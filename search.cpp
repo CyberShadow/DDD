@@ -2002,8 +2002,10 @@ void mergeExpanded()
 		delete[] chunkInput;
 		delete output;
 		renameFile(formatFileName("merging", currentFrameGroup), formatFileName("expanded", currentFrameGroup));
+#ifndef KEEP_PAST_FILES
 		for (unsigned i=0; i<expansionChunks; i++)
 			deleteFile(formatFileName("expanded", currentFrameGroup, i));
+#endif
 	}
 	else
 	if (expansionChunks)
@@ -2714,7 +2716,9 @@ int search()
 		printf("Merging..."); fflush(stdout);
 		mergeExpanded();
 
+#ifndef KEEP_PAST_FILES
 		deleteFile(formatFileName("expandedcount", currentFrameGroup));
+#endif
 
 		ftime(&time2);
 		{
@@ -2761,7 +2765,9 @@ int search()
 		renameFile(formatFileName("closing", currentFrameGroup+1), formatFileName("closed", currentFrameGroup+1));
 		deleteFile(formatFileName("combined", currentFrameGroup));
 		renameFile(formatFileName("combining", currentFrameGroup+1), formatFileName("combined", currentFrameGroup+1));
+#ifndef KEEP_PAST_FILES
 		deleteFile(formatFileName("expanded", currentFrameGroup));
+#endif
 
 		timeb time3;
 		ftime(&time3);
