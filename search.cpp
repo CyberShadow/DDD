@@ -2697,10 +2697,13 @@ int search()
 		putchar('\n');
 	}
 
-	for (; currentFrameGroup<maxFrameGroups; currentFrameGroup++)
+	for (;; currentFrameGroup++)
 	{
 		searchPrintHeader();
 		searchPrintNodeCounts();
+
+		if (currentFrameGroup >= maxFrameGroups)
+			break;
 
 		if (checkStop(true))
 			return EXIT_STOP;
