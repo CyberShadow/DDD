@@ -1922,8 +1922,8 @@ sortNextFilledRegion:
 	{
 		if (expansionThread[threadID].count)
 		{
-#ifdef DEBUG_EXPANSION
 			expansionThreadIter[threadID]->type = EXPANSION_BUFFER_REGION_SORTING;
+#ifdef DEBUG_EXPANSION
 			dumpExpansionDebug(threadID);
 #endif
 
