@@ -2503,14 +2503,13 @@ public:
 
 void searchPrintHeader()
 {
-	printTime();
 	printf("Frame" GROUP_STR " " GROUP_ALIGNED_FORMAT "/" GROUP_ALIGNED_FORMAT ": ", currentFrameGroup, maxFrameGroups);
 	fflush(stdout);
 }
 
 void searchPrintNodeCounts()
 {
-	printf("%11llu closed, %12llu combined", closedNodesInCurrentFrameGroup, combinedNodesTotal);
+	printf("%11llu nodes, %12llu total", closedNodesInCurrentFrameGroup, combinedNodesTotal);
 	fflush(stdout);
 }
 
@@ -2544,6 +2543,7 @@ int search()
 	for (currentFrameGroup=MAX_FRAME_GROUPS; currentFrameGroup>=0; currentFrameGroup--)
 		if (fileExists(formatFileName("combined", currentFrameGroup)))
 		{
+			printTime();
 			printf("Resuming from frame" GROUP_STR " " GROUP_FORMAT "\n", currentFrameGroup);
 			break;
 	    }
@@ -2611,7 +2611,7 @@ int search()
 		searchPrintHeader();
 		searchPrintNodeCounts();
 
-		printf("; (Resuming)                                    "); fflush(stdout);
+		printf("; (Resuming)                                                 "); fflush(stdout);
 
 		time2 = time0;
 
@@ -2718,8 +2718,9 @@ int search()
 
 		ftime(&time2);
 		{
-			time_t ms = (time2.time - time1.time)*1000 + (time2.millitm - time1.millitm);
-			printf("%4d.%03d s", ms/1000, ms%1000);
+			time_t ms       = (time2.time - time1.time)*1000 + (time2.millitm - time1.millitm);
+			time_t ms_total = (time2.time - time0.time)*1000 + (time2.millitm - time0.millitm);
+			printf("%4d.%03d s (%4d.%03d s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000);
 		}
 
 		if (checkStop(true))
