@@ -1587,10 +1587,6 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 	{
 		SCOPED_LOCK lock(expansionMutex);
 
-#ifdef DEBUG_EXPANSION
-		dumpExpansionDebug(threadID);
-#endif
-
 		{
 			std::list<expansionBufferRegion>::iterator before = expansionThreadIter[threadID];
 			std::list<expansionBufferRegion>::iterator after  = expansionThreadIter[threadID]; ++after;
@@ -1870,10 +1866,6 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 
 sortNextFilledRegion:
 
-#ifdef DEBUG_EXPANSION
-	dumpExpansionDebug(threadID);
-#endif
-
 	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
 	{
 		if (!INRANGEX(i->type, EXPANSION_BUFFER_REGION_FILLED, EXPANSION_BUFFER_REGION_FILLED+WORKERS))
@@ -1963,9 +1955,6 @@ sortNextFilledRegion:
 		{
 			expansionThreadIter[threadID]->type = EXPANSION_BUFFER_REGION_SORTING;
 			// this is such a small sort, that it should not be counted towards numSortsInProgress
-#ifdef DEBUG_EXPANSION
-			dumpExpansionDebug(threadID);
-#endif
 
 			lock.unlock();
 
