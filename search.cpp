@@ -1475,6 +1475,7 @@ struct expansionBufferSortedRegion
 	OpenNode *start, *end;
 };
 std::queue<expansionBufferSortedRegion> expansionBufferRegionsToMerge;
+unsigned numSortsInProgress;
 bool expansionThreadFinalized[WORKERS];
 #ifdef DEBUG_EXPANSION
 FILE *expansionDebug;
@@ -1535,6 +1536,7 @@ void initExpansion()
 	OpenNode* slot = expansionBuffer;
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 	{
+		numSortsInProgress = 0;
 		expansionThreadFinalized[threadID] = false;
 
 		expansionThread[threadID].buffer = slot;
@@ -1727,6 +1729,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 				}
 				*/
 
+				numSortsInProgress++;
 				regionToSort->type = EXPANSION_BUFFER_REGION_SORTING;
 				OpenNode *bufferToSort = expansionBuffer + regionToSort->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 				size_t count = regionToSort->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
@@ -1761,6 +1764,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 					region.type = EXPANSION_BUFFER_REGION_EMPTY;
 					expansionBufferRegions.insert(nextRegion, region);
 				}
+				numSortsInProgress--;
 
 #ifdef DEBUG_EXPANSION
 				dumpExpansionDebug(threadID);
@@ -1871,10 +1875,12 @@ sortNextFilledRegion:
 		if (!INRANGEX(i->type, EXPANSION_BUFFER_REGION_FILLED, EXPANSION_BUFFER_REGION_FILLED+WORKERS))
 			continue;
 
+		numSortsInProgress++;
+
 		size_t bufferOffset = 0;
 		fpos_t countOffset = 0;
 
-		if (i->type != EXPANSION_BUFFER_REGION_FILLED+WORKERS-1)
+		if (i->type != EXPANSION_BUFFER_REGION_FILLED+WORKERS-1 && numSortsInProgress < WORKERS)
 		{
 			unsigned oldLength = i->length;
 			unsigned denominator = EXPANSION_BUFFER_REGION_FILLED+WORKERS - i->type;
@@ -1930,7 +1936,6 @@ sortNextFilledRegion:
 		lock.unlock();
 
 		std::sort(bufferToSort, bufferToSort + count);
-		//count = deduplicate(bufferToSort, count);
 
 		lock.lock();
 
@@ -1938,6 +1943,7 @@ sortNextFilledRegion:
 		region.start = bufferToSort;
 		region.end   = bufferToSort + count;
 		expansionBufferRegionsToMerge.push(region);
+		numSortsInProgress--;
 
 #ifdef DEBUG_EXPANSION
 		i->type = EXPANSION_BUFFER_REGION_MERGING;
@@ -1952,6 +1958,7 @@ sortNextFilledRegion:
 		if (expansionThread[threadID].count)
 		{
 			expansionThreadIter[threadID]->type = EXPANSION_BUFFER_REGION_SORTING;
+			// this is such a small sort, that it should not be counted towards numSortsInProgress
 #ifdef DEBUG_EXPANSION
 			dumpExpansionDebug(threadID);
 #endif
