@@ -3078,9 +3078,9 @@ int dump(FRAME_GROUP g)
 
 // *********************************************** Sample ***********************************************
 
-int sample(FRAME_GROUP g)
+int sample(FRAME_GROUP g, unsigned count)
 {
-	printf("Sampling frame" GROUP_STR " " GROUP_FORMAT ":\n", g);
+	printf("Sampling frame" GROUP_STR " " GROUP_FORMAT " %u times:\n", g, count);
 	const char* fn = formatFileName("closed", g);
 	if (!fileExists(fn))
 		fn = formatFileName("open", g);
@@ -3089,15 +3089,18 @@ int sample(FRAME_GROUP g)
 	
 	InputStream<Node> in(fn);
 	srand((unsigned)time(NULL));
-	in.seek(((uint64_t)rand() + ((uint64_t)rand()<<32)) % in.size());
-	Node cs;
-	in.read(&cs, 1);
+	for (unsigned i=0; i<count; i++)
+	{
+		in.seek(((uint64_t)rand() + ((uint64_t)rand()<<32)) % in.size());
+		Node cs;
+		in.read(&cs, 1);
 #ifdef GROUP_FRAMES
-	printf("Frame %u:\n", GET_FRAME(g, cs));
+		printf("Frame %u:\n", GET_FRAME(g, cs));
 #endif
-	State s;
-	s.decompress(&cs.getState());
-	puts(s.toString());
+		State s;
+		s.decompress(&cs.getState());
+		puts(s.toString());
+	}
 	return EXIT_OK;
 }
 
@@ -3926,8 +3929,8 @@ int run(int argc, const char* argv[])
 	else
 	if (argc>1 && strcmp(argv[1], "sample")==0)
 	{
-		enforce(argc==3, "Specify a frame"GROUP_STR" to sample");
-		return sample(parseInt(argv[2]));
+		enforce(argc==4, "Specify a frame"GROUP_STR" to sample and a number of samples");
+		return sample(parseInt(argv[2]), parseInt(argv[3]));
 	}
 	else
 	if (argc>1 && strcmp(argv[1], "compare")==0)
