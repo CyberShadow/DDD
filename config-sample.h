@@ -7,9 +7,12 @@
 // Add problem settings (such as level to solve) here.
 //#define POWER_LEVEL 9001
 
+// Use this in combination with DISK_WINFILES to achieve more efficient disk I/O when the data set has gotten very large (however, this is slower with small data sets)
+//#define USE_UNBUFFERED_DISK_IO
+
 // MULTITHREADING will enable threading and synchronization code.
 #define MULTITHREADING
-#define THREADS 6
+#define THREADS (1+4)
 
 // THREAD_* defines how will threads be created.
 #define THREAD_BOOST
@@ -26,13 +29,14 @@
 
 // How many bytes to use for file stream buffers?
 #define STANDARD_BUFFER_SIZE (  1*1024*1024 / sizeof(Node)) // allocated separately in heap - used for open node files and other files
-#define ALL_FILE_BUFFER_SIZE ( 64*1024*1024 / sizeof(Node)) // for USE_ALL: taken twice from RAM_SIZE (the rest is used for the cache)
 
 // The expected ratio of Merging output/input
-#define EXPECTED_MERGING_RATIO 0.6
+#define EXPECTED_MERGING_RATIO 0.999
 
-// How many nodes to group under a single hash in the cache? Higher values reduce speed but may allow better distribution.
-#define NODES_PER_HASH 1
+// The parameters for the multithreaded Expansion queue/scheduler
+//#define DEBUG_EXPANSION
+#define EXPANSION_NODES_PER_QUEUE_ELEMENT 0x400
+#define EXPANSION_BUFFER_FILL_RATIO (1./WORKERS)
 
 // DISK_* selects the back-end storage to be used for the node disk files.
 #define DISK_WINFILES
@@ -43,11 +47,3 @@
 #ifdef DEBUG
 #define NO_DISK_FLUSH
 #endif
-
-// Keep a file with all nodes to filter against, instead of filtering against each individual frame. 
-// The "all" file contains the sorted contents of all "closed" nodes, and needs to be rewritten every frame/frame-group.
-// Enable USE_ALL to use less RAM/CPU and to optimize for sequential disk I/O. Disable USE_ALL if random disk access is very fast.
-#define USE_ALL
-
-// When free disk space falls below this amount, try to free up space by filtering open node files. If not defined, free space is not checked.
-//#define FREE_SPACE_THRESHOLD (50LL*1024*1024*1024)
