@@ -2657,7 +2657,7 @@ int search()
 		searchPrintHeader();
 		searchPrintNodeCounts();
 
-		printf("; (Resuming)             "); fflush(stdout);
+		printf("; (Resuming)              "); fflush(stdout);
 
 		InputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup));
 		resumeInfo.read(&expansionChunks, 1);
