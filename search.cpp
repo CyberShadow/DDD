@@ -1969,7 +1969,7 @@ sortNextFilledRegion:
 			if (expansionThread[threadID].increment < 0)
 			{
 				buffer += expansionThread[threadID].i + 1;
-				count = EXPANSION_NODES_PER_QUEUE_ELEMENT-1 - count;
+				count = EXPANSION_NODES_PER_QUEUE_ELEMENT-1 - expansionThread[threadID].i;
 			}
 
 			std::sort(buffer, buffer + count);
