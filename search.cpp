@@ -2686,15 +2686,21 @@ int search()
 		
 		printf("Extracting..."); fflush(stdout);
 
-		const size_t ramBaseSize = RAM_SIZE / (1 + 10) / sizeof(OpenNode);
+		const size_t relativeSizeClosed      = 1;
+		const size_t relativeSizeExpanded    = 10;
+		
+		const size_t sizeClosed   = (OPENNODE_BUFFER_SIZE             ) * relativeSizeClosed   / (relativeSizeClosed + relativeSizeExpanded) ?
+		                            (OPENNODE_BUFFER_SIZE             ) * relativeSizeClosed   / (relativeSizeClosed + relativeSizeExpanded) : 1;
+		const size_t sizeExpanded = (OPENNODE_BUFFER_SIZE - sizeClosed) * relativeSizeExpanded / (                     relativeSizeExpanded) ?
+		                            (OPENNODE_BUFFER_SIZE - sizeClosed) * relativeSizeExpanded / (                     relativeSizeExpanded) : 1;
 
-		closedNodeFile.setWriteBuffer((Node*)ram, ramBaseSize*1 * sizeof(OpenNode) / sizeof(Node));
+		closedNodeFile.setWriteBuffer((Node*)ram, sizeClosed * sizeof(OpenNode) / sizeof(Node));
 		closedNodeFile.open(formatFileName("closing", currentFrameGroup), false);
 
 		ClosedNodeFilterOutput output;
 
 		BufferedInputStream<OpenNode> input;
-		input.setReadBuffer((OpenNode*)ram + ramBaseSize*1, ramBaseSize*10);
+		input.setReadBuffer((OpenNode*)ram + sizeClosed, sizeExpanded);
 		input.open(formatFileName("combined", currentFrameGroup));
 
 		copyStream<OpenNode>(&input, &output);
