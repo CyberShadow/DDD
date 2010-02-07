@@ -3877,10 +3877,6 @@ int run(int argc, const char* argv[])
 #error Disk plugin not set
 #endif
 
-#ifdef USE_ALL
-	printf("Using \"all\" files\n");
-#endif
-
 	if (fileExists(formatProblemFileName("stop", NULL, "txt")))
 	{
 		printf("Stop file present.\n");
