@@ -1484,8 +1484,7 @@ FILE *expansionDebug;
 struct
 {
 	OpenNode* buffer;
-	int count;
-	int increment;
+	int i, increment;
 } expansionThread[WORKERS];
 
 #ifdef DEBUG_EXPANSION
@@ -1541,7 +1540,7 @@ void initExpansion()
 
 		expansionThread[threadID].buffer = slot;
 		slot += EXPANSION_NODES_PER_QUEUE_ELEMENT;
-		expansionThread[threadID].count = 0;
+		expansionThread[threadID].i = 0;
 		expansionThread[threadID].increment = +1;
 
 		expansionBufferRegion region;
@@ -1576,10 +1575,10 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 		return;
 	FRAME_GROUP group = frame/FRAMES_PER_GROUP;
 
-	expansionThread[threadID].buffer[expansionThread[threadID].count].state = *state;
-	expansionThread[threadID].buffer[expansionThread[threadID].count].frame = (PACKED_FRAME)frame;
-	expansionThread[threadID].count += expansionThread[threadID].increment;
-	if (expansionThread[threadID].count == (expansionThread[threadID].increment<0 ? -1 : EXPANSION_NODES_PER_QUEUE_ELEMENT))
+	expansionThread[threadID].buffer[expansionThread[threadID].i].state = *state;
+	expansionThread[threadID].buffer[expansionThread[threadID].i].frame = (PACKED_FRAME)frame;
+	expansionThread[threadID].i += expansionThread[threadID].increment;
+	if (expansionThread[threadID].i == (expansionThread[threadID].increment<0 ? -1 : EXPANSION_NODES_PER_QUEUE_ELEMENT))
 	{
 		SCOPED_LOCK lock(expansionMutex);
 
@@ -1822,7 +1821,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 					if (--bestRegionToFill->length == 0)
 						expansionBufferRegions.erase(bestRegionToFill);
 
-					expansionThread[threadID].count = EXPANSION_NODES_PER_QUEUE_ELEMENT-1;
+					expansionThread[threadID].i = EXPANSION_NODES_PER_QUEUE_ELEMENT-1;
 					expansionThread[threadID].increment = -1;
 				}
 				else
@@ -1834,7 +1833,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 					else
 						bestRegionToFill->pos++;
 
-					expansionThread[threadID].count = 0;
+					expansionThread[threadID].i = 0;
 					expansionThread[threadID].increment = +1;
 				}
 				expansionThread[threadID].buffer = expansionBuffer + region.pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
@@ -1903,7 +1902,7 @@ sortNextFilledRegion:
 					after->length = 0;
 					i->length++;
 
-					countOffset = expansionThread[threadID].count - EXPANSION_NODES_PER_QUEUE_ELEMENT;
+					countOffset = expansionThread[threadID].i - EXPANSION_NODES_PER_QUEUE_ELEMENT;
 				}
 			}
 		}
@@ -1919,7 +1918,7 @@ sortNextFilledRegion:
 					i->pos--;
 					i->length++;
 
-					bufferOffset = EXPANSION_NODES_PER_QUEUE_ELEMENT - expansionThread[threadID].count;
+					bufferOffset = expansionThread[threadID].i + 1;
 					countOffset -= bufferOffset;
 				}
 			}
@@ -1955,7 +1954,7 @@ sortNextFilledRegion:
 
 	if (expansionThreadIter[threadID]->length)
 	{
-		if (expansionThread[threadID].count)
+		if (expansionThread[threadID].i != (expansionThread[threadID].increment<0 ? EXPANSION_NODES_PER_QUEUE_ELEMENT-1 : 0))
 		{
 			expansionThreadIter[threadID]->type = EXPANSION_BUFFER_REGION_SORTING;
 			// this is such a small sort, that it should not be counted towards numSortsInProgress
@@ -1966,14 +1965,18 @@ sortNextFilledRegion:
 			lock.unlock();
 
 			OpenNode* buffer = expansionThread[threadID].buffer;
+			size_t    count  = expansionThread[threadID].i;
 			if (expansionThread[threadID].increment < 0)
-				buffer += EXPANSION_NODES_PER_QUEUE_ELEMENT - expansionThread[threadID].count;
+			{
+				buffer += expansionThread[threadID].i + 1;
+				count = EXPANSION_NODES_PER_QUEUE_ELEMENT-1 - count;
+			}
 
-			std::sort(buffer, buffer + expansionThread[threadID].count);
+			std::sort(buffer, buffer + count);
 			
 			expansionBufferSortedRegion region;
 			region.start = buffer;
-			region.end = buffer + expansionThread[threadID].count;
+			region.end = buffer + count;
 
 			lock.lock();
 
