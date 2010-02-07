@@ -97,7 +97,12 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 // assert - check condition in DEBUG builds, try to instruct compiler to assume the condition is true in RELEASE builds
 // debug_assert - check condition in DEBUG builds, do nothing in RELEASE builds (classic ASSERT)
 
-#define enforce(expr,...) while(!(expr)){error(defaultstr(format("Check failed at %s:%d", __FILE__,  __LINE__), __VA_ARGS__));throw "Unreachable";}
+#define enforce(expr,...) \
+	while (!(expr)) \
+	{ \
+		error(defaultstr(format("Check failed at %s:%d", __FILE__,  __LINE__), __VA_ARGS__)); \
+		throw "Unreachable"; \
+	}
 
 #undef assert
 #ifdef DEBUG
