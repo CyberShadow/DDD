@@ -3873,7 +3873,12 @@ int run(int argc, const char* argv[])
 	printf("Using %lld bytes of RAM for %lld buffer nodes\n", (long long)RAM_SIZE, (long long)OPENNODE_BUFFER_SIZE);
 
 #if defined(DISK_WINFILES)
-	printf("Using Windows API files\n");
+	printf("Using Windows API files");
+#ifdef USE_UNBUFFERED_DISK_IO
+	printf(" with unbuffered disk I/O\n");
+#else
+	printf(" with Windows disk I/O buffering\n");
+#endif
 #elif defined(DISK_POSIX)
 	printf("Using POSIX files\n");
 #else
