@@ -1461,10 +1461,7 @@ enum expansionBufferRegionType
 //	EXPANSION_BUFFER_REGION_FILLING+1 is threadID==1
 //	EXPANSION_BUFFER_REGION_FILLING+2 is threadID==2, etc...
 	EXPANSION_BUFFER_REGION_FILLED = EXPANSION_BUFFER_REGION_FILLING + WORKERS,
-//	EXPANSION_BUFFER_REGION_FILLED+1 is a FILLED   which has been divided by multiplying it by (WORKERS-1)/(WORKERS  )
-//	EXPANSION_BUFFER_REGION_FILLED+2 is a FILLED+1 which has been divided by multiplying it by (WORKERS-2)/(WORKERS-1)
-//	EXPANSION_BUFFER_REGION_FILLED+3 is a FILLED+2 which has been divided by multiplying it by (WORKERS-3)/(WORKERS-2) etc...
-	EXPANSION_BUFFER_REGION_SORTING = EXPANSION_BUFFER_REGION_FILLED + WORKERS,
+	EXPANSION_BUFFER_REGION_SORTING,
 	EXPANSION_BUFFER_REGION_WRITING,
 	EXPANSION_BUFFER_REGION_MERGING,
 };
@@ -1634,7 +1631,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 			for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin();; i++)
 			{
 				bool end = i==expansionBufferRegions.end();
-				if (!end && INRANGEX(i->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLED+WORKERS))
+				if (!end && INRANGE(i->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLED))
 				{
 					if (longestFilledLength < i->length)
 					{
@@ -1696,7 +1693,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 						{
 							bestRegionToFill = i;
 							std::list<expansionBufferRegion>::iterator before = i;
-							fillReverse = (before != expansionBufferRegions.begin() && !INRANGEX((--before)->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLED+WORKERS));
+							fillReverse = (before != expansionBufferRegions.begin() && !INRANGE((--before)->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLED));
 						}
 					}
 
@@ -1868,7 +1865,7 @@ sortNextFilledRegion:
 
 	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
 	{
-		if (!INRANGEX(i->type, EXPANSION_BUFFER_REGION_FILLED, EXPANSION_BUFFER_REGION_FILLED+WORKERS))
+		if (i->type != EXPANSION_BUFFER_REGION_FILLED)
 			continue;
 
 		numSortsInProgress++;
@@ -1876,20 +1873,21 @@ sortNextFilledRegion:
 		size_t bufferOffset = 0;
 		fpos_t countOffset = 0;
 
-		if (i->type != EXPANSION_BUFFER_REGION_FILLED+WORKERS-1 && numSortsInProgress < WORKERS)
+		if (numSortsInProgress < WORKERS)
 		{
 			unsigned oldLength = i->length;
-			unsigned denominator = EXPANSION_BUFFER_REGION_FILLED+WORKERS - i->type;
+			unsigned denominator = WORKERS - numSortsInProgress + 1;
 			i->length = (i->length + denominator-1) / denominator;
 			expansionBufferRegion region;
 			region.pos = i->pos + i->length;
 			region.length = oldLength - i->length;
-			region.type = (expansionBufferRegionType)(i->type + 1);
+			region.type = EXPANSION_BUFFER_REGION_FILLED;
 			std::list<expansionBufferRegion>::iterator insert = i;
 			expansionBufferRegions.insert(++insert, region);
 		}
 		else
 		{
+			// if there is a queue element that were still being filled when expansion ended, and it is adjacent to this region on the RIGHT side with no gap, treat it as part of this region for the purposes of sorting and merging
 			std::list<expansionBufferRegion>::iterator after = i; ++after;
 			if (after != expansionBufferRegions.end() && INRANGEX(after->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLING+WORKERS))
 			{
@@ -1903,21 +1901,19 @@ sortNextFilledRegion:
 				}
 			}
 		}
-		if (i->type == EXPANSION_BUFFER_REGION_FILLED)
+		// if there is a queue element that were still being filled when expansion ended, and it is adjacent to this region on the LEFT side with no gap, treat it as part of this region for the purposes of sorting and merging
+		std::list<expansionBufferRegion>::iterator before = i;
+		if (before != expansionBufferRegions.begin() && INRANGEX((--before)->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLING+WORKERS))
 		{
-			std::list<expansionBufferRegion>::iterator before = i;
-			if (before != expansionBufferRegions.begin() && INRANGEX((--before)->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLING+WORKERS))
+			THREAD_ID threadID = before->type - EXPANSION_BUFFER_REGION_FILLING;
+			if (expansionThreadFinalized[threadID] && expansionThread[threadID].increment == -1)
 			{
-				THREAD_ID threadID = before->type - EXPANSION_BUFFER_REGION_FILLING;
-				if (expansionThreadFinalized[threadID] && expansionThread[threadID].increment == -1)
-				{
-					before->length = 0;
-					i->pos--;
-					i->length++;
+				before->length = 0;
+				i->pos--;
+				i->length++;
 
-					bufferOffset = expansionThread[threadID].i + 1;
-					countOffset -= bufferOffset;
-				}
+				bufferOffset = expansionThread[threadID].i + 1;
+				countOffset -= bufferOffset;
 			}
 		}
 
