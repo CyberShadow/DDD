@@ -1619,7 +1619,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 		{
 			std::list<expansionBufferRegion>::iterator bestRegionToFill = expansionBufferRegions.end();
 			unsigned bestRegionToFillFlankingLength = 0;
-			unsigned bestRegionToFillShorestEmptyLength = EXPANSION_BUFFER_SLOTS+1;
+			unsigned bestRegionToFillClosestDistanceFromDesired = EXPANSION_BUFFER_SLOTS+1;
 			bool fillReverse = false;
 
 			std::list<expansionBufferRegion>::iterator leftEmpty = expansionBufferRegions.end();
@@ -1644,40 +1644,22 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 				{
 					if (contiguouslyFilledLength)
 					{
-						if (leftEmpty != expansionBufferRegions.end())
+						if (leftEmpty != expansionBufferRegions.end()) // is there an empty region adjacent to this filled region on the left?
 						{
-							if (bestRegionToFillFlankingLength == contiguouslyFilledLength)
+							unsigned distanceFromDesired = (unsigned)abs((int)contiguouslyFilledLength + (int)leftEmpty->length - (int)EXPANSION_BUFFER_FILL_THRESHOLD);
+							if (bestRegionToFillClosestDistanceFromDesired > distanceFromDesired)
 							{
-								if (bestRegionToFillShorestEmptyLength > leftEmpty->length)
-								{
-									bestRegionToFillShorestEmptyLength = leftEmpty->length;
-									bestRegionToFill = leftEmpty;
-									fillReverse = true;
-								}
-							}
-							else
-							if (bestRegionToFillFlankingLength < contiguouslyFilledLength)
-							{
-								bestRegionToFillFlankingLength = contiguouslyFilledLength;
+								bestRegionToFillClosestDistanceFromDesired = distanceFromDesired;
 								bestRegionToFill = leftEmpty;
 								fillReverse = true;
 							}
 						}
-						if (!end && i->type == EXPANSION_BUFFER_REGION_EMPTY)
+						if (!end && i->type == EXPANSION_BUFFER_REGION_EMPTY) // is there an empty region adjacent to this filled region on the right?
 						{
-							if (bestRegionToFillFlankingLength == contiguouslyFilledLength)
+							unsigned distanceFromDesired = (unsigned)abs((int)contiguouslyFilledLength + (int)i->length - (int)EXPANSION_BUFFER_FILL_THRESHOLD);
+							if (bestRegionToFillClosestDistanceFromDesired > distanceFromDesired)
 							{
-								if (bestRegionToFillShorestEmptyLength > i->length)
-								{
-									bestRegionToFillShorestEmptyLength = i->length;
-									bestRegionToFill = i;
-									fillReverse = false;
-								}
-							}
-							else
-							if (bestRegionToFillFlankingLength < contiguouslyFilledLength)
-							{
-								bestRegionToFillFlankingLength = contiguouslyFilledLength;
+								bestRegionToFillClosestDistanceFromDesired = distanceFromDesired;
 								bestRegionToFill = i;
 								fillReverse = false;
 							}
