@@ -167,16 +167,16 @@ public:
 	}
 
 	__declspec(noinline)
-	void write(const NODE* p, size_t n)
+	void write(const NODE* p, size_t n, DWORD chunkSize = 256*1024)
 	{
 		assert(archive, "File not open");
 		size_t total = n * sizeof(NODE);
 		size_t bytes = 0;
 		const BYTE* data = (const BYTE*)p;
-		while (bytes < total) // write in 256 KB chunks
+		while (bytes < total)
 		{
 			size_t left = total-bytes;
-			DWORD chunk = left > 256*1024 ? 256*1024 : (DWORD)left;
+			DWORD chunk = left > chunkSize ? chunkSize : (DWORD)left;
 			DWORD w;
 			BOOL b;
 			if (sectorBufferUse)
@@ -349,16 +349,16 @@ public:
 	}
 
 	__declspec(noinline)
-	size_t read(NODE* p, size_t n)
+	size_t read(NODE* p, size_t n, DWORD chunkSize = 256*1024)
 	{
 		assert(archive, "File not open");
 		size_t total = n * sizeof(NODE);
 		size_t bytes = 0;
 		char* data = (char*)p;
-		while (bytes < total) // read in 256 KB chunks
+		while (bytes < total)
 		{
 			size_t left = total-bytes;
-			DWORD chunk = left > 256*1024 ? 256*1024 : (DWORD)left;
+			DWORD chunk = left > chunkSize ? chunkSize : (DWORD)left;
 			DWORD r = 0;
 			BOOL b;
 			if (sectorBufferPos)

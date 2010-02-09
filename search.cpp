@@ -1709,7 +1709,7 @@ void expansionWriteSpillover(OpenNode *bufferToWrite, size_t count)
 		if (spilloverToNextChunk > 0)
 			count -= spilloverToNextChunk;
 
-		expansionSpilloverOut.write(bufferToWrite, count);
+		expansionSpilloverOut.write(bufferToWrite, count, 4*1024*1024);
 
 		expansionSpilloverChunkOutPos += count;
 
@@ -1753,7 +1753,7 @@ void expansionReadSpillover(OpenNode *bufferToRead, size_t count)
 		if (spilloverToNextChunk > 0)
 			count -= spilloverToNextChunk;
 
-		expansionSpilloverIn.read(bufferToRead, count);
+		expansionSpilloverIn.read(bufferToRead, count, 4*1024*1024);
 
 		expansionSpilloverChunkInPos += count;
 
