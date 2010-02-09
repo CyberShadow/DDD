@@ -1849,10 +1849,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 		std::list<expansionBufferRegion>::iterator shortestFilledRegion = expansionBufferRegions.end();
 		unsigned shortestFilledLength = EXPANSION_BUFFER_SLOTS+1;
 
-		std::list<expansionBufferRegion>::iterator loadSpilloverLeft  = expansionBufferRegions.end();
-		std::list<expansionBufferRegion>::iterator loadSpilloverRight = expansionBufferRegions.end();
-		bool loadSpillover = false;
-		bool spilloverLeft, spilloverRight;
+		std::list<expansionBufferRegion>::iterator loadSpilloverRegion = expansionBufferRegions.end();
 
 		for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin();; i++)
 		{
@@ -1879,16 +1876,15 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 					bool haveLeft = leftEmpty != expansionBufferRegions.end();
 					bool haveRight = !end && i->type == EXPANSION_BUFFER_REGION_EMPTY;
 					
-					if (!loadSpillover && (haveLeft || haveRight))
+					if (loadSpilloverRegion == expansionBufferRegions.end() && (haveLeft || haveRight))
 					{
 						unsigned combinedLength = (haveLeft ? leftEmpty->length : 0) + contiguouslyFilledLength + (haveRight ? i->length : 0);
 						if (combinedLength >= expansionSpilloverReadThreshold)
 						{
-							if (spilloverLeft  = haveLeft)
-								loadSpilloverLeft = leftEmpty;
-							if (spilloverRight = haveRight)
-								loadSpilloverRight = i;
-							loadSpillover = true;
+							if (haveLeft)
+								loadSpilloverRegion = leftEmpty;
+							else
+								loadSpilloverRegion = i;
 						}
 					}
 					if (haveLeft) // is there an empty region adjacent to this filled region on the left?
@@ -1932,7 +1928,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 			}
 		}
 
-		if (loadSpillover && !expansionSpilloverInUse && numWritesInProgress==0)
+		if (loadSpilloverRegion != expansionBufferRegions.end() && !expansionSpilloverInUse && numWritesInProgress==0)
 		{
 			size_t expansionSpilloverAvailable;
 			{
@@ -1945,75 +1941,29 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 				if (expansionSpilloverAvailable > expansionSpilloverReadThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT)
 					expansionSpilloverAvailable = expansionSpilloverReadThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 
-				if (spilloverLeft)
+				if (expansionSpilloverAvailable)
 				{
-					size_t count = loadSpilloverLeft->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+					size_t count = loadSpilloverRegion->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 					
 					if (count <= expansionSpilloverAvailable)
-						loadSpilloverLeft->type = EXPANSION_BUFFER_REGION_READING;
+						loadSpilloverRegion->type = EXPANSION_BUFFER_REGION_READING;
 					else
 					{
 						count = expansionSpilloverAvailable;
 						expansionBufferRegion region;
+						region.pos = loadSpilloverRegion->pos;
 						assert(count % EXPANSION_NODES_PER_QUEUE_ELEMENT == 0);
 						region.length = (unsigned)(count / EXPANSION_NODES_PER_QUEUE_ELEMENT);
-						region.pos = loadSpilloverLeft->pos + loadSpilloverLeft->length - region.length;
 						region.type = EXPANSION_BUFFER_REGION_READING;
-						std::list<expansionBufferRegion>::iterator insert = loadSpilloverLeft;
-						loadSpilloverLeft->length -= region.length;
-						if (++insert == expansionBufferRegions.end())
-						{
-							expansionBufferRegions.push_back(region);
-							loadSpilloverLeft = expansionBufferRegions.end();
-							loadSpilloverLeft--;
-						}
-						else
-							loadSpilloverLeft = expansionBufferRegions.insert(insert, region);
+						loadSpilloverRegion->pos    += region.length;
+						loadSpilloverRegion->length -= region.length;
+						loadSpilloverRegion = expansionBufferRegions.insert(loadSpilloverRegion, region);
 					}
 	#ifdef DEBUG_EXPANSION
 					dumpExpansionDebug(threadID);
 	#endif
 
-					OpenNode *bufferToRead = expansionBuffer + loadSpilloverLeft->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
-
-					expansionSpilloverInUse = true;
-					lock.unlock();
-
-					expansionReadSpillover(bufferToRead, count);
-
-					lock.lock();
-					expansionSpilloverInUse = false;
-
-					expansionSpilloverAvailable -= count;
-
-					expansionMarkRegionFilled(loadSpilloverLeft);
-	#ifdef DEBUG_EXPANSION
-					dumpExpansionDebug(threadID);
-	#endif
-				}
-				if (spilloverRight && expansionSpilloverAvailable)
-				{
-					size_t count = loadSpilloverRight->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
-					
-					if (count <= expansionSpilloverAvailable)
-						loadSpilloverRight->type = EXPANSION_BUFFER_REGION_READING;
-					else
-					{
-						count = expansionSpilloverAvailable;
-						expansionBufferRegion region;
-						region.pos = loadSpilloverRight->pos;
-						assert(count % EXPANSION_NODES_PER_QUEUE_ELEMENT == 0);
-						region.length = (unsigned)(count / EXPANSION_NODES_PER_QUEUE_ELEMENT);
-						region.type = EXPANSION_BUFFER_REGION_READING;
-						loadSpilloverRight->pos    += region.length;
-						loadSpilloverRight->length -= region.length;
-						loadSpilloverRight = expansionBufferRegions.insert(loadSpilloverRight, region);
-					}
-	#ifdef DEBUG_EXPANSION
-					dumpExpansionDebug(threadID);
-	#endif
-
-					OpenNode *bufferToRead = expansionBuffer + loadSpilloverRight->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+					OpenNode *bufferToRead = expansionBuffer + loadSpilloverRegion->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 
 					expansionSpilloverInUse = true;
 					lock.unlock();
@@ -2023,7 +1973,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 					lock.lock();
 					expansionSpilloverInUse = false;
 
-					expansionMarkRegionFilled(loadSpilloverRight);
+					expansionMarkRegionFilled(loadSpilloverRegion);
 	#ifdef DEBUG_EXPANSION
 					dumpExpansionDebug(threadID);
 	#endif
