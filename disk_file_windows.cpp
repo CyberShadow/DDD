@@ -35,6 +35,7 @@ public:
 	{
 		ULARGE_INTEGER li;
 		li.LowPart = GetFileSize(archive, &li.HighPart);
+		assert(li.QuadPart % sizeof(NODE) == 0, "Unaligned EOF");
 		return li.QuadPart / sizeof(NODE);
 	}
 
@@ -108,26 +109,64 @@ public:
 		flush(true);
 	}
 
+	__declspec(noinline)
+	void seek(uint64_t pos)
+	{
+		if (sectorBufferFlushed < sectorBufferUse)
+		{
+			DWORD w;
+			BOOL b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &w, NULL);
+			if (!b)
+				windowsError("Write error");
+			if (w != sizeof(sectorBuffer))
+				windowsError("Out of disk space?");
+			sectorBufferUse = 0;
+			sectorBufferFlushed = 0;
+		}
+
+		pos *= sizeof(NODE);
+		
+		LARGE_INTEGER li;
+		DWORD error;
+		li.QuadPart = pos & -(int64_t)sizeof(sectorBuffer);
+		li.LowPart = SetFilePointer(archive, li.LowPart, &li.HighPart, FILE_BEGIN);
+		if (li.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
+			windowsError(format("Seek error (%s)", filenameOpened));
+
+		sectorBufferUse = (WORD)pos % sizeof(sectorBuffer);
+
+		if (sectorBufferUse)
+		{
+			memset(sectorBuffer, 0, sizeof(sectorBuffer));
+			DWORD r;
+			BOOL b = ReadFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
+			if (b && r!=sectorBufferUse)
+				windowsError(format("Read alignment error in write alignment (%s)", filenameOpened));
+			if (!b || r==0)
+				windowsError(format("Read error in write alignment (%s)", filenameOpened));
+
+			li.QuadPart = pos & -(int64_t)sizeof(sectorBuffer);
+			li.LowPart = SetFilePointer(archive, li.LowPart, &li.HighPart, FILE_BEGIN);
+			if (li.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
+				windowsError(format("Seek error after write alignment read (%s)", filenameOpened));
+		}
+	}
+
+	__declspec(noinline)
 	void open(const char* filename, bool resume=false)
 	{
 		assert(archive==0);
 		sectorBufferUse = 0;
 		sectorBufferFlushed = 0;
 		strcpy(filenameOpened, filename);
-		archive = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
+		archive = CreateFile(filename, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
 		if (archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File creation failure (%s)", filename));
 		if (resume)
-		{
-			LARGE_INTEGER li;
-			DWORD error;
-			li.QuadPart = 0;
-			li.LowPart = SetFilePointer(archive, li.LowPart, &li.HighPart, FILE_END);
-			if (li.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
-				windowsError("Append error");
-		}
+			seek(size());
 	}
 
+	__declspec(noinline)
 	void write(const NODE* p, size_t n)
 	{
 		assert(archive, "File not open");
@@ -138,7 +177,7 @@ public:
 		{
 			size_t left = total-bytes;
 			DWORD chunk = left > 256*1024 ? 256*1024 : (DWORD)left;
-			DWORD r;
+			DWORD w;
 			BOOL b;
 			if (sectorBufferUse)
 			{
@@ -148,10 +187,10 @@ public:
 				sectorBufferUse += (WORD)chunk;
 				if (sectorBufferUse == sizeof(sectorBuffer))
 				{
-					b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
+					b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &w, NULL);
 					if (!b)
 						windowsError("Write error");
-					if (r != sizeof(sectorBuffer))
+					if (w != sizeof(sectorBuffer))
 						windowsError("Out of disk space?");
 					sectorBufferUse = 0;
 					sectorBufferFlushed = 0;
@@ -171,16 +210,17 @@ public:
 					return;
 				}
 			}
-			b = WriteFile(archive, data + bytes, chunk, &r, NULL);
+			b = WriteFile(archive, data + bytes, chunk, &w, NULL);
 			if (!b)
 				windowsError("Write error");
-			if (r == 0)
+			if (w == 0)
 				windowsError("Out of disk space?");
-			bytes += r;
+			bytes += w;
 		}
 	}
 
 private:
+	__declspec(noinline)
 	void flush(bool reopen)
 	{
 		if (!archive)
@@ -200,15 +240,15 @@ private:
 		assert(sectorBufferFlushed < sectorBufferUse);
 
 		BOOL b;
-		DWORD r;
+		DWORD w;
 		ULARGE_INTEGER size;
 		size.LowPart = GetFileSize(archive, &size.HighPart);
 		size.QuadPart += sectorBufferUse;
 
-		b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
+		b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &w, NULL);
 		if (!b)
 			windowsError("Write error");
-		if (r != sizeof(sectorBuffer))
+		if (w != sizeof(sectorBuffer))
 			windowsError("Out of disk space?");
 		CloseHandle(archive);
 
@@ -265,6 +305,7 @@ public:
 		open(filename);
 	}
 
+	__declspec(noinline)
 	void open(const char* filename)
 	{
 #ifdef DEBUG
@@ -283,6 +324,7 @@ public:
 		return filePosition / sizeof(NODE);
 	}
 
+	__declspec(noinline)
 	void seek(uint64_t pos)
 	{
 		filePosition = pos * sizeof(NODE);
@@ -306,6 +348,7 @@ public:
 		}
 	}
 
+	__declspec(noinline)
 	size_t read(NODE* p, size_t n)
 	{
 		assert(archive, "File not open");
