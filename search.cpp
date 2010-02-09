@@ -1873,82 +1873,82 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 
 	while (true)
 	{
-		if (expansionSpilloverInUse || numWritesInProgress || !expansionSpilloverAvailable)
+		if (!expansionSpilloverAvailable)
 		{
-			if (!expansionSpilloverAvailable)
+			SCOPED_LOCK lock(processQueueMutex);
+			if (stopSpecialWorkers)
 			{
-				SCOPED_LOCK lock(processQueueMutex);
-				if (stopSpecialWorkers)
+				runningSpecialWorkers--;
+				CONDITION_NOTIFY(specialWorkersExitCondition, lock);
+				return;
+			}
+		}
+		else
+		if (!expansionSpilloverInUse && numWritesInProgress==0)
+		{
+			std::list<expansionBufferRegion>::iterator firstEmptyRegionToFill;
+			bool foundEmptyRegionToFill = false;
+
+			for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i != expansionBufferRegions.end(); i++)
+			{
+				if (i->type == EXPANSION_BUFFER_REGION_EMPTY)
 				{
-					runningSpecialWorkers--;
-					CONDITION_NOTIFY(specialWorkersExitCondition, lock);
-					return;
+					if (!foundEmptyRegionToFill)
+					{
+						foundEmptyRegionToFill = true;
+						firstEmptyRegionToFill = i;
+						break;
+					}
 				}
 			}
-			lock.unlock();
-			SLEEP(1);
-			lock.lock();
-			continue;
-		}
 
-		std::list<expansionBufferRegion>::iterator firstEmptyRegionToFill;
-		bool foundEmptyRegionToFill = false;
-
-		for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i != expansionBufferRegions.end(); i++)
-		{
-			if (i->type == EXPANSION_BUFFER_REGION_EMPTY)
+			if (foundEmptyRegionToFill && firstEmptyRegionToFill->length >= expansionSpilloverReadThreshold)
 			{
-				if (!foundEmptyRegionToFill)
+				size_t expansionSpilloverPresented = expansionSpilloverAvailable;
+				if (expansionSpilloverPresented > expansionSpilloverReadThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT)
+					expansionSpilloverPresented = expansionSpilloverReadThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+
+				size_t count = firstEmptyRegionToFill->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+				
+				if (count <= expansionSpilloverPresented)
+					firstEmptyRegionToFill->type = EXPANSION_BUFFER_REGION_READING;
+				else
 				{
-					foundEmptyRegionToFill = true;
-					firstEmptyRegionToFill = i;
-					break;
+					count = expansionSpilloverPresented;
+					expansionBufferRegion region;
+					region.pos = firstEmptyRegionToFill->pos;
+					assert(count % EXPANSION_NODES_PER_QUEUE_ELEMENT == 0);
+					region.length = (unsigned)(count / EXPANSION_NODES_PER_QUEUE_ELEMENT);
+					region.type = EXPANSION_BUFFER_REGION_READING;
+					firstEmptyRegionToFill->pos    += region.length;
+					firstEmptyRegionToFill->length -= region.length;
+					firstEmptyRegionToFill = expansionBufferRegions.insert(firstEmptyRegionToFill, region);
 				}
+	#ifdef DEBUG_EXPANSION
+				dumpExpansionDebug(threadID);
+	#endif
+
+				expansionSpilloverThreadBuffer = expansionBuffer + firstEmptyRegionToFill->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+				expansionSpilloverThreadCount  = count;
+				expansionSpilloverThreadRegion = firstEmptyRegionToFill;
+
+				expansionSpilloverInUse = true;
+				lock.unlock();
+
+				expansionReadSpillover(expansionSpilloverThreadBuffer, expansionSpilloverThreadCount);
+		
+				lock.lock();
+				expansionSpilloverInUse = false;
+
+				expansionRegionMarkFilled(expansionSpilloverThreadRegion, threadID);
+
+				continue;
 			}
 		}
 
-		if (foundEmptyRegionToFill && firstEmptyRegionToFill->length >= expansionSpilloverReadThreshold)
-		{
-			size_t expansionSpilloverPresented = expansionSpilloverAvailable;
-			if (expansionSpilloverPresented > expansionSpilloverReadThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT)
-				expansionSpilloverPresented = expansionSpilloverReadThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT;
-
-			size_t count = firstEmptyRegionToFill->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
-			
-			if (count <= expansionSpilloverPresented)
-				firstEmptyRegionToFill->type = EXPANSION_BUFFER_REGION_READING;
-			else
-			{
-				count = expansionSpilloverPresented;
-				expansionBufferRegion region;
-				region.pos = firstEmptyRegionToFill->pos;
-				assert(count % EXPANSION_NODES_PER_QUEUE_ELEMENT == 0);
-				region.length = (unsigned)(count / EXPANSION_NODES_PER_QUEUE_ELEMENT);
-				region.type = EXPANSION_BUFFER_REGION_READING;
-				firstEmptyRegionToFill->pos    += region.length;
-				firstEmptyRegionToFill->length -= region.length;
-				firstEmptyRegionToFill = expansionBufferRegions.insert(firstEmptyRegionToFill, region);
-			}
-#ifdef DEBUG_EXPANSION
-			dumpExpansionDebug(threadID);
-#endif
-
-			expansionSpilloverThreadBuffer = expansionBuffer + firstEmptyRegionToFill->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
-			expansionSpilloverThreadCount  = count;
-			expansionSpilloverThreadRegion = firstEmptyRegionToFill;
-
-			expansionSpilloverInUse = true;
-			lock.unlock();
-
-			expansionReadSpillover(expansionSpilloverThreadBuffer, expansionSpilloverThreadCount);
-	
-			lock.lock();
-			expansionSpilloverInUse = false;
-
-			expansionRegionMarkFilled(expansionSpilloverThreadRegion, threadID);
-
-			continue;
-		}
+		lock.unlock();
+		SLEEP(1);
+		lock.lock();
 	}
 }
 
