@@ -1784,14 +1784,6 @@ void expansionReadSpillover(OpenNode *bufferToRead, size_t count)
 	}
 }
 
-OpenNode *expansionReadSpilloverBuffer;
-size_t    expansionReadSpilloverCount;
-// only allow one instance of this thread
-void expansionReadSpilloverThread(THREAD_ID threadID)
-{
-	expansionReadSpillover(expansionReadSpilloverBuffer, expansionReadSpilloverCount);
-}
-
 void expansionMarkRegionFilled(std::list<expansionBufferRegion>::iterator& regionToFill)
 {
 	std::list<expansionBufferRegion>::iterator before = regionToFill;
@@ -1820,6 +1812,26 @@ void expansionMarkRegionFilled(std::list<expansionBufferRegion>::iterator& regio
 		regionToFill->type = EXPANSION_BUFFER_REGION_FILLED;
 
 	regionToFill = expansionBufferRegions.end();
+}
+
+OpenNode *expansionReadSpilloverBuffer;
+size_t    expansionReadSpilloverCount;
+std::list<expansionBufferRegion>::iterator *expansionReadSpilloverRegion;
+// only allow one instance of this thread
+void expansionReadSpilloverThread(THREAD_ID threadID)
+{
+	expansionReadSpillover(expansionReadSpilloverBuffer, expansionReadSpilloverCount);
+	
+	{
+		SCOPED_LOCK lock(expansionMutex);
+
+		expansionSpilloverInUse = false;
+
+		expansionMarkRegionFilled(*expansionReadSpilloverRegion);
+#ifdef DEBUG_EXPANSION
+		dumpExpansionDebug(threadID);
+#endif
+	}
 }
 
 void expansionHandleFilledQueueElement(THREAD_ID threadID)
@@ -1963,20 +1975,13 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 					dumpExpansionDebug(threadID);
 	#endif
 
-					OpenNode *bufferToRead = expansionBuffer + loadSpilloverRegion->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+					expansionReadSpilloverBuffer = expansionBuffer + loadSpilloverRegion->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+					expansionReadSpilloverCount  = count;
+					expansionReadSpilloverRegion = &loadSpilloverRegion;
 
 					expansionSpilloverInUse = true;
-					lock.unlock();
-					
-					expansionReadSpillover(bufferToRead, count);
-					
-					lock.lock();
-					expansionSpilloverInUse = false;
 
-					expansionMarkRegionFilled(loadSpilloverRegion);
-	#ifdef DEBUG_EXPANSION
-					dumpExpansionDebug(threadID);
-	#endif
+					THREAD_CREATE(expansionReadSpilloverThread, 0);
 				}
 
 				continue;
