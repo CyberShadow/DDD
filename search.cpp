@@ -1341,6 +1341,12 @@ size_t deduplicate(COMPRESSED_STATE* start, size_t records)
 
 // ********************************************* File names *********************************************
 
+/*
+#define formatFileName(name) formatProblemFileName(name, "bin")
+
+#define formatFileNameG(name, g) formatProblemFileName(name, 
+*/
+
 const char* formatFileName(const char* name)
 {
 	return formatProblemFileName(name, NULL, "bin");
@@ -1445,9 +1451,24 @@ uint64_t combinedNodesTotal;
 
 BufferedOutputStream<Node> closedNodeFile;
 
+bool expansionSpilloverInUse;
+OutputStream<OpenNode> expansionSpilloverOut;
+bool expansionSpilloverOutOpen;
+unsigned expansionSpilloverChunkOut;
+size_t   expansionSpilloverChunkOutPos;
+InputStream<OpenNode> expansionSpilloverIn;
+bool expansionSpilloverInOpen;
+unsigned expansionSpilloverChunkIn;
+size_t   expansionSpilloverChunkInPos;
+
 #define EXPANSION_BUFFER_SLOTS (RAM_SIZE / sizeof(OpenNode) / EXPANSION_NODES_PER_QUEUE_ELEMENT)
 #define EXPANSION_BUFFER_SIZE (EXPANSION_BUFFER_SLOTS * EXPANSION_NODES_PER_QUEUE_ELEMENT)
-#define EXPANSION_BUFFER_FILL_THRESHOLD ((unsigned)(EXPANSION_BUFFER_SLOTS * EXPANSION_BUFFER_FILL_RATIO))
+
+const unsigned expansionBufferFillThreshold ((unsigned)(EXPANSION_BUFFER_SLOTS * EXPANSION_BUFFER_FILL_RATIO)  <=   EXPANSION_BUFFER_SLOTS - (WORKERS-1) ?
+                                             (unsigned)(EXPANSION_BUFFER_SLOTS * EXPANSION_BUFFER_FILL_RATIO)  >=   1                                    ?
+                                             (unsigned)(EXPANSION_BUFFER_SLOTS * EXPANSION_BUFFER_FILL_RATIO)     : 1
+                                                                                                                  : EXPANSION_BUFFER_SLOTS - (WORKERS-1));
+const unsigned expansionSpilloverReadThreshold = EXPANSION_BUFFER_SLOTS - expansionBufferFillThreshold + 1;
 
 OpenNode* const expansionBuffer    = (OpenNode*)ram;
 OpenNode* const expansionBufferEnd = (OpenNode*)ram + EXPANSION_BUFFER_SIZE;
@@ -1461,6 +1482,7 @@ enum expansionBufferRegionType
 //	EXPANSION_BUFFER_REGION_FILLING+1 is threadID==1
 //	EXPANSION_BUFFER_REGION_FILLING+2 is threadID==2, etc...
 	EXPANSION_BUFFER_REGION_FILLED = EXPANSION_BUFFER_REGION_FILLING + WORKERS,
+	EXPANSION_BUFFER_REGION_READING,
 	EXPANSION_BUFFER_REGION_SORTING,
 	EXPANSION_BUFFER_REGION_WRITING,
 	EXPANSION_BUFFER_REGION_MERGING,
@@ -1478,6 +1500,7 @@ struct expansionBufferSortedRegion
 };
 std::queue<expansionBufferSortedRegion> expansionBufferRegionsToMerge;
 unsigned numSortsInProgress;
+unsigned numWritesInProgress;
 bool expansionThreadFinalized[WORKERS];
 #ifdef DEBUG_EXPANSION
 FILE *expansionDebug;
@@ -1502,8 +1525,7 @@ void dumpExpansionDebug(THREAD_ID threadID)
 
 	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
 	{
-		if (i->type == EXPANSION_BUFFER_REGION_EMPTY && i->length==0)
-			__debugbreak();
+		debug_assert(!(i->type == EXPANSION_BUFFER_REGION_EMPTY && i->length==0));
 
 		for (unsigned x=0; x<i->length; x++)
 		{
@@ -1511,14 +1533,8 @@ void dumpExpansionDebug(THREAD_ID threadID)
 			{
 			case EXPANSION_BUFFER_REGION_EMPTY:   fputc('.', expansionDebug); break;
 			case EXPANSION_BUFFER_REGION_FILLED:  fputc('#', expansionDebug); break;
-			default:
-				if (INRANGEX(i->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLING+WORKERS))
-				{
-					fputc('1'+i->type-EXPANSION_BUFFER_REGION_FILLING, expansionDebug);
-					break;
-				}
-				fputc((x==0?'A':'a')+i->type-EXPANSION_BUFFER_REGION_FILLED, expansionDebug);
-				break;
+			default: fputc('1'+i->type-EXPANSION_BUFFER_REGION_FILLING, expansionDebug); break;
+			case EXPANSION_BUFFER_REGION_READING: fputc(x==0?'R':'r', expansionDebug); break;
 			case EXPANSION_BUFFER_REGION_SORTING: fputc(x==0?'S':'s', expansionDebug); break;
 			case EXPANSION_BUFFER_REGION_WRITING: fputc(x==0?'W':'w', expansionDebug); break;
 			case EXPANSION_BUFFER_REGION_MERGING: fputc(x==0?'M':'m', expansionDebug); break;
@@ -1532,12 +1548,21 @@ void dumpExpansionDebug(THREAD_ID threadID)
 
 void initExpansion()
 {
+	expansionSpilloverInUse = false;
+	expansionSpilloverOutOpen = false;
+	expansionSpilloverChunkOut = 0;
+	expansionSpilloverChunkOutPos = 0;
+	expansionSpilloverInOpen = false;
+	expansionSpilloverChunkIn = 0;
+	expansionSpilloverChunkInPos = 0;
+
 	expansionBufferRegions.clear();
 	expansionBufferRegionsToMerge.c.clear();
 	OpenNode* slot = expansionBuffer;
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 	{
 		numSortsInProgress = 0;
+		numWritesInProgress = 0;
 		expansionThreadFinalized[threadID] = false;
 
 		expansionThread[threadID].buffer = slot;
@@ -1570,6 +1595,547 @@ void initExpansion()
 #endif
 }
 
+void emptyExpansionBufferRegion(std::list<expansionBufferRegion>::iterator& regionToEmpty, THREAD_ID threadID)
+{
+	std::list<expansionBufferRegion>::iterator before = regionToEmpty;
+	std::list<expansionBufferRegion>::iterator after  = regionToEmpty; ++after;
+	if (before != expansionBufferRegions.begin() && (--before)->type == EXPANSION_BUFFER_REGION_EMPTY)
+	{
+		if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_EMPTY)
+		{
+			before->length += regionToEmpty->length + after->length;
+			expansionBufferRegions.erase(regionToEmpty, ++after);
+		}
+		else
+		{
+			before->length += regionToEmpty->length;
+			expansionBufferRegions.erase(regionToEmpty);
+		}
+	}
+	else
+	if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_EMPTY)
+	{
+		after->pos    -= regionToEmpty->length;
+		after->length += regionToEmpty->length;
+		expansionBufferRegions.erase(regionToEmpty);
+	}
+	else
+		regionToEmpty->type = EXPANSION_BUFFER_REGION_EMPTY;
+#ifdef DEBUG_EXPANSION
+	dumpExpansionDebug(threadID);
+#endif
+}
+
+void sortExpansionRegion(std::list<expansionBufferRegion>::iterator& regionToSort, THREAD_ID threadID, SCOPED_LOCK& lock)
+{
+	if (regionToSort->length > expansionBufferFillThreshold)
+	{
+		expansionBufferRegion region;
+		region.pos = regionToSort->pos + expansionBufferFillThreshold;
+		region.length = regionToSort->length - expansionBufferFillThreshold;
+		region.type = EXPANSION_BUFFER_REGION_FILLED;
+		std::list<expansionBufferRegion>::iterator insert = regionToSort;
+		expansionBufferRegions.insert(++insert, region);
+		regionToSort->length = expansionBufferFillThreshold;
+	}
+
+	regionToSort->type = EXPANSION_BUFFER_REGION_SORTING;
+	OpenNode *bufferToSort = expansionBuffer + regionToSort->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+	size_t count = regionToSort->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+	
+#ifdef DEBUG_EXPANSION
+	dumpExpansionDebug(threadID);
+#endif
+
+	numSortsInProgress++;
+	lock.unlock();
+	
+	std::sort(bufferToSort, bufferToSort + count);
+	count = deduplicate(bufferToSort, count);
+
+	lock.lock();
+	numSortsInProgress--;
+
+	unsigned oldLength = regionToSort->length;
+	unsigned newLength = (unsigned)((count + EXPANSION_NODES_PER_QUEUE_ELEMENT-1) / EXPANSION_NODES_PER_QUEUE_ELEMENT);
+	regionToSort->length = newLength;
+	regionToSort->type = EXPANSION_BUFFER_REGION_WRITING;
+	std::list<expansionBufferRegion>::iterator nextRegion = regionToSort; ++nextRegion;
+	if (nextRegion != expansionBufferRegions.end() && nextRegion->type == EXPANSION_BUFFER_REGION_EMPTY)
+	{
+		nextRegion->pos    -= oldLength - newLength;
+		nextRegion->length += oldLength - newLength;
+	}
+	else
+	if (oldLength > newLength)
+	{
+		expansionBufferRegion region;
+		region.pos = regionToSort->pos + newLength;
+		region.length = oldLength - newLength;
+		region.type = EXPANSION_BUFFER_REGION_EMPTY;
+		expansionBufferRegions.insert(nextRegion, region);
+	}
+
+#ifdef DEBUG_EXPANSION
+	dumpExpansionDebug(threadID);
+#endif
+
+	unsigned chunk = expansionChunks++;
+
+	numWritesInProgress++;
+	lock.unlock();
+
+	OutputStream<OpenNode> output(formatFileName("expanded", currentFrameGroup, chunk), false);
+	output.write(bufferToSort, count);
+
+	lock.lock();
+	numWritesInProgress--;
+
+	emptyExpansionBufferRegion(regionToSort, threadID);
+}
+
+void expansionWriteSpillover(OpenNode *bufferToWrite, size_t count)
+{
+	while (true)
+	{
+		if (!expansionSpilloverOutOpen)
+		{
+			expansionSpilloverOut.open(formatFileName("expansionSpillover", currentFrameGroup, expansionSpilloverChunkOut));
+			expansionSpilloverChunkOutPos = 0;
+			expansionSpilloverOutOpen = true;
+		}
+
+		fpos_t spilloverToNextChunk = expansionSpilloverChunkOutPos + count - expansionBufferFillThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+		if (spilloverToNextChunk > 0)
+			count -= spilloverToNextChunk;
+
+		expansionSpilloverOut.write(bufferToWrite, count);
+
+		expansionSpilloverChunkOutPos += count;
+
+		if (spilloverToNextChunk >= 0)
+		{
+			expansionSpilloverOut.close();
+			expansionSpilloverChunkOut++;
+			expansionSpilloverChunkOutPos = 0;
+			expansionSpilloverOutOpen = false;
+		}
+		if (spilloverToNextChunk <= 0)
+			break;
+
+		count = spilloverToNextChunk;
+	}
+}
+
+void expansionReadSpillover(OpenNode *bufferToRead, size_t count)
+{
+	while (true)
+	{
+		debug_assert(!(expansionSpilloverChunkIn >  expansionSpilloverChunkOut ||
+		               expansionSpilloverChunkIn == expansionSpilloverChunkOut && expansionSpilloverChunkInPos + count > expansionSpilloverChunkOutPos));
+
+		bool reopen = false;
+		if (expansionSpilloverOutOpen && expansionSpilloverChunkIn == expansionSpilloverChunkOut)
+		{
+			expansionSpilloverOut.close();
+			reopen = true;
+		}
+
+		if (!expansionSpilloverInOpen)
+		{
+			expansionSpilloverIn.open(formatFileName("expansionSpillover", currentFrameGroup, expansionSpilloverChunkIn));
+			if (expansionSpilloverChunkInPos)
+				expansionSpilloverIn.seek(expansionSpilloverChunkInPos);
+			expansionSpilloverInOpen = true;
+		}
+
+		fpos_t spilloverToNextChunk = expansionSpilloverChunkInPos + count - expansionBufferFillThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+		if (spilloverToNextChunk > 0)
+			count -= spilloverToNextChunk;
+
+		expansionSpilloverIn.read(bufferToRead, count);
+
+		expansionSpilloverChunkInPos += count;
+
+		if (spilloverToNextChunk >= 0)
+		{
+			debug_assert(!reopen);
+			expansionSpilloverIn.close();
+			deleteFile(formatFileName("expansionSpillover", currentFrameGroup, expansionSpilloverChunkIn));
+			expansionSpilloverChunkIn++;
+			expansionSpilloverChunkInPos = 0;
+			expansionSpilloverInOpen = false;
+		}
+		else
+		if (reopen)
+		{
+			if (expansionSpilloverInOpen)
+			{
+				expansionSpilloverIn.close();
+				expansionSpilloverInOpen = false;
+			}
+			expansionSpilloverOut.open(formatFileName("expansionSpillover", currentFrameGroup, expansionSpilloverChunkOut), true);
+		}
+
+		if (spilloverToNextChunk <= 0)
+			break;
+
+		count = spilloverToNextChunk;
+	}
+}
+
+OpenNode *expansionReadSpilloverBuffer;
+size_t    expansionReadSpilloverCount;
+// only allow one instance of this thread
+void expansionReadSpilloverThread(THREAD_ID threadID)
+{
+	expansionReadSpillover(expansionReadSpilloverBuffer, expansionReadSpilloverCount);
+}
+
+void expansionMarkRegionFilled(std::list<expansionBufferRegion>::iterator& regionToFill)
+{
+	std::list<expansionBufferRegion>::iterator before = regionToFill;
+	std::list<expansionBufferRegion>::iterator after  = regionToFill; ++after;
+	if (before != expansionBufferRegions.begin() && (--before)->type == EXPANSION_BUFFER_REGION_FILLED)
+	{
+		if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_FILLED)
+		{
+			before->length += regionToFill->length + after->length;
+			expansionBufferRegions.erase(regionToFill, ++after);
+		}
+		else
+		{
+			before->length += regionToFill->length;
+			expansionBufferRegions.erase(regionToFill);
+		}
+	}
+	else
+	if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_FILLED)
+	{
+		after->pos    -= regionToFill->length;
+		after->length += regionToFill->length;
+		expansionBufferRegions.erase(regionToFill);
+	}
+	else
+		regionToFill->type = EXPANSION_BUFFER_REGION_FILLED;
+
+	regionToFill = expansionBufferRegions.end();
+}
+
+void expansionHandleFilledQueueElement(THREAD_ID threadID)
+{
+	SCOPED_LOCK lock(expansionMutex);
+
+	expansionMarkRegionFilled(expansionThreadIter[threadID]);
+	expansionThread[threadID].buffer = NULL;
+
+#ifdef DEBUG_EXPANSION
+	dumpExpansionDebug(threadID);
+#endif
+
+	while (true)
+	{
+		std::list<expansionBufferRegion>::iterator bestRegionToFill = expansionBufferRegions.end();
+		unsigned bestRegionToFillFlankingLength = 0;
+		unsigned bestRegionToFillClosestDistanceFromDesired = EXPANSION_BUFFER_SLOTS+1;
+		bool fillReverse = false;
+
+		std::list<expansionBufferRegion>::iterator leftEmpty = expansionBufferRegions.end();
+		unsigned contiguouslyFilledLength = 0;
+		
+		std::list<expansionBufferRegion>::iterator longestFilledRegion = expansionBufferRegions.end();
+		unsigned longestFilledLength = 0;
+		
+		std::list<expansionBufferRegion>::iterator shortestFilledRegion = expansionBufferRegions.end();
+		unsigned shortestFilledLength = EXPANSION_BUFFER_SLOTS+1;
+
+		std::list<expansionBufferRegion>::iterator loadSpilloverLeft  = expansionBufferRegions.end();
+		std::list<expansionBufferRegion>::iterator loadSpilloverRight = expansionBufferRegions.end();
+		bool loadSpillover = false;
+		bool spilloverLeft, spilloverRight;
+
+		for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin();; i++)
+		{
+			bool end = i==expansionBufferRegions.end();
+			if (!end && INRANGE(i->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLED))
+			{
+				if (longestFilledLength < i->length)
+				{
+					longestFilledLength = i->length;
+					longestFilledRegion = i;
+				}
+				if (shortestFilledLength > i->length)
+				{
+					debug_assert(i->length != 0);
+					shortestFilledLength = i->length;
+					shortestFilledRegion = i;
+				}
+				contiguouslyFilledLength += i->length;
+			}
+			else
+			{
+				if (contiguouslyFilledLength)
+				{
+					bool haveLeft = leftEmpty != expansionBufferRegions.end();
+					bool haveRight = !end && i->type == EXPANSION_BUFFER_REGION_EMPTY;
+					
+					if (!loadSpillover && (haveLeft || haveRight))
+					{
+						unsigned combinedLength = (haveLeft ? leftEmpty->length : 0) + contiguouslyFilledLength + (haveRight ? i->length : 0);
+						if (combinedLength >= expansionSpilloverReadThreshold)
+						{
+							if (spilloverLeft  = haveLeft)
+								loadSpilloverLeft = leftEmpty;
+							if (spilloverRight = haveRight)
+								loadSpilloverRight = i;
+							loadSpillover = true;
+						}
+					}
+					if (haveLeft) // is there an empty region adjacent to this filled region on the left?
+					{
+						unsigned distanceFromDesired = (unsigned)abs((int)contiguouslyFilledLength + (int)leftEmpty->length - (int)expansionBufferFillThreshold);
+						if (bestRegionToFillClosestDistanceFromDesired > distanceFromDesired)
+						{
+							bestRegionToFillClosestDistanceFromDesired = distanceFromDesired;
+							bestRegionToFill = leftEmpty;
+							fillReverse = false;
+							//fillReverse = true;
+						}
+					}
+					if (haveRight) // is there an empty region adjacent to this filled region on the right?
+					{
+						unsigned distanceFromDesired = (unsigned)abs((int)contiguouslyFilledLength + (int)i->length - (int)expansionBufferFillThreshold);
+						if (bestRegionToFillClosestDistanceFromDesired > distanceFromDesired)
+						{
+							bestRegionToFillClosestDistanceFromDesired = distanceFromDesired;
+							bestRegionToFill = i;
+							fillReverse = false;
+						}
+					}
+				}
+				if (end)
+					break;
+
+				if (i->type == EXPANSION_BUFFER_REGION_EMPTY)
+				{
+					leftEmpty = i;
+					if (bestRegionToFill == expansionBufferRegions.end())
+					{
+						bestRegionToFill = i;
+						std::list<expansionBufferRegion>::iterator before = i;
+						fillReverse = false;
+						//fillReverse = (before != expansionBufferRegions.begin() && !INRANGE((--before)->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLED));
+					}
+				}
+
+				contiguouslyFilledLength = 0;
+			}
+		}
+
+		if (loadSpillover && !expansionSpilloverInUse && numWritesInProgress==0)
+		{
+			size_t expansionSpilloverAvailable;
+			{
+				size_t expansionSpilloverOutPos = (size_t)expansionSpilloverChunkOut * expansionBufferFillThreshold + expansionSpilloverChunkOutPos;
+				size_t expansionSpilloverInPos  = (size_t)expansionSpilloverChunkIn  * expansionBufferFillThreshold + expansionSpilloverChunkInPos;
+				expansionSpilloverAvailable = expansionSpilloverOutPos - expansionSpilloverInPos;
+			}
+			if (expansionSpilloverAvailable)
+			{
+				if (expansionSpilloverAvailable > expansionSpilloverReadThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT)
+					expansionSpilloverAvailable = expansionSpilloverReadThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+
+				if (spilloverLeft)
+				{
+					size_t count = loadSpilloverLeft->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+					
+					if (count <= expansionSpilloverAvailable)
+						loadSpilloverLeft->type = EXPANSION_BUFFER_REGION_READING;
+					else
+					{
+						count = expansionSpilloverAvailable;
+						expansionBufferRegion region;
+						assert(count % EXPANSION_NODES_PER_QUEUE_ELEMENT == 0);
+						region.length = (unsigned)(count / EXPANSION_NODES_PER_QUEUE_ELEMENT);
+						region.pos = loadSpilloverLeft->pos + loadSpilloverLeft->length - region.length;
+						region.type = EXPANSION_BUFFER_REGION_READING;
+						std::list<expansionBufferRegion>::iterator insert = loadSpilloverLeft;
+						loadSpilloverLeft->length -= region.length;
+						if (++insert == expansionBufferRegions.end())
+						{
+							expansionBufferRegions.push_back(region);
+							loadSpilloverLeft = expansionBufferRegions.end();
+							loadSpilloverLeft--;
+						}
+						else
+							loadSpilloverLeft = expansionBufferRegions.insert(insert, region);
+					}
+	#ifdef DEBUG_EXPANSION
+					dumpExpansionDebug(threadID);
+	#endif
+
+					OpenNode *bufferToRead = expansionBuffer + loadSpilloverLeft->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+
+					expansionSpilloverInUse = true;
+					lock.unlock();
+
+					expansionReadSpillover(bufferToRead, count);
+
+					lock.lock();
+					expansionSpilloverInUse = false;
+
+					expansionSpilloverAvailable -= count;
+
+					expansionMarkRegionFilled(loadSpilloverLeft);
+	#ifdef DEBUG_EXPANSION
+					dumpExpansionDebug(threadID);
+	#endif
+				}
+				if (spilloverRight && expansionSpilloverAvailable)
+				{
+					size_t count = loadSpilloverRight->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+					
+					if (count <= expansionSpilloverAvailable)
+						loadSpilloverRight->type = EXPANSION_BUFFER_REGION_READING;
+					else
+					{
+						count = expansionSpilloverAvailable;
+						expansionBufferRegion region;
+						region.pos = loadSpilloverRight->pos;
+						assert(count % EXPANSION_NODES_PER_QUEUE_ELEMENT == 0);
+						region.length = (unsigned)(count / EXPANSION_NODES_PER_QUEUE_ELEMENT);
+						region.type = EXPANSION_BUFFER_REGION_READING;
+						loadSpilloverRight->pos    += region.length;
+						loadSpilloverRight->length -= region.length;
+						loadSpilloverRight = expansionBufferRegions.insert(loadSpilloverRight, region);
+					}
+	#ifdef DEBUG_EXPANSION
+					dumpExpansionDebug(threadID);
+	#endif
+
+					OpenNode *bufferToRead = expansionBuffer + loadSpilloverRight->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+
+					expansionSpilloverInUse = true;
+					lock.unlock();
+					
+					expansionReadSpillover(bufferToRead, count);
+					
+					lock.lock();
+					expansionSpilloverInUse = false;
+
+					expansionMarkRegionFilled(loadSpilloverRight);
+	#ifdef DEBUG_EXPANSION
+					dumpExpansionDebug(threadID);
+	#endif
+				}
+
+				continue;
+			}
+		}
+
+		if (longestFilledLength >= expansionBufferFillThreshold)
+		{
+			std::list<expansionBufferRegion>::iterator after = longestFilledRegion; ++after;
+			if (after == expansionBufferRegions.end() || after->type != EXPANSION_BUFFER_REGION_EMPTY || after->length > 1)
+				sortExpansionRegion(longestFilledRegion, threadID, lock);
+		}
+		else
+		if (bestRegionToFill == expansionBufferRegions.end())
+		{
+			if (shortestFilledLength && !expansionSpilloverInUse)
+			{
+				std::list<expansionBufferRegion>::iterator& regionToWrite = shortestFilledRegion;
+
+				OpenNode *bufferToWrite = expansionBuffer + regionToWrite->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+				size_t count = regionToWrite->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+				regionToWrite->type = EXPANSION_BUFFER_REGION_WRITING;
+#ifdef DEBUG_EXPANSION
+				dumpExpansionDebug(threadID);
+#endif
+
+				expansionSpilloverInUse = true;
+				lock.unlock();
+					
+				expansionWriteSpillover(bufferToWrite, count);
+				
+				lock.lock();
+				expansionSpilloverInUse = false;
+
+				emptyExpansionBufferRegion(regionToWrite, threadID);
+				continue;
+			}
+			else
+			{
+				{
+					SCOPED_LOCK lock(processQueueMutex);
+					if (processQueueHead == processQueueTail && stopWorkers)
+						return;
+				}
+				// wait until another thread empties queue element(s)
+				lock.unlock();
+				SLEEP(1);
+				lock.lock();
+			}
+		}
+		else
+		{
+			expansionBufferRegion region;
+			region.length = 1;
+			region.type = (expansionBufferRegionType)(EXPANSION_BUFFER_REGION_FILLING + threadID);
+			if (fillReverse)
+			{
+				if (bestRegionToFill->length == 1)
+				{
+					region.pos = bestRegionToFill->pos;
+					bestRegionToFill->type = region.type;
+					expansionThreadIter[threadID] = bestRegionToFill;
+				}
+				else
+				{
+					region.pos = bestRegionToFill->pos + bestRegionToFill->length - 1;
+					std::list<expansionBufferRegion>::iterator insert = bestRegionToFill;
+					if (++insert == expansionBufferRegions.end())
+					{
+						expansionBufferRegions.push_back(region);
+						expansionThreadIter[threadID] = expansionBufferRegions.end();
+						expansionThreadIter[threadID]--;
+					}
+					else
+						expansionThreadIter[threadID] = expansionBufferRegions.insert(insert, region);
+					bestRegionToFill->length--;
+				}
+
+				expansionThread[threadID].i = EXPANSION_NODES_PER_QUEUE_ELEMENT-1;
+				expansionThread[threadID].increment = -1;
+			}
+			else
+			{
+				region.pos = bestRegionToFill->pos;
+				if (bestRegionToFill->length == 1)
+				{
+					bestRegionToFill->type = region.type;
+					expansionThreadIter[threadID] = bestRegionToFill;
+				}
+				else
+				{
+					expansionThreadIter[threadID] = expansionBufferRegions.insert(bestRegionToFill, region);
+					bestRegionToFill->pos++;
+					bestRegionToFill->length--;
+				}
+
+				expansionThread[threadID].i = 0;
+				expansionThread[threadID].increment = +1;
+			}
+			debug_assert(expansionThread[threadID].buffer == NULL);
+			expansionThread[threadID].buffer = expansionBuffer + region.pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+#ifdef DEBUG_EXPANSION
+			dumpExpansionDebug(threadID);
+#endif
+			break;
+		}
+	}
+}
+
 template<class NODE>
 void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 {
@@ -1581,260 +2147,7 @@ void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 	expansionThread[threadID].buffer[expansionThread[threadID].i].frame = (PACKED_FRAME)frame;
 	expansionThread[threadID].i += expansionThread[threadID].increment;
 	if (expansionThread[threadID].i == (expansionThread[threadID].increment<0 ? -1 : EXPANSION_NODES_PER_QUEUE_ELEMENT))
-	{
-		SCOPED_LOCK lock(expansionMutex);
-
-		{
-			std::list<expansionBufferRegion>::iterator before = expansionThreadIter[threadID];
-			std::list<expansionBufferRegion>::iterator after  = expansionThreadIter[threadID]; ++after;
-			if (before != expansionBufferRegions.begin() && (--before)->type == EXPANSION_BUFFER_REGION_FILLED)
-			{
-				if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_FILLED)
-				{
-					before->length += 1 + after->length;
-					expansionBufferRegions.erase(expansionThreadIter[threadID], ++after);
-				}
-				else
-				{
-					before->length++;
-					expansionBufferRegions.erase(expansionThreadIter[threadID]);
-				}
-			}
-			else
-			if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_FILLED)
-			{
-				after->pos--;
-				after->length++;
-				expansionBufferRegions.erase(expansionThreadIter[threadID]);
-			}
-			else
-				expansionThreadIter[threadID]->type = EXPANSION_BUFFER_REGION_FILLED;
-		}
-
-#ifdef DEBUG_EXPANSION
-		dumpExpansionDebug(threadID);
-#endif
-
-		while (true)
-		{
-			std::list<expansionBufferRegion>::iterator bestRegionToFill = expansionBufferRegions.end();
-			unsigned bestRegionToFillFlankingLength = 0;
-			unsigned bestRegionToFillClosestDistanceFromDesired = EXPANSION_BUFFER_SLOTS+1;
-			bool fillReverse = false;
-
-			std::list<expansionBufferRegion>::iterator leftEmpty = expansionBufferRegions.end();
-			unsigned contiguouslyFilledLength = 0;
-			
-			std::list<expansionBufferRegion>::iterator longestFilledRegion = expansionBufferRegions.end();
-			unsigned longestFilledLength = 0;
-
-			for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin();; i++)
-			{
-				bool end = i==expansionBufferRegions.end();
-				if (!end && INRANGE(i->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLED))
-				{
-					if (longestFilledLength < i->length)
-					{
-						longestFilledLength = i->length;
-						longestFilledRegion = i;
-					}
-					contiguouslyFilledLength += i->length;
-				}
-				else
-				{
-					if (contiguouslyFilledLength)
-					{
-						if (leftEmpty != expansionBufferRegions.end()) // is there an empty region adjacent to this filled region on the left?
-						{
-							unsigned distanceFromDesired = (unsigned)abs((int)contiguouslyFilledLength + (int)leftEmpty->length - (int)EXPANSION_BUFFER_FILL_THRESHOLD);
-							if (bestRegionToFillClosestDistanceFromDesired > distanceFromDesired)
-							{
-								bestRegionToFillClosestDistanceFromDesired = distanceFromDesired;
-								bestRegionToFill = leftEmpty;
-								fillReverse = true;
-							}
-						}
-						if (!end && i->type == EXPANSION_BUFFER_REGION_EMPTY) // is there an empty region adjacent to this filled region on the right?
-						{
-							unsigned distanceFromDesired = (unsigned)abs((int)contiguouslyFilledLength + (int)i->length - (int)EXPANSION_BUFFER_FILL_THRESHOLD);
-							if (bestRegionToFillClosestDistanceFromDesired > distanceFromDesired)
-							{
-								bestRegionToFillClosestDistanceFromDesired = distanceFromDesired;
-								bestRegionToFill = i;
-								fillReverse = false;
-							}
-						}
-					}
-					if (end)
-						break;
-
-					if (i->type == EXPANSION_BUFFER_REGION_EMPTY)
-					{
-						leftEmpty = i;
-						if (bestRegionToFill == expansionBufferRegions.end())
-						{
-							bestRegionToFill = i;
-							std::list<expansionBufferRegion>::iterator before = i;
-							fillReverse = (before != expansionBufferRegions.begin() && !INRANGE((--before)->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLED));
-						}
-					}
-
-					contiguouslyFilledLength = 0;
-				}
-			}
-
-			bool sortThis = false;
-			if (longestFilledLength >= EXPANSION_BUFFER_FILL_THRESHOLD || bestRegionToFill == expansionBufferRegions.end() && longestFilledLength)
-			{
-				std::list<expansionBufferRegion>::iterator after = longestFilledRegion; ++after;
-				if (after == expansionBufferRegions.end() || after->type != EXPANSION_BUFFER_REGION_EMPTY || after->length > 1)
-					sortThis = true;
-			}
-			if (sortThis)
-			{
-				std::list<expansionBufferRegion>::iterator& regionToSort = longestFilledRegion;
-
-				/*
-				assert(regionToSort->length == longestFilledLength);
-				if (regionToSort->length > EXPANSION_BUFFER_FILL_THRESHOLD)
-				{
-					expansionBufferRegion region;
-					region.pos = regionToSort->pos + EXPANSION_BUFFER_FILL_THRESHOLD;
-					region.length = regionToSort->length - EXPANSION_BUFFER_FILL_THRESHOLD;
-					region.type = EXPANSION_BUFFER_REGION_FILLED;
-					std::list<expansionBufferRegion>::iterator insert = regionToSort;
-					expansionBufferRegions.insert(++insert, region);
-					regionToSort->length = EXPANSION_BUFFER_FILL_THRESHOLD;
-				}
-				*/
-
-				numSortsInProgress++;
-				regionToSort->type = EXPANSION_BUFFER_REGION_SORTING;
-				OpenNode *bufferToSort = expansionBuffer + regionToSort->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
-				size_t count = regionToSort->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
-				
-#ifdef DEBUG_EXPANSION
-				dumpExpansionDebug(threadID);
-#endif
-
-				lock.unlock();
-				
-				std::sort(bufferToSort, bufferToSort + count);
-				count = deduplicate(bufferToSort, count);
-
-				lock.lock();
-
-				unsigned oldLength = regionToSort->length;
-				unsigned newLength = (unsigned)((count + EXPANSION_NODES_PER_QUEUE_ELEMENT-1) / EXPANSION_NODES_PER_QUEUE_ELEMENT);
-				regionToSort->length = newLength;
-				regionToSort->type = EXPANSION_BUFFER_REGION_WRITING;
-				std::list<expansionBufferRegion>::iterator nextRegion = regionToSort; ++nextRegion;
-				if (nextRegion != expansionBufferRegions.end() && nextRegion->type == EXPANSION_BUFFER_REGION_EMPTY)
-				{
-					nextRegion->pos    -= oldLength - newLength;
-					nextRegion->length += oldLength - newLength;
-				}
-				else
-				if (oldLength > newLength)
-				{
-					expansionBufferRegion region;
-					region.pos = regionToSort->pos + newLength;
-					region.length = oldLength - newLength;
-					region.type = EXPANSION_BUFFER_REGION_EMPTY;
-					expansionBufferRegions.insert(nextRegion, region);
-				}
-				numSortsInProgress--;
-
-#ifdef DEBUG_EXPANSION
-				dumpExpansionDebug(threadID);
-#endif
-
-				unsigned chunk = expansionChunks++;
-
-				lock.unlock();
-
-				OutputStream<OpenNode> output(formatFileName("expanded", currentFrameGroup, chunk), false);
-				output.write(bufferToSort, count);
-
-				lock.lock();
-
-				std::list<expansionBufferRegion>::iterator before = regionToSort;
-				std::list<expansionBufferRegion>::iterator after  = regionToSort; ++after;
-				if (before != expansionBufferRegions.begin() && (--before)->type == EXPANSION_BUFFER_REGION_EMPTY)
-				{
-					if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_EMPTY)
-					{
-						before->length += newLength + after->length;
-						expansionBufferRegions.erase(regionToSort, ++after);
-					}
-					else
-					{
-						before->length += newLength;
-						expansionBufferRegions.erase(regionToSort);
-					}
-				}
-				else
-				if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_EMPTY)
-				{
-					after->pos    -= newLength;
-					after->length += newLength;
-					expansionBufferRegions.erase(regionToSort);
-				}
-				else
-					regionToSort->type = EXPANSION_BUFFER_REGION_EMPTY;
-
-#ifdef DEBUG_EXPANSION
-				dumpExpansionDebug(threadID);
-#endif
-			}
-			else
-			if (bestRegionToFill != expansionBufferRegions.end())
-			{
-				expansionBufferRegion region;
-				region.length = 1;
-				region.type = (expansionBufferRegionType)(EXPANSION_BUFFER_REGION_FILLING + threadID);
-				if (fillReverse)
-				{
-					region.pos = bestRegionToFill->pos + bestRegionToFill->length - 1;
-					std::list<expansionBufferRegion>::iterator insert = bestRegionToFill;
-					expansionThreadIter[threadID] = expansionBufferRegions.insert(++insert, region);
-					if (--bestRegionToFill->length == 0)
-						expansionBufferRegions.erase(bestRegionToFill);
-
-					expansionThread[threadID].i = EXPANSION_NODES_PER_QUEUE_ELEMENT-1;
-					expansionThread[threadID].increment = -1;
-				}
-				else
-				{
-					region.pos = bestRegionToFill->pos;
-					expansionThreadIter[threadID] = expansionBufferRegions.insert(bestRegionToFill, region);
-					if (--bestRegionToFill->length == 0)
-						expansionBufferRegions.erase(bestRegionToFill);
-					else
-						bestRegionToFill->pos++;
-
-					expansionThread[threadID].i = 0;
-					expansionThread[threadID].increment = +1;
-				}
-				expansionThread[threadID].buffer = expansionBuffer + region.pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
-#ifdef DEBUG_EXPANSION
-				dumpExpansionDebug(threadID);
-#endif
-				break;
-			}
-			else
-			{
-				{
-					SCOPED_LOCK lock(processQueueMutex);
-					if (processQueueHead == processQueueTail && stopWorkers)
-						return;
-				}
-				lock.unlock();
-				SLEEP(1);
-				lock.lock();
-			}
-		}
-	}
+		expansionHandleFilledQueueElement(threadID);
 }
 
 void expansionSortFinalRegions(THREAD_ID threadID)
@@ -1995,6 +2308,9 @@ void expansionWriteFinalChunk()
 	mergeStreams<OpenNode>(inputs, numInputs, &output);
 
 	expansionChunks++;
+
+	if (expansionSpilloverOutOpen)
+		expansionSpilloverOut.close();
 }
 
 void mergeExpanded()
@@ -2699,7 +3015,7 @@ int search()
 		printf("; Expanding..."); fflush(stdout);
 
 		{
-			BufferedInputStream<Node> input(STANDARD_BUFFER_SIZE); // allocate buffer outside of "ram"; reserve "ram" exclusively for expansion
+			BufferedInputStream<Node> input(CLOSED_IN_BUFFER_SIZE); // allocate buffer outside of "ram"; reserve "ram" exclusively for expansion
 			input.open(formatFileName("closed", currentFrameGroup));
 
 			ProcessStateOutput output;
