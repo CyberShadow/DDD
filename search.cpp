@@ -1816,7 +1816,7 @@ void expansionMarkRegionFilled(std::list<expansionBufferRegion>::iterator& regio
 
 OpenNode *expansionReadSpilloverBuffer;
 size_t    expansionReadSpilloverCount;
-std::list<expansionBufferRegion>::iterator *expansionReadSpilloverRegion;
+std::list<expansionBufferRegion>::iterator expansionReadSpilloverRegion;
 // only allow one instance of this thread
 void expansionReadSpilloverThread(THREAD_ID threadID)
 {
@@ -1827,7 +1827,7 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 
 		expansionSpilloverInUse = false;
 
-		expansionMarkRegionFilled(*expansionReadSpilloverRegion);
+		expansionMarkRegionFilled(expansionReadSpilloverRegion);
 #ifdef DEBUG_EXPANSION
 		dumpExpansionDebug(threadID);
 #endif
@@ -1977,7 +1977,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 
 					expansionReadSpilloverBuffer = expansionBuffer + loadSpilloverRegion->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 					expansionReadSpilloverCount  = count;
-					expansionReadSpilloverRegion = &loadSpilloverRegion;
+					expansionReadSpilloverRegion = loadSpilloverRegion;
 
 					expansionSpilloverInUse = true;
 
