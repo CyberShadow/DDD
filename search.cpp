@@ -1372,11 +1372,11 @@ Node processQueue[PROCESS_QUEUE_SIZE]; // circular buffer
 size_t processQueueHead=0, processQueueTail=0;
 MUTEX processQueueMutex; // for head/tail
 CONDITION processQueueReadCondition, processQueueWriteCondition, processQueueExitCondition;
-int runningWorkers = 0;
-bool stopWorkers = false;
+volatile int runningWorkers = 0;
+volatile bool stopWorkers = false;
 CONDITION specialWorkersExitCondition;
-int runningSpecialWorkers = 0;
-bool stopSpecialWorkers = false;
+volatile int runningSpecialWorkers = 0;
+volatile bool stopSpecialWorkers = false;
 
 void expansionReadSpilloverThread(THREAD_ID threadID);
 void expansionSortFinalRegions(THREAD_ID threadID);
@@ -1438,16 +1438,16 @@ void flushProcessingQueue()
 {
 	SCOPED_LOCK lock(processQueueMutex);
 
+	stopSpecialWorkers = true;
+	while (runningSpecialWorkers)
+		CONDITION_WAIT(specialWorkersExitCondition, lock);
+	stopSpecialWorkers = false;
+
 	stopWorkers = true;
 	CONDITION_NOTIFY(processQueueWriteCondition, lock);
 	while (runningWorkers)
 		CONDITION_WAIT(processQueueExitCondition, lock);
 	stopWorkers = false;
-
-	stopSpecialWorkers = true;
-	while (runningSpecialWorkers)
-		CONDITION_WAIT(specialWorkersExitCondition, lock);
-	stopSpecialWorkers = false;
 }
 
 #endif
@@ -1462,7 +1462,7 @@ uint64_t combinedNodesTotal;
 BufferedOutputStream<Node> closedNodeFile;
 
 
-bool expansionSpilloverInUse;
+bool expansionSpilloverLocked; // true if expansion spillover is currently being read or written to
 
 OutputStream<OpenNode> expansionSpilloverOut;
 bool expansionSpilloverOutOpen;
@@ -1474,7 +1474,7 @@ bool expansionSpilloverInOpen;
 unsigned expansionSpilloverChunkIn;
 size_t   expansionSpilloverChunkInPos;
 
-size_t expansionSpilloverAvailable;
+size_t expansionSpilloverNodesQueued;
 
 
 #define EXPANSION_BUFFER_SLOTS (RAM_SIZE / sizeof(OpenNode) / EXPANSION_NODES_PER_QUEUE_ELEMENT)
@@ -1565,14 +1565,14 @@ void dumpExpansionDebug(THREAD_ID threadID)
 
 void initExpansion()
 {
-	expansionSpilloverInUse = false;
+	expansionSpilloverLocked = false;
 	expansionSpilloverOutOpen = false;
 	expansionSpilloverChunkOut = 0;
 	expansionSpilloverChunkOutPos = 0;
 	expansionSpilloverInOpen = false;
 	expansionSpilloverChunkIn = 0;
 	expansionSpilloverChunkInPos = 0;
-	expansionSpilloverAvailable = 0;
+	expansionSpilloverNodesQueued = 0;
 
 	numSortsInProgress = 0;
 	expansionChunkWriteInProgress = false;
@@ -1795,7 +1795,7 @@ void expansionWriteSpillover(OpenNode *bufferToWrite, size_t count)
 		expansionSpilloverOut.write(bufferToWrite, count);
 
 		expansionSpilloverChunkOutPos += count;
-		expansionSpilloverAvailable   += count;
+		expansionSpilloverNodesQueued += count;
 
 		if (spilloverToNextChunk >= 0)
 		{
@@ -1839,12 +1839,12 @@ void expansionReadSpillover(OpenNode *bufferToRead, size_t count)
 
 		expansionSpilloverIn.read(bufferToRead, count);
 
-		expansionSpilloverChunkInPos += count;
-		expansionSpilloverAvailable  -= count;
+		expansionSpilloverChunkInPos  += count;
+		expansionSpilloverNodesQueued -= count;
 
-		assert(expansionSpilloverAvailable >= 0);
+		assert(expansionSpilloverNodesQueued >= 0);
 
-		if (expansionSpilloverAvailable == 0)
+		if (expansionSpilloverNodesQueued == 0)
 		{
 			expansionSpilloverIn.close();
 			deleteFile(formatFileName("expansionSpillover", currentFrameGroup, expansionSpilloverChunkIn));
@@ -1899,7 +1899,7 @@ void expansionWriteSpilloverThread(THREAD_ID threadID)
 	{
 		SCOPED_LOCK lock(expansionMutex);
 
-		expansionSpilloverInUse = false;
+		expansionSpilloverLocked = false;
 
 		expansionRegionMarkEmpty(expansionSpilloverThreadBuffer[0].region, threadID);
 		if (expansionSpilloverThreadBuffer[1].buffer)
@@ -1916,7 +1916,7 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 
 	while (true)
 	{
-		if (!expansionSpilloverAvailable)
+		if (!expansionSpilloverNodesQueued)
 		{
 			SCOPED_LOCK lock(processQueueMutex);
 			if (stopSpecialWorkers)
@@ -1927,7 +1927,7 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 			}
 		}
 		else
-		if (!expansionSpilloverInUse && !expansionChunkWriteInProgress)
+		if (!expansionSpilloverLocked && !expansionChunkWriteInProgress)
 		{
 			std::list<expansionBufferRegion>::iterator firstEmptyRegionToFill;
 			bool foundEmptyRegionToFill = false;
@@ -1947,7 +1947,7 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 
 			if (foundEmptyRegionToFill && firstEmptyRegionToFill->length >= expansionSpilloverReadThreshold)
 			{
-				size_t expansionSpilloverPresented = expansionSpilloverAvailable;
+				size_t expansionSpilloverPresented = expansionSpilloverNodesQueued;
 				if (expansionSpilloverPresented > expansionSpilloverReadThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT)
 					expansionSpilloverPresented = expansionSpilloverReadThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 
@@ -1973,13 +1973,13 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 
 				OpenNode *buffer = expansionBuffer + firstEmptyRegionToFill->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 
-				expansionSpilloverInUse = true;
+				expansionSpilloverLocked = true;
 				lock.unlock();
 
 				expansionReadSpillover(buffer, count);
 		
 				lock.lock();
-				expansionSpilloverInUse = false;
+				expansionSpilloverLocked = false;
 
 				expansionRegionMarkFilled(firstEmptyRegionToFill, threadID);
 
@@ -2049,7 +2049,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 			continue;
 		}
 
-		if (totalEmptyLength <= 1 && !expansionSpilloverInUse && !expansionChunkWriteInProgress && foundRightmostFilledRegion)
+		if (totalEmptyLength <= 1 && !expansionSpilloverLocked && !expansionChunkWriteInProgress && foundRightmostFilledRegion)
 		{
 			std::list<expansionBufferRegion>::iterator& regionToWrite = rightmostFilledRegionToSpillover;
 			debug_assert(regionToWrite->length != 0);
@@ -2114,7 +2114,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 			dumpExpansionDebug(threadID);
 #endif
 
-			expansionSpilloverInUse = true;
+			expansionSpilloverLocked = true;
 
 			THREAD_CREATE(expansionWriteSpilloverThread, 0);
 
@@ -2266,6 +2266,20 @@ sortNextFilledRegion:
 
 		goto sortNextFilledRegion;
 	}
+
+	lock.unlock();
+	{
+		SCOPED_LOCK lock(processQueueMutex);
+		
+		if (runningSpecialWorkers)
+		{
+			lock.unlock();
+			SLEEP(1);
+			lock.lock();
+			goto sortNextFilledRegion;
+		}
+	}
+	lock.lock();
 
 	if (expansionThreadIter[threadID]->length)
 	{
