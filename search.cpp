@@ -2060,7 +2060,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 		unsigned totalEmptyLength = 0;
 
 		std::list<expansionBufferRegion>::iterator longestFilledRegionToSort;
-volatile		unsigned longestFilledLength = 0;
+		unsigned longestFilledLength = 0;
 		
 #ifdef ENABLE_EXPANSION_SPILLOVER
 		std::list<expansionBufferRegion>::iterator rightmostFilledRegionToSpillover;
