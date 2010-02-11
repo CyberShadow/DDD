@@ -1542,7 +1542,7 @@ struct
 {
 	OpenNode* buffer;
 	int i, increment;
-	size_t finalSortCount;
+	OpenNode* finalSortBufferEnd;
 } expansionThread[WORKERS];
 
 #ifdef DEBUG_EXPANSION
@@ -1800,7 +1800,7 @@ void sortExpansionSpilloverThread(THREAD_ID threadID)
 {
 	expansionBufferSortedRegion region;
 	region.start = expansionThread[threadID].buffer;
-	region.end = expansionThread[threadID].buffer + expansionThread[threadID].finalSortCount;
+	region.end = expansionThread[threadID].finalSortBufferEnd;
 
 	std::sort(region.start, region.end);
 
@@ -1827,7 +1827,7 @@ void expansionWriteSpillover(OpenNode *bufferToWrite, size_t count)
 			expansionSpilloverOutOpen = true;
 		}
 
-		fpos_t spilloverToNextChunk = expansionSpilloverChunkOutPos + count - expansionBufferFillThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+		fpos_t spilloverToNextChunk = expansionSpilloverChunkOutPos + count - SPILLOVER_CHUNK_SIZE * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 		if (spilloverToNextChunk > 0)
 			count -= spilloverToNextChunk;
 
@@ -1872,7 +1872,7 @@ void expansionReadSpillover(OpenNode *bufferToRead, size_t count)
 			expansionSpilloverInOpen = true;
 		}
 
-		fpos_t spilloverToNextChunk = expansionSpilloverChunkInPos + count - expansionBufferFillThreshold * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+		fpos_t spilloverToNextChunk = expansionSpilloverChunkInPos + count - SPILLOVER_CHUNK_SIZE * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 		if (spilloverToNextChunk > 0)
 			count -= spilloverToNextChunk;
 
@@ -2366,16 +2366,19 @@ void expansionMergeRegionsToDisk()
 
 void expansionWriteFinalChunk()
 {
-	expansionBufferRegions.clear();
-
-	if (expansionBufferRegionsToMerge.empty())
-		return;
-
 #ifdef DEBUG_EXPANSION
-	dumpExpansionDebug(0);
+	{
+		timeb time1;
+		ftime(&time1);
+		fprintf(expansionDebug, "Merging sorted region(s) to disk.\n", time1.time, time1.millitm, WORKERS);
+		fflush(expansionDebug);
+	}
 #endif
 
-	expansionMergeRegionsToDisk();
+	expansionBufferRegions.clear();
+
+	if (!expansionBufferRegionsToMerge.empty())
+		expansionMergeRegionsToDisk();
 
 	if (expansionSpilloverOutOpen)
 		expansionSpilloverOut.close();
@@ -2399,10 +2402,9 @@ void expansionWriteFinalChunk()
 		size_t numerator = 0;
 		for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 		{
-			expansionThread[threadID].buffer = expansionBuffer + numerator/WORKERS;
-			size_t next_numerator = numerator + count;
-			expansionThread[threadID].finalSortCount = next_numerator/WORKERS - numerator/WORKERS;
-			numerator = next_numerator;
+			expansionThread[threadID].buffer             = expansionBuffer + numerator/WORKERS;
+			numerator += count;
+			expansionThread[threadID].finalSortBufferEnd = expansionBuffer + numerator/WORKERS;
 		}
 
 #ifdef DEBUG_EXPANSION
