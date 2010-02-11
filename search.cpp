@@ -1426,28 +1426,28 @@ void worker(THREAD_ID threadID)
 template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID)>
 void startWorkers()
 {
+	runningSpecialWorkers++;
+	THREAD_CREATE(expansionReadSpilloverThread, 0);
+
 	runningWorkers += WORKERS;
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 		THREAD_CREATE(worker<STATE_HANDLER>, threadID);
-
-	runningSpecialWorkers++;
-	THREAD_CREATE(expansionReadSpilloverThread, 0);
 }
 
 void flushProcessingQueue()
 {
 	SCOPED_LOCK lock(processQueueMutex);
 
-	stopSpecialWorkers = true;
-	while (runningSpecialWorkers)
-		CONDITION_WAIT(specialWorkersExitCondition, lock);
-	stopSpecialWorkers = false;
-
 	stopWorkers = true;
 	CONDITION_NOTIFY(processQueueWriteCondition, lock);
 	while (runningWorkers)
 		CONDITION_WAIT(processQueueExitCondition, lock);
 	stopWorkers = false;
+
+	stopSpecialWorkers = true;
+	while (runningSpecialWorkers)
+		CONDITION_WAIT(specialWorkersExitCondition, lock);
+	stopSpecialWorkers = false;
 }
 
 #endif
@@ -1477,7 +1477,7 @@ size_t   expansionSpilloverChunkInPos;
 size_t expansionSpilloverNodesQueued;
 
 
-#define EXPANSION_BUFFER_SLOTS (RAM_SIZE / sizeof(OpenNode) / EXPANSION_NODES_PER_QUEUE_ELEMENT)
+#define EXPANSION_BUFFER_SLOTS (OPENNODE_BUFFER_SIZE / EXPANSION_NODES_PER_QUEUE_ELEMENT)
 #define EXPANSION_BUFFER_SIZE (EXPANSION_BUFFER_SLOTS * EXPANSION_NODES_PER_QUEUE_ELEMENT)
 
 const unsigned expansionBufferFillThreshold ((unsigned)(EXPANSION_BUFFER_SLOTS * EXPANSION_BUFFER_FILL_RATIO)  <=   EXPANSION_BUFFER_SLOTS - (WORKERS-1) ?
@@ -1527,6 +1527,7 @@ struct
 {
 	OpenNode* buffer;
 	int i, increment;
+	size_t finalSortCount;
 } expansionThread[WORKERS];
 
 #ifdef DEBUG_EXPANSION
@@ -1777,6 +1778,27 @@ void sortExpansionRegion(std::list<expansionBufferRegion>::iterator& regionToSor
 	THREAD_CREATE(expansionWriteChunkThread, 0);
 }
 
+void sortExpansionSpilloverThread(THREAD_ID threadID)
+{
+	expansionBufferSortedRegion region;
+	region.start = expansionThread[threadID].buffer;
+
+	std::sort(expansionThread[threadID].buffer, expansionThread[threadID].buffer + expansionThread[threadID].finalSortCount);
+	size_t count = deduplicate(expansionThread[threadID].buffer, expansionThread[threadID].finalSortCount);
+	region.end = expansionThread[threadID].buffer + count;
+
+	{
+		SCOPED_LOCK lock(expansionMutex);
+		expansionBufferRegionsToMerge.push(region);
+	}
+
+	{
+		SCOPED_LOCK lock(processQueueMutex);
+		runningSpecialWorkers--;
+		CONDITION_NOTIFY(specialWorkersExitCondition, lock);
+	}
+}
+
 void expansionWriteSpillover(OpenNode *bufferToWrite, size_t count)
 {
 	while (true)
@@ -1916,7 +1938,6 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 
 	while (true)
 	{
-		if (!expansionSpilloverNodesQueued)
 		{
 			SCOPED_LOCK lock(processQueueMutex);
 			if (stopSpecialWorkers)
@@ -1926,8 +1947,7 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 				return;
 			}
 		}
-		else
-		if (!expansionSpilloverLocked && !expansionChunkWriteInProgress)
+		if (expansionSpilloverNodesQueued && !expansionSpilloverLocked && !expansionChunkWriteInProgress)
 		{
 			std::list<expansionBufferRegion>::iterator firstEmptyRegionToFill;
 			bool foundEmptyRegionToFill = false;
@@ -2267,20 +2287,6 @@ sortNextFilledRegion:
 		goto sortNextFilledRegion;
 	}
 
-	lock.unlock();
-	{
-		SCOPED_LOCK lock(processQueueMutex);
-		
-		if (runningSpecialWorkers)
-		{
-			lock.unlock();
-			SLEEP(1);
-			lock.lock();
-			goto sortNextFilledRegion;
-		}
-	}
-	lock.lock();
-
 	if (expansionThreadIter[threadID]->length)
 	{
 		if (expansionThread[threadID].i != (expansionThread[threadID].increment<0 ? EXPANSION_NODES_PER_QUEUE_ELEMENT-1 : 0))
@@ -2322,18 +2328,8 @@ sortNextFilledRegion:
 	}
 }
 
-void expansionWriteFinalChunk()
+void expansionMergeRegionsToDisk()
 {
-#ifdef DEBUG_EXPANSION
-	dumpExpansionDebug(0);
-	fclose(expansionDebug);
-#endif
-
-	expansionBufferRegions.clear();
-
-	if (expansionBufferRegionsToMerge.empty())
-		return;
-
 	unsigned numInputs = 0;
 	MemoryInputStream<OpenNode>* inputs = new MemoryInputStream<OpenNode> [expansionBufferRegionsToMerge.size()];
 	while (!expansionBufferRegionsToMerge.empty())
@@ -2349,6 +2345,68 @@ void expansionWriteFinalChunk()
 	mergeStreams<OpenNode>(inputs, numInputs, &output);
 
 	expansionChunks++;
+}
+
+void expansionWriteFinalChunk()
+{
+	expansionBufferRegions.clear();
+
+	if (expansionBufferRegionsToMerge.empty())
+		return;
+
+	expansionMergeRegionsToDisk();
+
+	while (expansionSpilloverNodesQueued)
+	{
+		size_t count = OPENNODE_BUFFER_SIZE;
+		if (count > expansionSpilloverNodesQueued)
+			count = expansionSpilloverNodesQueued;
+#ifdef DEBUG_EXPANSION
+		{
+			timeb time1;
+			ftime(&time1);
+			fprintf(expansionDebug, "%9d.%03d: Flushing %llu nodes of spillover...", time1.time, time1.millitm, count);
+			fflush(expansionDebug);
+		}
+#endif
+
+		expansionReadSpillover(expansionBuffer, count);
+
+		size_t numerator = 0;
+		for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+		{
+			expansionThread[threadID].buffer = expansionBuffer + numerator / WORKERS;
+			expansionThread[threadID].finalSortCount;
+			numerator += count;
+		}
+
+#ifdef DEBUG_EXPANSION
+		{
+			timeb time1;
+			ftime(&time1);
+			fprintf(expansionDebug, "%9d.%03d: Sorting spillover with %u threads...", time1.time, time1.millitm, count, WORKERS);
+			fflush(expansionDebug);
+		}
+#endif
+
+		runningSpecialWorkers += WORKERS;
+		for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+			THREAD_CREATE(sortExpansionSpilloverThread, threadID);
+
+		{
+			SCOPED_LOCK lock(processQueueMutex);
+
+			while (runningSpecialWorkers)
+				CONDITION_WAIT(specialWorkersExitCondition, lock);
+		}
+
+		expansionMergeRegionsToDisk();
+	}
+
+#ifdef DEBUG_EXPANSION
+	dumpExpansionDebug(0);
+	fclose(expansionDebug);
+#endif
 
 	if (expansionSpilloverOutOpen)
 		expansionSpilloverOut.close();
@@ -2940,6 +2998,9 @@ int search()
 	if (currentFrameGroup == -1)
 	{
 		currentFrameGroup = 0;
+
+		printTime();
+		printf("Starting search\n");
 
 		{
 			OpenNode* initialCompressedStates = (OpenNode*)ram;
