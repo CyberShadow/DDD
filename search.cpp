@@ -2044,7 +2044,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 		unsigned totalEmptyLength = 0;
 
 		std::list<expansionBufferRegion>::iterator longestFilledRegionToSort;
-		unsigned longestFilledLength = 0;
+volatile		unsigned longestFilledLength = 0;
 		
 		std::list<expansionBufferRegion>::iterator rightmostFilledRegionToSpillover;
 		std::list<expansionBufferRegion>::iterator secondRightmostFilledRegionToSpillover;
@@ -2086,7 +2086,8 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 			continue;
 		}
 
-		if (totalEmptyLength <= expansionSpilloverSlack && !expansionSpilloverLocked && !expansionChunkWriteInProgress && foundRightmostFilledRegion)
+		if (totalEmptyLength <= expansionSpilloverSlack && longestFilledLength + expansionSpilloverSlack < expansionBufferFillThreshold
+			&& !expansionSpilloverLocked && !expansionChunkWriteInProgress && foundRightmostFilledRegion)
 		{
 			std::list<expansionBufferRegion>::iterator& regionToWrite = rightmostFilledRegionToSpillover;
 			debug_assert(regionToWrite->length != 0);
