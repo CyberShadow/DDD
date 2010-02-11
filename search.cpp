@@ -1500,6 +1500,8 @@ const unsigned expansionBufferFillThreshold ((unsigned)(EXPANSION_BUFFER_SLOTS *
 const unsigned expansionSpilloverWriteThreshold  = EXPANSION_BUFFER_SLOTS - expansionBufferFillThreshold;
 const unsigned expansionSpilloverReadThreshold   = EXPANSION_BUFFER_SLOTS - expansionBufferFillThreshold + 1;
 
+const unsigned expansionSpilloverSlack = (0x200000 + EXPANSION_NODES_PER_QUEUE_ELEMENT-1) / EXPANSION_NODES_PER_QUEUE_ELEMENT;
+
 OpenNode* const expansionBuffer    = (OpenNode*)ram;
 OpenNode* const expansionBufferEnd = (OpenNode*)ram + EXPANSION_BUFFER_SIZE;
 
@@ -1798,10 +1800,9 @@ void sortExpansionSpilloverThread(THREAD_ID threadID)
 {
 	expansionBufferSortedRegion region;
 	region.start = expansionThread[threadID].buffer;
+	region.end = expansionThread[threadID].buffer + expansionThread[threadID].finalSortCount;
 
-	std::sort(expansionThread[threadID].buffer, expansionThread[threadID].buffer + expansionThread[threadID].finalSortCount);
-	size_t count = deduplicate(expansionThread[threadID].buffer, expansionThread[threadID].finalSortCount);
-	region.end = expansionThread[threadID].buffer + count;
+	std::sort(region.start, region.end);
 
 	{
 		SCOPED_LOCK lock(expansionMutex);
@@ -2085,7 +2086,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 			continue;
 		}
 
-		if (totalEmptyLength <= 1 && !expansionSpilloverLocked && !expansionChunkWriteInProgress && foundRightmostFilledRegion)
+		if (totalEmptyLength <= expansionSpilloverSlack && !expansionSpilloverLocked && !expansionChunkWriteInProgress && foundRightmostFilledRegion)
 		{
 			std::list<expansionBufferRegion>::iterator& regionToWrite = rightmostFilledRegionToSpillover;
 			debug_assert(regionToWrite->length != 0);
@@ -2436,6 +2437,15 @@ void expansionWriteFinalChunk()
 
 		expansionMergeRegionsToDisk();
 	}
+
+#ifdef DEBUG_EXPANSION
+	{
+		timeb time1;
+		ftime(&time1);
+		fprintf(expansionDebug, "%9d.%03d: Finished flushing spillover.\n", time1.time, time1.millitm);
+		fflush(expansionDebug);
+	}
+#endif
 
 #ifdef DEBUG_EXPANSION
 	fclose(expansionDebug);
