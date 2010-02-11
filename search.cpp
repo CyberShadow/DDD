@@ -1444,6 +1444,7 @@ void flushProcessingQueue()
 {
 	SCOPED_LOCK lock(processQueueMutex);
 
+	// finish expansionReadSpilloverThread
 	stopSpecialWorkers = true;
 	while (runningSpecialWorkers)
 		CONDITION_WAIT(specialWorkersExitCondition, lock);
@@ -1455,10 +1456,11 @@ void flushProcessingQueue()
 		CONDITION_WAIT(processQueueExitCondition, lock);
 	stopWorkers = false;
 
-	stopSpecialWorkers = true;
+	// wait for expansionWriteChunkThread to finish
+	//stopSpecialWorkers = true;
 	while (runningSpecialWorkers)
 		CONDITION_WAIT(specialWorkersExitCondition, lock);
-	stopSpecialWorkers = false;
+	//stopSpecialWorkers = false;
 }
 
 #endif
@@ -2396,9 +2398,10 @@ void expansionWriteFinalChunk()
 		size_t numerator = 0;
 		for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 		{
-			expansionThread[threadID].buffer = expansionBuffer + numerator / WORKERS;
-			expansionThread[threadID].finalSortCount;
-			numerator += count;
+			expansionThread[threadID].buffer = expansionBuffer + numerator/WORKERS;
+			size_t next_numerator = numerator + count;
+			expansionThread[threadID].finalSortCount = next_numerator/WORKERS - numerator/WORKERS;
+			numerator = next_numerator;
 		}
 
 #ifdef DEBUG_EXPANSION
