@@ -2978,7 +2978,7 @@ int search()
 		searchPrintHeader();
 		searchPrintNodeCounts();
 
-		printf("; (Resuming)                                                 "); fflush(stdout);
+		printf("; (Resuming)                                                        "); fflush(stdout);
 
 		time2 = time0;
 
@@ -3113,9 +3113,11 @@ int search()
 
 		ftime(&time2);
 		{
-			time_t ms       = (time2.time - time1.time)*1000 + (time2.millitm - time1.millitm);
-			time_t ms_total = (time2.time - time0.time)*1000 + (time2.millitm - time0.millitm);
-			printf("%4d.%03d s (%4d.%03d s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000);
+			InputStream<Node> getSize(formatFileName("expanded", currentFrameGroup));
+			uint64_t expandedNodes = getSize.size();
+
+			time_t ms = (time2.time - time1.time)*1000 + (time2.millitm - time1.millitm);
+			printf("%4d.%03d s, %12llu nodes", ms/1000, ms%1000, expandedNodes);
 		}
 
 		if (checkStop(true))
