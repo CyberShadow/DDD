@@ -1426,10 +1426,16 @@ void worker(THREAD_ID threadID)
 template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID)>
 void startWorkers()
 {
-	runningSpecialWorkers++;
+	{
+		SCOPED_LOCK lock(processQueueMutex);
+		runningSpecialWorkers++;
+	}
 	THREAD_CREATE(expansionReadSpilloverThread, 0);
 
-	runningWorkers += WORKERS;
+	{
+		SCOPED_LOCK lock(processQueueMutex);
+		runningWorkers += WORKERS;
+	}
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 		THREAD_CREATE(worker<STATE_HANDLER>, threadID);
 }
@@ -1437,6 +1443,11 @@ void startWorkers()
 void flushProcessingQueue()
 {
 	SCOPED_LOCK lock(processQueueMutex);
+
+	stopSpecialWorkers = true;
+	while (runningSpecialWorkers)
+		CONDITION_WAIT(specialWorkersExitCondition, lock);
+	stopSpecialWorkers = false;
 
 	stopWorkers = true;
 	CONDITION_NOTIFY(processQueueWriteCondition, lock);
@@ -1774,7 +1785,10 @@ void sortExpansionRegion(std::list<expansionBufferRegion>::iterator& regionToSor
 
 	expansionChunkWriteInProgress = true;
 
-	runningSpecialWorkers++;
+	{
+		SCOPED_LOCK lock(processQueueMutex);
+		runningSpecialWorkers++;
+	}
 	THREAD_CREATE(expansionWriteChunkThread, 0);
 }
 
@@ -2354,7 +2368,14 @@ void expansionWriteFinalChunk()
 	if (expansionBufferRegionsToMerge.empty())
 		return;
 
+#ifdef DEBUG_EXPANSION
+	dumpExpansionDebug(0);
+#endif
+
 	expansionMergeRegionsToDisk();
+
+	if (expansionSpilloverOutOpen)
+		expansionSpilloverOut.close();
 
 	while (expansionSpilloverNodesQueued)
 	{
@@ -2365,7 +2386,7 @@ void expansionWriteFinalChunk()
 		{
 			timeb time1;
 			ftime(&time1);
-			fprintf(expansionDebug, "%9d.%03d: Flushing %llu nodes of spillover...", time1.time, time1.millitm, count);
+			fprintf(expansionDebug, "%9d.%03d: Reading %llu nodes of spillover...\n", time1.time, time1.millitm, count);
 			fflush(expansionDebug);
 		}
 #endif
@@ -2384,32 +2405,38 @@ void expansionWriteFinalChunk()
 		{
 			timeb time1;
 			ftime(&time1);
-			fprintf(expansionDebug, "%9d.%03d: Sorting spillover with %u threads...", time1.time, time1.millitm, count, WORKERS);
+			fprintf(expansionDebug, "%9d.%03d: Sorting spillover with %u threads...\n", time1.time, time1.millitm, WORKERS);
 			fflush(expansionDebug);
 		}
 #endif
 
-		runningSpecialWorkers += WORKERS;
-		for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-			THREAD_CREATE(sortExpansionSpilloverThread, threadID);
-
 		{
 			SCOPED_LOCK lock(processQueueMutex);
-
+			runningSpecialWorkers += WORKERS;
+		}
+		for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+			THREAD_CREATE(sortExpansionSpilloverThread, threadID);
+		{
+			SCOPED_LOCK lock(processQueueMutex);
 			while (runningSpecialWorkers)
 				CONDITION_WAIT(specialWorkersExitCondition, lock);
 		}
+
+#ifdef DEBUG_EXPANSION
+		{
+			timeb time1;
+			ftime(&time1);
+			fprintf(expansionDebug, "%9d.%03d: Merging sorted spillover to disk...\n", time1.time, time1.millitm);
+			fflush(expansionDebug);
+		}
+#endif
 
 		expansionMergeRegionsToDisk();
 	}
 
 #ifdef DEBUG_EXPANSION
-	dumpExpansionDebug(0);
 	fclose(expansionDebug);
 #endif
-
-	if (expansionSpilloverOutOpen)
-		expansionSpilloverOut.close();
 }
 
 void mergeExpanded()
