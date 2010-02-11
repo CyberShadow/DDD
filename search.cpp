@@ -197,30 +197,30 @@ INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { ret
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,0,uint16_t) <  PIECE(b,0,uint16_t); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,0,uint16_t) <= PIECE(b,0,uint16_t); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  16 && COMPRESSED_BITS <=  24) // 3 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) == (MASKPIECE(b,0,uint32_t,0x00FFFFFF)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) != (MASKPIECE(b,0,uint32_t,0x00FFFFFF)); }
-INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) <  (MASKPIECE(b,0,uint32_t,0x00FFFFFF)); }
-INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) <= (MASKPIECE(b,0,uint32_t,0x00FFFFFF)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) == (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) != (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) <  (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) <= (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  24 && COMPRESSED_BITS <=  32) // 4 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,0,uint32_t) == PIECE(b,0,uint32_t); }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,0,uint32_t) != PIECE(b,0,uint32_t); }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,0,uint32_t) <  PIECE(b,0,uint32_t); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,0,uint32_t) <= PIECE(b,0,uint32_t); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  32 && COMPRESSED_BITS <=  40) // 5 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint64_t,0x000000FFFFFFFFFFLL)) == (MASKPIECE(b,0,uint64_t,0x000000FFFFFFFFFFLL)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint64_t,0x000000FFFFFFFFFFLL)) != (MASKPIECE(b,0,uint64_t,0x000000FFFFFFFFFFLL)); }
-INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint64_t,0x000000FFFFFFFFFFLL)) <  (MASKPIECE(b,0,uint64_t,0x000000FFFFFFFFFFLL)); }
-INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint64_t,0x000000FFFFFFFFFFLL)) <= (MASKPIECE(b,0,uint64_t,0x000000FFFFFFFFFFLL)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-3,uint64_t,0xFFFFFFFFFF000000LL)) == (MASKPIECE(b,-3,uint64_t,0xFFFFFFFFFF000000LL)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-3,uint64_t,0xFFFFFFFFFF000000LL)) != (MASKPIECE(b,-3,uint64_t,0xFFFFFFFFFF000000LL)); }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-3,uint64_t,0xFFFFFFFFFF000000LL)) <  (MASKPIECE(b,-3,uint64_t,0xFFFFFFFFFF000000LL)); }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-3,uint64_t,0xFFFFFFFFFF000000LL)) <= (MASKPIECE(b,-3,uint64_t,0xFFFFFFFFFF000000LL)); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  40 && COMPRESSED_BITS <=  48) // 6 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint64_t,0x0000FFFFFFFFFFFFLL)) == (MASKPIECE(b,0,uint64_t,0x0000FFFFFFFFFFFFLL)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint64_t,0x0000FFFFFFFFFFFFLL)) != (MASKPIECE(b,0,uint64_t,0x0000FFFFFFFFFFFFLL)); }
-INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint64_t,0x0000FFFFFFFFFFFFLL)) <  (MASKPIECE(b,0,uint64_t,0x0000FFFFFFFFFFFFLL)); }
-INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint64_t,0x0000FFFFFFFFFFFFLL)) <= (MASKPIECE(b,0,uint64_t,0x0000FFFFFFFFFFFFLL)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-2,uint64_t,0xFFFFFFFFFFFF0000LL)) == (MASKPIECE(b,-2,uint64_t,0xFFFFFFFFFFFF0000LL)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-2,uint64_t,0xFFFFFFFFFFFF0000LL)) != (MASKPIECE(b,-2,uint64_t,0xFFFFFFFFFFFF0000LL)); }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-2,uint64_t,0xFFFFFFFFFFFF0000LL)) <  (MASKPIECE(b,-2,uint64_t,0xFFFFFFFFFFFF0000LL)); }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-2,uint64_t,0xFFFFFFFFFFFF0000LL)) <= (MASKPIECE(b,-2,uint64_t,0xFFFFFFFFFFFF0000LL)); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  48 && COMPRESSED_BITS <=  56) // 7 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint64_t,0x00FFFFFFFFFFFFFFLL)) == (MASKPIECE(b,0,uint64_t,0x00FFFFFFFFFFFFFFLL)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint64_t,0x00FFFFFFFFFFFFFFLL)) != (MASKPIECE(b,0,uint64_t,0x00FFFFFFFFFFFFFFLL)); }
-INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint64_t,0x00FFFFFFFFFFFFFFLL)) <  (MASKPIECE(b,0,uint64_t,0x00FFFFFFFFFFFFFFLL)); }
-INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,0,uint64_t,0x00FFFFFFFFFFFFFFLL)) <= (MASKPIECE(b,0,uint64_t,0x00FFFFFFFFFFFFFFLL)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)) == (MASKPIECE(b,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)) != (MASKPIECE(b,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)); }
+INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)) <  (MASKPIECE(b,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)); }
+INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return (MASKPIECE(a,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)) <= (MASKPIECE(b,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  56 && COMPRESSED_BITS <=  64) // 8 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,0,uint64_t) == PIECE(b,0,uint64_t); }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,0,uint64_t) != PIECE(b,0,uint64_t); }
@@ -241,12 +241,12 @@ INLINE bool operator< (const CompressedState& a, const CompressedState& b) { ret
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,2,uint64_t) <  PIECE(b,2,uint64_t) || 
                                                                                    (PIECE(a,2,uint64_t) == PIECE(b,2,uint64_t) && PIECE(a,0,uint16_t) <= PIECE(b,0,uint16_t)); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  80 && COMPRESSED_BITS <=  88) // 11 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) == (MASKPIECE(b,0,uint32_t,0x00FFFFFF)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,3,uint64_t) != PIECE(b,3,uint64_t) || (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) != (MASKPIECE(b,0,uint32_t,0x00FFFFFF)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) == (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,3,uint64_t) != PIECE(b,3,uint64_t) || (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) != (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,3,uint64_t) <  PIECE(b,3,uint64_t) || 
-                                                                                   (PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) <  (MASKPIECE(b,0,uint32_t,0x00FFFFFF))); }
+                                                                                   (PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) <  (MASKPIECE(b,-1,uint32_t,0xFFFFFF00))); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,3,uint64_t) <  PIECE(b,3,uint64_t) || 
-                                                                                   (PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) <= (MASKPIECE(b,0,uint32_t,0x00FFFFFF))); }
+                                                                                   (PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) <= (MASKPIECE(b,-1,uint32_t,0xFFFFFF00))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  88 && COMPRESSED_BITS <=  96) // 12 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,4,uint64_t) == PIECE(b,4,uint64_t) && PIECE(a,0,uint32_t) == PIECE(b,0,uint32_t); }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,4,uint64_t) != PIECE(b,4,uint64_t) || PIECE(a,0,uint32_t) != PIECE(b,0,uint32_t); }
@@ -255,26 +255,26 @@ INLINE bool operator< (const CompressedState& a, const CompressedState& b) { ret
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,4,uint64_t) <  PIECE(b,4,uint64_t) || 
                                                                                    (PIECE(a,4,uint64_t) == PIECE(b,4,uint64_t) && PIECE(a,0,uint32_t) <= PIECE(b,0,uint32_t)); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS >  96 && COMPRESSED_BITS <= 104) // 13 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,5,uint64_t) == PIECE(b,5,uint64_t) && (MASKPIECE(a,0,uint64_t,0x000000FFFFFFFFFFLL)) == (MASKPIECE(b,0,uint64_t,0x000000FFFFFFFFFFLL)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,5,uint64_t) != PIECE(b,5,uint64_t) || (MASKPIECE(a,0,uint64_t,0x000000FFFFFFFFFFLL)) != (MASKPIECE(b,0,uint64_t,0x000000FFFFFFFFFFLL)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,5,uint64_t) == PIECE(b,5,uint64_t) && (MASKPIECE(a,-3,uint64_t,0xFFFFFFFFFF000000LL)) == (MASKPIECE(b,-3,uint64_t,0xFFFFFFFFFF000000LL)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,5,uint64_t) != PIECE(b,5,uint64_t) || (MASKPIECE(a,-3,uint64_t,0xFFFFFFFFFF000000LL)) != (MASKPIECE(b,-3,uint64_t,0xFFFFFFFFFF000000LL)); }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,5,uint64_t) <  PIECE(b,5,uint64_t) || 
-                                                                                   (PIECE(a,5,uint64_t) == PIECE(b,5,uint64_t) && (MASKPIECE(a,0,uint64_t,0x000000FFFFFFFFFFLL)) <  (MASKPIECE(b,0,uint64_t,0x000000FFFFFFFFFFLL))); }
+                                                                                   (PIECE(a,5,uint64_t) == PIECE(b,5,uint64_t) && (MASKPIECE(a,-3,uint64_t,0xFFFFFFFFFF000000LL)) <  (MASKPIECE(b,-3,uint64_t,0xFFFFFFFFFF000000LL))); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,5,uint64_t) <  PIECE(b,5,uint64_t) || 
-                                                                                   (PIECE(a,5,uint64_t) == PIECE(b,5,uint64_t) && (MASKPIECE(a,0,uint64_t,0x000000FFFFFFFFFFLL)) <= (MASKPIECE(b,0,uint64_t,0x000000FFFFFFFFFFLL))); }
+                                                                                   (PIECE(a,5,uint64_t) == PIECE(b,5,uint64_t) && (MASKPIECE(a,-3,uint64_t,0xFFFFFFFFFF000000LL)) <= (MASKPIECE(b,-3,uint64_t,0xFFFFFFFFFF000000LL))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 104 && COMPRESSED_BITS <= 112) // 14 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,6,uint64_t) == PIECE(b,6,uint64_t) && (MASKPIECE(a,0,uint64_t,0x0000FFFFFFFFFFFFLL)) == (MASKPIECE(b,0,uint64_t,0x0000FFFFFFFFFFFFLL)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,6,uint64_t) != PIECE(b,6,uint64_t) || (MASKPIECE(a,0,uint64_t,0x0000FFFFFFFFFFFFLL)) != (MASKPIECE(b,0,uint64_t,0x0000FFFFFFFFFFFFLL)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,6,uint64_t) == PIECE(b,6,uint64_t) && (MASKPIECE(a,-2,uint64_t,0xFFFFFFFFFFFF0000LL)) == (MASKPIECE(b,-2,uint64_t,0xFFFFFFFFFFFF0000LL)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,6,uint64_t) != PIECE(b,6,uint64_t) || (MASKPIECE(a,-2,uint64_t,0xFFFFFFFFFFFF0000LL)) != (MASKPIECE(b,-2,uint64_t,0xFFFFFFFFFFFF0000LL)); }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,6,uint64_t) <  PIECE(b,6,uint64_t) || 
-                                                                                   (PIECE(a,6,uint64_t) == PIECE(b,6,uint64_t) && (MASKPIECE(a,0,uint64_t,0x0000FFFFFFFFFFFFLL)) <  (MASKPIECE(b,0,uint64_t,0x0000FFFFFFFFFFFFLL))); }
+                                                                                   (PIECE(a,6,uint64_t) == PIECE(b,6,uint64_t) && (MASKPIECE(a,-2,uint64_t,0xFFFFFFFFFFFF0000LL)) <  (MASKPIECE(b,-2,uint64_t,0xFFFFFFFFFFFF0000LL))); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,6,uint64_t) <  PIECE(b,6,uint64_t) || 
-                                                                                   (PIECE(a,6,uint64_t) == PIECE(b,6,uint64_t) && (MASKPIECE(a,0,uint64_t,0x0000FFFFFFFFFFFFLL)) <= (MASKPIECE(b,0,uint64_t,0x0000FFFFFFFFFFFFLL))); }
+                                                                                   (PIECE(a,6,uint64_t) == PIECE(b,6,uint64_t) && (MASKPIECE(a,-2,uint64_t,0xFFFFFFFFFFFF0000LL)) <= (MASKPIECE(b,-2,uint64_t,0xFFFFFFFFFFFF0000LL))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 112 && COMPRESSED_BITS <= 120) // 15 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,7,uint64_t) == PIECE(b,7,uint64_t) && (MASKPIECE(a,0,uint64_t,0x00FFFFFFFFFFFFFFLL)) == (MASKPIECE(b,0,uint64_t,0x00FFFFFFFFFFFFFFLL)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,7,uint64_t) != PIECE(b,7,uint64_t) || (MASKPIECE(a,0,uint64_t,0x00FFFFFFFFFFFFFFLL)) != (MASKPIECE(b,0,uint64_t,0x00FFFFFFFFFFFFFFLL)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,7,uint64_t) == PIECE(b,7,uint64_t) && (MASKPIECE(a,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)) == (MASKPIECE(b,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,7,uint64_t) != PIECE(b,7,uint64_t) || (MASKPIECE(a,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)) != (MASKPIECE(b,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)); }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,7,uint64_t) <  PIECE(b,7,uint64_t) || 
-                                                                                   (PIECE(a,7,uint64_t) == PIECE(b,7,uint64_t) && (MASKPIECE(a,0,uint64_t,0x00FFFFFFFFFFFFFFLL)) <  (MASKPIECE(b,0,uint64_t,0x00FFFFFFFFFFFFFFLL))); }
+                                                                                   (PIECE(a,7,uint64_t) == PIECE(b,7,uint64_t) && (MASKPIECE(a,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)) <  (MASKPIECE(b,-1,uint64_t,0xFFFFFFFFFFFFFF00LL))); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,7,uint64_t) <  PIECE(b,7,uint64_t) || 
-                                                                                   (PIECE(a,7,uint64_t) == PIECE(b,7,uint64_t) && (MASKPIECE(a,0,uint64_t,0x00FFFFFFFFFFFFFFLL)) <= (MASKPIECE(b,0,uint64_t,0x00FFFFFFFFFFFFFFLL))); }
+                                                                                   (PIECE(a,7,uint64_t) == PIECE(b,7,uint64_t) && (MASKPIECE(a,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)) <= (MASKPIECE(b,-1,uint64_t,0xFFFFFFFFFFFFFF00LL))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 120 && COMPRESSED_BITS <= 128) // 16 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,8,uint64_t) == PIECE(b,8,uint64_t) && PIECE(a,0,uint64_t) == PIECE(b,0,uint64_t); }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,8,uint64_t) != PIECE(b,8,uint64_t) || PIECE(a,0,uint64_t) != PIECE(b,0,uint64_t); }
@@ -301,14 +301,14 @@ INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { ret
                                                                                    (PIECE(a,10,uint64_t) == PIECE(b,10,uint64_t) && (PIECE(a,2,uint64_t) <  PIECE(b,2,uint64_t) ||
                                                                                                                                     (PIECE(a,2,uint64_t) == PIECE(b,2,uint64_t) && PIECE(a,0,uint16_t) <= PIECE(b,0,uint16_t)))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 144 && COMPRESSED_BITS <= 152) // 19 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,11,uint64_t) == PIECE(b,11,uint64_t) &&  PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) == (MASKPIECE(b,0,uint32_t,0x00FFFFFF)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,11,uint64_t) != PIECE(b,11,uint64_t) ||  PIECE(a,3,uint64_t) != PIECE(b,3,uint64_t) || (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) != (MASKPIECE(b,0,uint32_t,0x00FFFFFF)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,11,uint64_t) == PIECE(b,11,uint64_t) &&  PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) == (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,11,uint64_t) != PIECE(b,11,uint64_t) ||  PIECE(a,3,uint64_t) != PIECE(b,3,uint64_t) || (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) != (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,11,uint64_t) <  PIECE(b,11,uint64_t) || 
                                                                                    (PIECE(a,11,uint64_t) == PIECE(b,11,uint64_t) && (PIECE(a,3,uint64_t) <  PIECE(b,3,uint64_t) ||
-                                                                                                                                    (PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) <  (MASKPIECE(b,0,uint32_t,0x00FFFFFF))))); }
+                                                                                                                                    (PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) <  (MASKPIECE(b,-1,uint32_t,0xFFFFFF00))))); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,11,uint64_t) <  PIECE(b,11,uint64_t) || 
                                                                                    (PIECE(a,11,uint64_t) == PIECE(b,11,uint64_t) && (PIECE(a,3,uint64_t) <  PIECE(b,3,uint64_t) ||
-                                                                                                                                    (PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) <= (MASKPIECE(b,0,uint32_t,0x00FFFFFF))))); }
+                                                                                                                                    (PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) <= (MASKPIECE(b,-1,uint32_t,0xFFFFFF00))))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 152 && COMPRESSED_BITS <= 160) // 20 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,12,uint64_t) == PIECE(b,12,uint64_t) &&  PIECE(a,4,uint64_t) == PIECE(b,4,uint64_t) && PIECE(a,0,uint32_t) == PIECE(b,0,uint32_t); }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,12,uint64_t) != PIECE(b,12,uint64_t) ||  PIECE(a,4,uint64_t) != PIECE(b,4,uint64_t) || PIECE(a,0,uint32_t) != PIECE(b,0,uint32_t); }
@@ -319,32 +319,32 @@ INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { ret
                                                                                    (PIECE(a,12,uint64_t) == PIECE(b,12,uint64_t) && (PIECE(a,4,uint64_t) <  PIECE(b,4,uint64_t) ||
                                                                                                                                     (PIECE(a,4,uint64_t) == PIECE(b,4,uint64_t) && PIECE(a,0,uint32_t) <= PIECE(b,0,uint32_t)))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 160 && COMPRESSED_BITS <= 168) // 21 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,13,uint64_t) == PIECE(b,13,uint64_t) &&  PIECE(a,5,uint64_t) == PIECE(b,5,uint64_t) && (MASKPIECE(a,0,uint64_t,0x000000FFFFFFFFFFLL)) == (MASKPIECE(b,0,uint64_t,0x000000FFFFFFFFFFLL)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,13,uint64_t) != PIECE(b,13,uint64_t) ||  PIECE(a,5,uint64_t) != PIECE(b,5,uint64_t) || (MASKPIECE(a,0,uint64_t,0x000000FFFFFFFFFFLL)) != (MASKPIECE(b,0,uint64_t,0x000000FFFFFFFFFFLL)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,13,uint64_t) == PIECE(b,13,uint64_t) &&  PIECE(a,5,uint64_t) == PIECE(b,5,uint64_t) && (MASKPIECE(a,-3,uint64_t,0xFFFFFFFFFF000000LL)) == (MASKPIECE(b,-3,uint64_t,0xFFFFFFFFFF000000LL)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,13,uint64_t) != PIECE(b,13,uint64_t) ||  PIECE(a,5,uint64_t) != PIECE(b,5,uint64_t) || (MASKPIECE(a,-3,uint64_t,0xFFFFFFFFFF000000LL)) != (MASKPIECE(b,-3,uint64_t,0xFFFFFFFFFF000000LL)); }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,13,uint64_t) <  PIECE(b,13,uint64_t) || 
                                                                                    (PIECE(a,13,uint64_t) == PIECE(b,13,uint64_t) && (PIECE(a,5,uint64_t) <  PIECE(b,5,uint64_t) ||
-                                                                                                                                    (PIECE(a,5,uint64_t) == PIECE(b,5,uint64_t) && (MASKPIECE(a,0,uint64_t,0x000000FFFFFFFFFFLL)) <  (MASKPIECE(b,0,uint64_t,0x000000FFFFFFFFFFLL))))); }
+                                                                                                                                    (PIECE(a,5,uint64_t) == PIECE(b,5,uint64_t) && (MASKPIECE(a,-3,uint64_t,0xFFFFFFFFFF000000LL)) <  (MASKPIECE(b,-3,uint64_t,0xFFFFFFFFFF000000LL))))); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,13,uint64_t) <  PIECE(b,13,uint64_t) || 
                                                                                    (PIECE(a,13,uint64_t) == PIECE(b,13,uint64_t) && (PIECE(a,5,uint64_t) <  PIECE(b,5,uint64_t) ||
-                                                                                                                                    (PIECE(a,5,uint64_t) == PIECE(b,5,uint64_t) && (MASKPIECE(a,0,uint64_t,0x000000FFFFFFFFFFLL)) <= (MASKPIECE(b,0,uint64_t,0x000000FFFFFFFFFFLL))))); }
+                                                                                                                                    (PIECE(a,5,uint64_t) == PIECE(b,5,uint64_t) && (MASKPIECE(a,-3,uint64_t,0xFFFFFFFFFF000000LL)) <= (MASKPIECE(b,-3,uint64_t,0xFFFFFFFFFF000000LL))))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 168 && COMPRESSED_BITS <= 176) // 22 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,14,uint64_t) == PIECE(b,14,uint64_t) &&  PIECE(a,6,uint64_t) == PIECE(b,6,uint64_t) && (MASKPIECE(a,0,uint64_t,0x0000FFFFFFFFFFFFLL)) == (MASKPIECE(b,0,uint64_t,0x0000FFFFFFFFFFFFLL)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,14,uint64_t) != PIECE(b,14,uint64_t) ||  PIECE(a,6,uint64_t) != PIECE(b,6,uint64_t) || (MASKPIECE(a,0,uint64_t,0x0000FFFFFFFFFFFFLL)) != (MASKPIECE(b,0,uint64_t,0x0000FFFFFFFFFFFFLL)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,14,uint64_t) == PIECE(b,14,uint64_t) &&  PIECE(a,6,uint64_t) == PIECE(b,6,uint64_t) && (MASKPIECE(a,-2,uint64_t,0xFFFFFFFFFFFF0000LL)) == (MASKPIECE(b,-2,uint64_t,0xFFFFFFFFFFFF0000LL)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,14,uint64_t) != PIECE(b,14,uint64_t) ||  PIECE(a,6,uint64_t) != PIECE(b,6,uint64_t) || (MASKPIECE(a,-2,uint64_t,0xFFFFFFFFFFFF0000LL)) != (MASKPIECE(b,-2,uint64_t,0xFFFFFFFFFFFF0000LL)); }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,14,uint64_t) <  PIECE(b,14,uint64_t) || 
                                                                                    (PIECE(a,14,uint64_t) == PIECE(b,14,uint64_t) && (PIECE(a,6,uint64_t) <  PIECE(b,6,uint64_t) ||
-                                                                                                                                    (PIECE(a,6,uint64_t) == PIECE(b,6,uint64_t) && (MASKPIECE(a,0,uint64_t,0x0000FFFFFFFFFFFFLL)) <  (MASKPIECE(b,0,uint64_t,0x0000FFFFFFFFFFFFLL))))); }
+                                                                                                                                    (PIECE(a,6,uint64_t) == PIECE(b,6,uint64_t) && (MASKPIECE(a,-2,uint64_t,0xFFFFFFFFFFFF0000LL)) <  (MASKPIECE(b,-2,uint64_t,0xFFFFFFFFFFFF0000LL))))); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,14,uint64_t) <  PIECE(b,14,uint64_t) || 
                                                                                    (PIECE(a,14,uint64_t) == PIECE(b,14,uint64_t) && (PIECE(a,6,uint64_t) <  PIECE(b,6,uint64_t) ||
-                                                                                                                                    (PIECE(a,6,uint64_t) == PIECE(b,6,uint64_t) && (MASKPIECE(a,0,uint64_t,0x0000FFFFFFFFFFFFLL)) <= (MASKPIECE(b,0,uint64_t,0x0000FFFFFFFFFFFFLL))))); }
+                                                                                                                                    (PIECE(a,6,uint64_t) == PIECE(b,6,uint64_t) && (MASKPIECE(a,-2,uint64_t,0xFFFFFFFFFFFF0000LL)) <= (MASKPIECE(b,-2,uint64_t,0xFFFFFFFFFFFF0000LL))))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 176 && COMPRESSED_BITS <= 184) // 23 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,15,uint64_t) == PIECE(b,15,uint64_t) &&  PIECE(a,7,uint64_t) == PIECE(b,7,uint64_t) && (MASKPIECE(a,0,uint64_t,0x00FFFFFFFFFFFFFFLL)) == (MASKPIECE(b,0,uint64_t,0x00FFFFFFFFFFFFFFLL)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,15,uint64_t) != PIECE(b,15,uint64_t) ||  PIECE(a,7,uint64_t) != PIECE(b,7,uint64_t) || (MASKPIECE(a,0,uint64_t,0x00FFFFFFFFFFFFFFLL)) != (MASKPIECE(b,0,uint64_t,0x00FFFFFFFFFFFFFFLL)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,15,uint64_t) == PIECE(b,15,uint64_t) &&  PIECE(a,7,uint64_t) == PIECE(b,7,uint64_t) && (MASKPIECE(a,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)) == (MASKPIECE(b,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,15,uint64_t) != PIECE(b,15,uint64_t) ||  PIECE(a,7,uint64_t) != PIECE(b,7,uint64_t) || (MASKPIECE(a,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)) != (MASKPIECE(b,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)); }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,15,uint64_t) <  PIECE(b,15,uint64_t) || 
                                                                                    (PIECE(a,15,uint64_t) == PIECE(b,15,uint64_t) && (PIECE(a,7,uint64_t) <  PIECE(b,7,uint64_t) ||
-                                                                                                                                    (PIECE(a,7,uint64_t) == PIECE(b,7,uint64_t) && (MASKPIECE(a,0,uint64_t,0x00FFFFFFFFFFFFFFLL)) <  (MASKPIECE(b,0,uint64_t,0x00FFFFFFFFFFFFFFLL))))); }
+                                                                                                                                    (PIECE(a,7,uint64_t) == PIECE(b,7,uint64_t) && (MASKPIECE(a,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)) <  (MASKPIECE(b,-1,uint64_t,0xFFFFFFFFFFFFFF00LL))))); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,15,uint64_t) <  PIECE(b,15,uint64_t) || 
                                                                                    (PIECE(a,15,uint64_t) == PIECE(b,15,uint64_t) && (PIECE(a,7,uint64_t) <  PIECE(b,7,uint64_t) ||
-                                                                                                                                    (PIECE(a,7,uint64_t) == PIECE(b,7,uint64_t) && (MASKPIECE(a,0,uint64_t,0x00FFFFFFFFFFFFFFLL)) <= (MASKPIECE(b,0,uint64_t,0x00FFFFFFFFFFFFFFLL))))); }
+                                                                                                                                    (PIECE(a,7,uint64_t) == PIECE(b,7,uint64_t) && (MASKPIECE(a,-1,uint64_t,0xFFFFFFFFFFFFFF00LL)) <= (MASKPIECE(b,-1,uint64_t,0xFFFFFFFFFFFFFF00LL))))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 184 && COMPRESSED_BITS <= 192) // 24 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,16,uint64_t) == PIECE(b,16,uint64_t) &&  PIECE(a,8,uint64_t) == PIECE(b,8,uint64_t) && PIECE(a,0,uint64_t) == PIECE(b,0,uint64_t); }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,16,uint64_t) != PIECE(b,16,uint64_t) ||  PIECE(a,8,uint64_t) != PIECE(b,8,uint64_t) || PIECE(a,0,uint64_t) != PIECE(b,0,uint64_t); }
@@ -377,16 +377,16 @@ INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { ret
                                                                                                                                     (PIECE(a,10,uint64_t) == PIECE(b,10,uint64_t) && (PIECE(a,2,uint64_t) <  PIECE(b,2,uint64_t) ||
 																																	                                                 (PIECE(a,2,uint64_t) == PIECE(b,2,uint64_t) && PIECE(a,0,uint16_t) <= PIECE(b,0,uint16_t)))))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 208 && COMPRESSED_BITS <= 216) // 27 bytes
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,19,uint64_t) == PIECE(b,19,uint64_t) &&  PIECE(a,11,uint64_t) == PIECE(b,11,uint64_t) &&  PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) == (MASKPIECE(b,0,uint32_t,0x00FFFFFF)); }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,19,uint64_t) != PIECE(b,19,uint64_t) ||  PIECE(a,11,uint64_t) != PIECE(b,11,uint64_t) ||  PIECE(a,3,uint64_t) != PIECE(b,3,uint64_t) || (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) != (MASKPIECE(b,0,uint32_t,0x00FFFFFF)); }
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,19,uint64_t) == PIECE(b,19,uint64_t) &&  PIECE(a,11,uint64_t) == PIECE(b,11,uint64_t) &&  PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) == (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,19,uint64_t) != PIECE(b,19,uint64_t) ||  PIECE(a,11,uint64_t) != PIECE(b,11,uint64_t) ||  PIECE(a,3,uint64_t) != PIECE(b,3,uint64_t) || (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) != (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,19,uint64_t) <  PIECE(b,19,uint64_t) || 
                                                                                    (PIECE(a,19,uint64_t) == PIECE(b,19,uint64_t) && (PIECE(a,11,uint64_t) <  PIECE(b,11,uint64_t) ||
                                                                                                                                     (PIECE(a,11,uint64_t) == PIECE(b,11,uint64_t) && (PIECE(a,3,uint64_t) <  PIECE(b,3,uint64_t) ||
-																																	                                                 (PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) <  (MASKPIECE(b,0,uint32_t,0x00FFFFFF))))))); }
+																																	                                                 (PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) <  (MASKPIECE(b,-1,uint32_t,0xFFFFFF00))))))); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,19,uint64_t) <  PIECE(b,19,uint64_t) || 
                                                                                    (PIECE(a,19,uint64_t) == PIECE(b,19,uint64_t) && (PIECE(a,11,uint64_t) <  PIECE(b,11,uint64_t) ||
                                                                                                                                     (PIECE(a,11,uint64_t) == PIECE(b,11,uint64_t) && (PIECE(a,3,uint64_t) <  PIECE(b,3,uint64_t) ||
-																																	                                                 (PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,0,uint32_t,0x00FFFFFF)) <= (MASKPIECE(b,0,uint32_t,0x00FFFFFF))))))); }
+																																	                                                 (PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) <= (MASKPIECE(b,-1,uint32_t,0xFFFFFF00))))))); }
 #else
 #pragma message("Performance warning: using memcmp for CompressedState comparison")
 #define SLOW_COMPARE
