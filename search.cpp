@@ -2057,6 +2057,8 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 	{
 		std::list<expansionBufferRegion>::iterator firstEmptyRegionToFill;
 		bool foundEmptyRegionToFill = false;
+		bool regionToFillAdjacentToFilled = false;
+		bool lastRegionWasFilled = false;
 		unsigned totalEmptyLength = 0;
 
 		std::list<expansionBufferRegion>::iterator longestFilledRegionToSort;
@@ -2073,11 +2075,13 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 		{
 			if (i->type == EXPANSION_BUFFER_REGION_EMPTY)
 			{
-				if (!foundEmptyRegionToFill)
+				if (!foundEmptyRegionToFill || !regionToFillAdjacentToFilled && lastRegionWasFilled)
 				{
 					foundEmptyRegionToFill = true;
 					firstEmptyRegionToFill = i;
+					regionToFillAdjacentToFilled = lastRegionWasFilled;
 				}
+				lastRegionWasFilled = false;
 				totalEmptyLength += i->length;
 			}
 			else
@@ -2097,7 +2101,13 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 				rightmostFilledRegionToSpillover = i;
 				foundRightmostFilledRegion = true;
 #endif
+				lastRegionWasFilled = true;
 			}
+			else
+			if (INRANGEX(i->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLING+WORKERS))
+				lastRegionWasFilled = true;
+			else
+				lastRegionWasFilled = false;
 		}
 
 		if (longestFilledLength >= expansionBufferFillThreshold)
