@@ -2057,6 +2057,9 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 	{
 		std::list<expansionBufferRegion>::iterator firstEmptyRegionToFill;
 		bool foundEmptyRegionToFill = false;
+		bool regionToFillAdjacentToFilledAdjacentToSortingBoundary = false;
+		bool regionToFillAdjacentToSortingBoundary = false;
+		bool lastRegionAdjacentToSortingBoundary = true;
 		bool regionToFillAdjacentToFilled = false;
 		bool lastRegionWasFilled = false;
 		unsigned totalEmptyLength = 0;
@@ -2075,12 +2078,17 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 		{
 			if (i->type == EXPANSION_BUFFER_REGION_EMPTY)
 			{
-				if (!foundEmptyRegionToFill || !regionToFillAdjacentToFilled && lastRegionWasFilled)
+				if (!foundEmptyRegionToFill ||
+					!regionToFillAdjacentToFilledAdjacentToSortingBoundary && lastRegionAdjacentToSortingBoundary ||
+					!regionToFillAdjacentToFilledAdjacentToSortingBoundary && !regionToFillAdjacentToFilled && lastRegionWasFilled ||
+					(!regionToFillAdjacentToFilledAdjacentToSortingBoundary || !regionToFillAdjacentToFilled) && lastRegionAdjacentToSortingBoundary && lastRegionWasFilled)
 				{
 					foundEmptyRegionToFill = true;
 					firstEmptyRegionToFill = i;
+					regionToFillAdjacentToFilledAdjacentToSortingBoundary = lastRegionAdjacentToSortingBoundary;
 					regionToFillAdjacentToFilled = lastRegionWasFilled;
 				}
+				lastRegionAdjacentToSortingBoundary = false;
 				lastRegionWasFilled = false;
 				totalEmptyLength += i->length;
 			}
@@ -2101,13 +2109,19 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 				rightmostFilledRegionToSpillover = i;
 				foundRightmostFilledRegion = true;
 #endif
+				lastRegionAdjacentToSortingBoundary = (i->pos % expansionBufferFillThreshold == 0);
 				lastRegionWasFilled = true;
 			}
 			else
 			if (INRANGEX(i->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLING+WORKERS))
+			{
 				lastRegionWasFilled = true;
+			}
 			else
+			{
+				lastRegionAdjacentToSortingBoundary = false;
 				lastRegionWasFilled = false;
+			}
 		}
 
 		if (longestFilledLength >= expansionBufferFillThreshold)
