@@ -2109,7 +2109,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 				rightmostFilledRegionToSpillover = i;
 				foundRightmostFilledRegion = true;
 #endif
-				lastRegionAdjacentToSortingBoundary = (i->pos % expansionBufferFillThreshold == 0);
+				lastRegionAdjacentToSortingBoundary = lastRegionAdjacentToSortingBoundary || (i->pos % expansionBufferFillThreshold == 0);
 				lastRegionWasFilled = true;
 			}
 			else
