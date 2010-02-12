@@ -118,6 +118,11 @@ INLINE bool operator==(const State& a, const State& b)
 	return memcmp(&a, &b, sizeof (State))==0;
 }
 
+INLINE bool canStatesBeParentAndChild(const CompressedState* parent, const CompressedState* child)
+{
+	return true;
+}
+
 // ******************************************************************************************************
 
 /// Defines a move within the problem state graph. Doesn't need to be memory-efficient.
@@ -145,7 +150,7 @@ void replayStep(State* state, FRAME* frame, Step step)
 // Templated function to enumerate a state's children. Children are collected through a static function in the template parameter class: 
 // static void handleChild(const State* state, Step step, FRAME frame).
 template <class CHILD_HANDLER>
-void expandChildren(FRAME frame, const State* state)
+void expandChildren(FRAME frame, const State* state, THREAD_ID threadID)
 {
 	State newState = *state;
 	for (Action action = ACTION_FIRST; action <= ACTION_LAST; action++)
@@ -155,7 +160,7 @@ void expandChildren(FRAME frame, const State* state)
 		if (res > 0)
 		{
 			step.action = action;
-			CHILD_HANDLER::handleChild(state, frame, step, &newState, frame + res);
+			CHILD_HANDLER::handleChild(state, frame, step, &newState, frame + res, threadID);
 		}
 		if (res >= 0)
 			newState = *state;

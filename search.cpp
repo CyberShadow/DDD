@@ -4,6 +4,7 @@
 #include "config.h"
 
 #include <time.h>
+#include <math.h>
 #include <sys/timeb.h>
 //#include <fstream>
 #include <algorithm>
@@ -424,6 +425,7 @@ INLINE bool operator>=(const CompressedState& a, const CompressedState& b) { ret
 #define SET_SUBFRAME(cs, frame)
 #define GROUP_STR ""
 #define GROUP_FORMAT "%u"
+#define GROUP_ALIGNED_FORMAT "%3u"
 
 #endif
 
@@ -476,12 +478,14 @@ typedef PackedCompressedState BareNode;
 struct Node
 {
 	PackedCompressedState state;
+#ifdef GROUP_FRAMES
 #if COMPRESSED_BYTES%4 == 1
 	uint8_t _align1;
 #endif
 	uint8_t subframe;
 #if (COMPRESSED_BYTES+(COMPRESSED_BYTES%4==1?1:0)+1)%4 != 0
 	uint8_t _align2[4-(COMPRESSED_BYTES+(COMPRESSED_BYTES%4==1?1:0)+1)%4];
+#endif
 #endif
 
 	CompressedState& getState() const { return (CompressedState&)state; }
@@ -513,10 +517,12 @@ INLINE bool operator> (const OpenNode& a, const OpenNode& b) { return a.getState
 INLINE bool operator>=(const OpenNode& a, const OpenNode& b) { return a.getState() >= b.getState(); }
 
 // For deduplication
-INLINE unsigned     getFrame(const     Node* node) { return node->subframe; }
-INLINE PACKED_FRAME getFrame(const OpenNode* node) { return node->frame;    }
-INLINE void setFrame(    Node* node, uint8_t      frame)  { node->subframe = frame; }
-INLINE void setFrame(OpenNode* node, PACKED_FRAME frame)  { node->frame    = frame; }
+#ifdef GROUP_FRAMES
+INLINE unsigned getFrame(const Node* node) { return node->subframe; }
+INLINE void setFrame(Node* node, uint8_t frame) { node->subframe = frame; }
+#endif
+INLINE PACKED_FRAME getFrame(const OpenNode* node) { return node->frame; }
+INLINE void setFrame(OpenNode* node, PACKED_FRAME frame) { node->frame = frame; }
 
 const size_t BUFFER_SIZE = RAM_SIZE / sizeof(Node);
 const size_t OPENNODE_BUFFER_SIZE = RAM_SIZE / sizeof(OpenNode);
@@ -1208,10 +1214,8 @@ void mergeStreams(INPUT inputs[], int inputCount, OUTPUT* output)
 		debug_assert(*cs2 >= cs);
 		if (cs == *cs2) // CompressedState::operator== does not compare subframe
 		{
-#ifdef GROUP_FRAMES
 			if (getFrame(&cs) > getFrame(cs2)) // in case of duplicate frames, pick the one from the smallest frame
 				setFrame(&cs,   getFrame(cs2));
-#endif
 		}
 		else
 		{
@@ -3020,7 +3024,9 @@ public:
 		{
 			Node cs;
 			(PackedCompressedState&)cs = node->state;
+#ifdef GROUP_FRAMES
 			cs.subframe = node->frame % FRAMES_PER_GROUP;
+#endif
 			write(&cs);
 		}
 	}
@@ -3037,7 +3043,9 @@ public:
 		{
 			Node cs;
 			(PackedCompressedState&)cs = node->state;
+#ifdef GROUP_FRAMES
 			cs.subframe = node->frame % FRAMES_PER_GROUP;
+#endif
 			closedNodeFile.write(&cs);
 			closedNodesInCurrentFrameGroup++;
 		}
@@ -3128,7 +3136,9 @@ int search()
 			Node* initialCompressedStates = (Node*)ram;
 			for (int i=0; i<initialStateCount; i++)
 			{
+#ifdef GROUP_FRAMES
 				initialCompressedStates[i].subframe = 0;
+#endif
 				initialStates[i].compress(&initialCompressedStates[i].getState());
 			}
 			std::sort(initialCompressedStates, initialCompressedStates + initialStateCount);
@@ -4365,7 +4375,7 @@ int run(int argc, const char* argv[])
 #endif
 #endif // MULTITHREADING
 	
-	printf("Compressed state is %u bits (%u bytes data, %u bytes with subframe, %u bytes with full frame)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(Node), sizeof(OpenNode));
+	printf("Compressed state is %u bits (%u bytes data, %u bytes per closed node, %u bytes per open node)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(Node), sizeof(OpenNode));
 #ifdef SLOW_COMPARE
 	printf("Using memcmp for CompressedState comparison\n");
 #endif
