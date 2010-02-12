@@ -1515,7 +1515,7 @@ OpenNode* const expansionBufferEnd = (OpenNode*)ram + EXPANSION_BUFFER_SIZE;
 
 MUTEX expansionMutex;
 unsigned expansionChunks;
-enum expansionBufferRegionType
+enum ExpansionBufferRegionType
 {
 	EXPANSION_BUFFER_REGION_EMPTY,
 	EXPANSION_BUFFER_REGION_FILLING,  // threadID==0
@@ -1527,18 +1527,18 @@ enum expansionBufferRegionType
 	EXPANSION_BUFFER_REGION_WRITING,
 	EXPANSION_BUFFER_REGION_MERGING,
 };
-struct expansionBufferRegion
+struct ExpansionBufferRegion
 {
 	unsigned pos, length;
-	expansionBufferRegionType type;
+	ExpansionBufferRegionType type;
 };
-std::list<expansionBufferRegion> expansionBufferRegions;
-std::list<expansionBufferRegion>::iterator expansionThreadIter[WORKERS];
-struct expansionBufferSortedRegion
+std::list<ExpansionBufferRegion> expansionBufferRegions;
+std::list<ExpansionBufferRegion>::iterator expansionThreadIter[WORKERS];
+struct ExpansionBufferSortedRegion
 {
 	OpenNode *start, *end;
 };
-std::queue<expansionBufferSortedRegion> expansionBufferRegionsToMerge;
+std::queue<ExpansionBufferSortedRegion> expansionBufferRegionsToMerge;
 unsigned numSortsInProgress;
 bool expansionChunkWriteInProgress;
 bool expansionThreadFinalized[WORKERS];
@@ -1564,7 +1564,7 @@ void dumpExpansionDebug(THREAD_ID threadID)
 	fputc(':', expansionDebug);
 	fputc(' ', expansionDebug);
 
-	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
+	for (std::list<ExpansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
 	{
 		debug_assert(!(i->type == EXPANSION_BUFFER_REGION_EMPTY && i->length==0));
 
@@ -1604,7 +1604,7 @@ void initExpansion()
 	expansionChunkWriteInProgress = false;
 
 	expansionBufferRegions.clear();
-	expansionBufferRegionsToMerge = std::queue<expansionBufferSortedRegion>();
+	expansionBufferRegionsToMerge = std::queue<ExpansionBufferSortedRegion>();
 	OpenNode* slot = expansionBuffer;
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 	{
@@ -1615,16 +1615,16 @@ void initExpansion()
 		expansionThread[threadID].i = 0;
 		expansionThread[threadID].increment = +1;
 
-		expansionBufferRegion region;
+		ExpansionBufferRegion region;
 		region.pos = (unsigned)threadID;
 		region.length = 1;
-		region.type = (expansionBufferRegionType)(EXPANSION_BUFFER_REGION_FILLING + threadID);
+		region.type = (ExpansionBufferRegionType)(EXPANSION_BUFFER_REGION_FILLING + threadID);
 		expansionBufferRegions.push_back(region);
 		expansionThreadIter[threadID] = expansionBufferRegions.end();
 		expansionThreadIter[threadID]--;
 	}
 	{
-		expansionBufferRegion region;
+		ExpansionBufferRegion region;
 		region.pos = WORKERS;
 		region.length = EXPANSION_BUFFER_SLOTS - WORKERS;
 		region.type = EXPANSION_BUFFER_REGION_EMPTY;
@@ -1640,10 +1640,10 @@ void initExpansion()
 #endif
 }
 
-void expansionRegionMarkFilled(std::list<expansionBufferRegion>::iterator& regionToFill, THREAD_ID threadID)
+void expansionRegionMarkFilled(std::list<ExpansionBufferRegion>::iterator& regionToFill, THREAD_ID threadID)
 {
-	std::list<expansionBufferRegion>::iterator before = regionToFill;
-	std::list<expansionBufferRegion>::iterator after  = regionToFill; ++after;
+	std::list<ExpansionBufferRegion>::iterator before = regionToFill;
+	std::list<ExpansionBufferRegion>::iterator after  = regionToFill; ++after;
 	if (before != expansionBufferRegions.begin() && (--before)->type == EXPANSION_BUFFER_REGION_FILLED)
 	{
 		if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_FILLED)
@@ -1674,10 +1674,10 @@ void expansionRegionMarkFilled(std::list<expansionBufferRegion>::iterator& regio
 #endif
 }
 
-void expansionRegionMarkEmpty(std::list<expansionBufferRegion>::iterator& regionToEmpty, THREAD_ID threadID)
+void expansionRegionMarkEmpty(std::list<ExpansionBufferRegion>::iterator& regionToEmpty, THREAD_ID threadID)
 {
-	std::list<expansionBufferRegion>::iterator before = regionToEmpty;
-	std::list<expansionBufferRegion>::iterator after  = regionToEmpty; ++after;
+	std::list<ExpansionBufferRegion>::iterator before = regionToEmpty;
+	std::list<ExpansionBufferRegion>::iterator after  = regionToEmpty; ++after;
 	if (before != expansionBufferRegions.begin() && (--before)->type == EXPANSION_BUFFER_REGION_EMPTY)
 	{
 		if (after != expansionBufferRegions.end() && after->type == EXPANSION_BUFFER_REGION_EMPTY)
@@ -1705,7 +1705,7 @@ void expansionRegionMarkEmpty(std::list<expansionBufferRegion>::iterator& region
 OutputStream<OpenNode> expansionWriteChunkThreadStream;
 OpenNode* expansionWriteChunkThreadBuffer;
 size_t expansionWriteChunkThreadCount;
-std::list<expansionBufferRegion>::iterator expansionWriteChunkThreadRegion;
+std::list<ExpansionBufferRegion>::iterator expansionWriteChunkThreadRegion;
 void expansionWriteChunkThread(THREAD_ID threadID)
 {
 	expansionWriteChunkThreadStream.write(expansionWriteChunkThreadBuffer, expansionWriteChunkThreadCount);
@@ -1729,15 +1729,15 @@ void expansionWriteChunkThread(THREAD_ID threadID)
 	}
 }
 
-void sortExpansionRegion(std::list<expansionBufferRegion>::iterator& regionToSort, THREAD_ID threadID, SCOPED_LOCK& lock)
+void sortExpansionRegion(std::list<ExpansionBufferRegion>::iterator& regionToSort, THREAD_ID threadID, SCOPED_LOCK& lock)
 {
 	if (regionToSort->length > expansionBufferFillThreshold)
 	{
-		expansionBufferRegion region;
+		ExpansionBufferRegion region;
 		region.pos = regionToSort->pos + expansionBufferFillThreshold;
 		region.length = regionToSort->length - expansionBufferFillThreshold;
 		region.type = EXPANSION_BUFFER_REGION_FILLED;
-		std::list<expansionBufferRegion>::iterator insert = regionToSort;
+		std::list<ExpansionBufferRegion>::iterator insert = regionToSort;
 		expansionBufferRegions.insert(++insert, region);
 		regionToSort->length = expansionBufferFillThreshold;
 	}
@@ -1763,7 +1763,7 @@ void sortExpansionRegion(std::list<expansionBufferRegion>::iterator& regionToSor
 	unsigned newLength = (unsigned)((count + EXPANSION_NODES_PER_QUEUE_ELEMENT-1) / EXPANSION_NODES_PER_QUEUE_ELEMENT);
 	regionToSort->length = newLength;
 	regionToSort->type = EXPANSION_BUFFER_REGION_WRITING;
-	std::list<expansionBufferRegion>::iterator nextRegion = regionToSort; ++nextRegion;
+	std::list<ExpansionBufferRegion>::iterator nextRegion = regionToSort; ++nextRegion;
 	if (nextRegion != expansionBufferRegions.end() && nextRegion->type == EXPANSION_BUFFER_REGION_EMPTY)
 	{
 		nextRegion->pos    -= oldLength - newLength;
@@ -1772,7 +1772,7 @@ void sortExpansionRegion(std::list<expansionBufferRegion>::iterator& regionToSor
 	else
 	if (oldLength > newLength)
 	{
-		expansionBufferRegion region;
+		ExpansionBufferRegion region;
 		region.pos = regionToSort->pos + newLength;
 		region.length = oldLength - newLength;
 		region.type = EXPANSION_BUFFER_REGION_EMPTY;
@@ -1810,7 +1810,7 @@ void sortExpansionRegion(std::list<expansionBufferRegion>::iterator& regionToSor
 
 void sortExpansionSpilloverThread(THREAD_ID threadID)
 {
-	expansionBufferSortedRegion region;
+	ExpansionBufferSortedRegion region;
 	region.start = expansionThread[threadID].buffer;
 	region.end = expansionThread[threadID].finalSortBufferEnd;
 
@@ -1938,7 +1938,7 @@ struct
 {
 	OpenNode *buffer;
 	size_t    count;
-	std::list<expansionBufferRegion>::iterator region;
+	std::list<ExpansionBufferRegion>::iterator region;
 } expansionSpilloverThreadBuffer[2];
 
 void expansionWriteSpilloverThread(THREAD_ID threadID)
@@ -1978,10 +1978,10 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 		}
 		if (expansionSpilloverNodesQueued && !expansionSpilloverLocked && !expansionChunkWriteInProgress)
 		{
-			std::list<expansionBufferRegion>::iterator firstEmptyRegionToFill;
+			std::list<ExpansionBufferRegion>::iterator firstEmptyRegionToFill;
 			bool foundEmptyRegionToFill = false;
 
-			for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i != expansionBufferRegions.end(); i++)
+			for (std::list<ExpansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i != expansionBufferRegions.end(); i++)
 			{
 				if (i->type == EXPANSION_BUFFER_REGION_EMPTY)
 				{
@@ -2007,7 +2007,7 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 				else
 				{
 					count = expansionSpilloverPresented;
-					expansionBufferRegion region;
+					ExpansionBufferRegion region;
 					region.pos = firstEmptyRegionToFill->pos;
 					assert(count % EXPANSION_NODES_PER_QUEUE_ELEMENT == 0);
 					region.length = (unsigned)(count / EXPANSION_NODES_PER_QUEUE_ELEMENT);
@@ -2053,7 +2053,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 
 	while (true)
 	{
-		std::list<expansionBufferRegion>::iterator firstEmptyRegionToFill;
+		std::list<ExpansionBufferRegion>::iterator firstEmptyRegionToFill;
 		bool foundEmptyRegionToFill = false;
 		bool regionToFillAdjacentToFilledAdjacentToSortingBoundary = false;
 		bool regionToFillAdjacentToSortingBoundary = false;
@@ -2062,17 +2062,17 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 		bool lastRegionWasFilled = false;
 		unsigned totalEmptyLength = 0;
 
-		std::list<expansionBufferRegion>::iterator longestFilledRegionToSort;
+		std::list<ExpansionBufferRegion>::iterator longestFilledRegionToSort;
 		unsigned longestFilledLength = 0;
 		
 #ifdef ENABLE_EXPANSION_SPILLOVER
-		std::list<expansionBufferRegion>::iterator rightmostFilledRegionToSpillover;
-		std::list<expansionBufferRegion>::iterator secondRightmostFilledRegionToSpillover;
+		std::list<ExpansionBufferRegion>::iterator rightmostFilledRegionToSpillover;
+		std::list<ExpansionBufferRegion>::iterator secondRightmostFilledRegionToSpillover;
 		bool foundRightmostFilledRegion = false;
 		bool foundSecondRightmostFilledRegion = false;
 #endif
 
-		for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i != expansionBufferRegions.end(); i++)
+		for (std::list<ExpansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i != expansionBufferRegions.end(); i++)
 		{
 			if (i->type == EXPANSION_BUFFER_REGION_EMPTY)
 			{
@@ -2132,14 +2132,14 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 		if (totalEmptyLength <= expansionSpilloverSlack && longestFilledLength + expansionSpilloverSlack < expansionBufferFillThreshold
 			&& !expansionSpilloverLocked && !expansionChunkWriteInProgress && foundRightmostFilledRegion)
 		{
-			std::list<expansionBufferRegion>::iterator& regionToWrite = rightmostFilledRegionToSpillover;
+			std::list<ExpansionBufferRegion>::iterator& regionToWrite = rightmostFilledRegionToSpillover;
 			debug_assert(regionToWrite->length != 0);
 
 			if (regionToWrite->length <= expansionSpilloverWriteThreshold)
 				regionToWrite->type = EXPANSION_BUFFER_REGION_WRITING;
 			else
 			{
-				expansionBufferRegion region;
+				ExpansionBufferRegion region;
 				region.pos = regionToWrite->pos + regionToWrite->length - expansionSpilloverWriteThreshold;
 				region.length = expansionSpilloverWriteThreshold;
 				region.type = EXPANSION_BUFFER_REGION_WRITING;
@@ -2163,13 +2163,13 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 
 			if (foundSecondRightmostFilledRegion && regionToWrite->length < expansionSpilloverWriteThreshold)
 			{
-				std::list<expansionBufferRegion>::iterator& secondRegionToWrite = secondRightmostFilledRegionToSpillover;
+				std::list<ExpansionBufferRegion>::iterator& secondRegionToWrite = secondRightmostFilledRegionToSpillover;
 
 				if (secondRegionToWrite->length + regionToWrite->length <= expansionSpilloverWriteThreshold)
 					secondRegionToWrite->type = EXPANSION_BUFFER_REGION_WRITING;
 				else
 				{
-					expansionBufferRegion region;
+					ExpansionBufferRegion region;
 					region.pos = secondRegionToWrite->pos + secondRegionToWrite->length + regionToWrite->length - expansionSpilloverWriteThreshold;
 					region.length = expansionSpilloverWriteThreshold - regionToWrite->length;
 					region.type = EXPANSION_BUFFER_REGION_WRITING;
@@ -2205,9 +2205,9 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 
 		if (foundEmptyRegionToFill)
 		{
-			expansionBufferRegion region;
+			ExpansionBufferRegion region;
 			region.length = 1;
-			region.type = (expansionBufferRegionType)(EXPANSION_BUFFER_REGION_FILLING + threadID);
+			region.type = (ExpansionBufferRegionType)(EXPANSION_BUFFER_REGION_FILLING + threadID);
 
 			region.pos = firstEmptyRegionToFill->pos;
 			if (firstEmptyRegionToFill->length == 1)
@@ -2267,7 +2267,7 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 
 sortNextFilledRegion:
 
-	for (std::list<expansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
+	for (std::list<ExpansionBufferRegion>::iterator i=expansionBufferRegions.begin(); i!=expansionBufferRegions.end(); i++)
 	{
 		if (i->type != EXPANSION_BUFFER_REGION_FILLED)
 			continue;
@@ -2282,17 +2282,17 @@ sortNextFilledRegion:
 			unsigned oldLength = i->length;
 			unsigned denominator = WORKERS - numSortsInProgress + 1;
 			i->length = (i->length + denominator-1) / denominator;
-			expansionBufferRegion region;
+			ExpansionBufferRegion region;
 			region.pos = i->pos + i->length;
 			region.length = oldLength - i->length;
 			region.type = EXPANSION_BUFFER_REGION_FILLED;
-			std::list<expansionBufferRegion>::iterator insert = i;
+			std::list<ExpansionBufferRegion>::iterator insert = i;
 			expansionBufferRegions.insert(++insert, region);
 		}
 		else
 		{
 			// if there is a queue element that were still being filled when expansion ended, and it is adjacent to this region on the RIGHT side with no gap, treat it as part of this region for the purposes of sorting and merging
-			std::list<expansionBufferRegion>::iterator after = i; ++after;
+			std::list<ExpansionBufferRegion>::iterator after = i; ++after;
 			if (after != expansionBufferRegions.end() && INRANGEX(after->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLING+WORKERS))
 			{
 				THREAD_ID threadID = after->type - EXPANSION_BUFFER_REGION_FILLING;
@@ -2306,7 +2306,7 @@ sortNextFilledRegion:
 			}
 		}
 		// if there is a queue element that were still being filled when expansion ended, and it is adjacent to this region on the LEFT side with no gap, treat it as part of this region for the purposes of sorting and merging
-		std::list<expansionBufferRegion>::iterator before = i;
+		std::list<ExpansionBufferRegion>::iterator before = i;
 		if (before != expansionBufferRegions.begin() && INRANGEX((--before)->type, EXPANSION_BUFFER_REGION_FILLING, EXPANSION_BUFFER_REGION_FILLING+WORKERS))
 		{
 			THREAD_ID threadID = before->type - EXPANSION_BUFFER_REGION_FILLING;
@@ -2335,7 +2335,7 @@ sortNextFilledRegion:
 
 		lock.lock();
 
-		expansionBufferSortedRegion region;
+		ExpansionBufferSortedRegion region;
 		region.start = bufferToSort;
 		region.end   = bufferToSort + count;
 		expansionBufferRegionsToMerge.push(region);
@@ -2368,7 +2368,7 @@ sortNextFilledRegion:
 
 			std::sort(buffer, buffer + count);
 			
-			expansionBufferSortedRegion region;
+			ExpansionBufferSortedRegion region;
 			region.start = buffer;
 			region.end = buffer + count;
 
@@ -2396,7 +2396,7 @@ void expansionMergeRegionsToDisk()
 	MemoryInputStream<OpenNode>* inputs = new MemoryInputStream<OpenNode> [expansionBufferRegionsToMerge.size()];
 	while (!expansionBufferRegionsToMerge.empty())
 	{
-		std::queue<expansionBufferSortedRegion>::reference region = expansionBufferRegionsToMerge.front();
+		std::queue<ExpansionBufferSortedRegion>::reference region = expansionBufferRegionsToMerge.front();
 		inputs[numInputs++].open(region.start, region.end);
 		expansionBufferRegionsToMerge.pop();
 	}
