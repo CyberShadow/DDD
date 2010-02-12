@@ -2670,8 +2670,11 @@ void traceExit(const State* exitState, FRAME exitFrame)
 		fread(steps, sizeof(Step), stepNr, f);
 		fclose(f);
 
-		printTime();
-		printf("Resuming exit trace from frame" GROUP_STR " " GROUP_FORMAT "...\n", exitSearchFrameGroup);
+		if (exitSearchFrameGroup >= 0)
+		{
+			printTime();
+			printf("Resuming exit trace from frame" GROUP_STR " " GROUP_FORMAT "...\n", exitSearchFrameGroup);
+		}
 
 		exitSearchFrameGroup++;
 
