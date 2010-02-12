@@ -3095,9 +3095,11 @@ int search()
 	    }
 
 	timeb time0;
-	timeb time1;
-	timeb time2;
 	ftime(&time0);
+
+	timeb time1 = time0;
+	timeb time2;
+	timeb time3;
 
 	if (currentFrameGroup == -1)
 	{
@@ -3145,7 +3147,7 @@ int search()
 
 		printf("; (Resuming)                                                        "); fflush(stdout);
 
-		time2 = time0;
+		time3 = time1;
 
 		goto skipToCombining;
 	}
@@ -3162,7 +3164,7 @@ int search()
 		InputStream<unsigned> resumeInfo(formatFileName("expandedcount", currentFrameGroup));
 		resumeInfo.read(&expansionChunks, 1);
 
-		time1 = time0;
+		time2 = time1;
 
 		goto skipToMerging;
 	}
@@ -3255,9 +3257,9 @@ int search()
 			return EXIT_OK;
 		}
 
-		ftime(&time1);
+		ftime(&time2);
 		{
-			time_t ms = (time1.time - time0.time)*1000 + (time1.millitm - time0.millitm);
+			time_t ms = (time2.time - time1.time)*1000 + (time2.millitm - time1.millitm);
 			printf("%4d.%03d s", ms/1000, ms%1000);
 		}
 
@@ -3275,12 +3277,12 @@ int search()
 		deleteFile(formatFileName("expandedcount", currentFrameGroup));
 #endif
 
-		ftime(&time2);
+		ftime(&time3);
 		{
 			InputStream<Node> getSize(formatFileName("expanded", currentFrameGroup));
 			uint64_t expandedNodes = getSize.size();
 
-			time_t ms = (time2.time - time1.time)*1000 + (time2.millitm - time1.millitm);
+			time_t ms = (time3.time - time2.time)*1000 + (time3.millitm - time2.millitm);
 			printf("%4d.%03d s, %12llu nodes", ms/1000, ms%1000, expandedNodes);
 		}
 
@@ -3335,14 +3337,19 @@ int search()
 		deleteFile(formatFileName("expanded", currentFrameGroup));
 #endif
 
-		timeb time3;
-		ftime(&time3);
+		timeb time4;
+		ftime(&time4);
 		{
-			time_t ms       = (time3.time - time2.time)*1000 + (time3.millitm - time2.millitm);
-			time_t ms_total = (time3.time - time0.time)*1000 + (time3.millitm - time0.millitm);
+			time_t ms         = (time4.time - time3.time)*1000 + (time4.millitm - time3.millitm);
+			time_t ms_total   = (time4.time - time1.time)*1000 + (time4.millitm - time1.millitm);
+#ifdef PRINT_RUNNING_TOTAL_TIME
+			time_t ms_running = (time4.time - time0.time)*1000 + (time4.millitm - time0.millitm);
+			printf("%4d.%03d s (%4d.%03d s, %6d.%03d s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000, ms_running/1000, ms_running%1000);
+#else
 			printf("%4d.%03d s (%4d.%03d s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000);
+#endif
 		}
-		time0 = time3;
+		time1 = time4;
 
 		putchar('\n');
 	}

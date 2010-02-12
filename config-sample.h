@@ -1,5 +1,6 @@
 // DEBUG enables asserts and some other debug checks.
 //#define DEBUG
+#define PRINT_RUNNING_TOTAL_TIME
 
 // Which problem to solve?
 #define PROBLEM SampleMaze
