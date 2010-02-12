@@ -29,7 +29,8 @@
 #define RAM_SIZE (8LL*1024*1024*1024)
 
 // How many bytes to use for file stream buffers?
-#define STANDARD_BUFFER_SIZE (  1*1024*1024 / sizeof(Node)) // allocated separately in heap - used for open node files and other files
+#define STANDARD_BUFFER_SIZE  (  1*1024*1024 / sizeof(Node)) // allocated separately in heap - used for open node files and other files
+#define CLOSED_IN_BUFFER_SIZE ( 16*1024*1024 / sizeof(Node)) // for input to the Expanding phase
 
 // The expected ratio of Merging output/input
 #define EXPECTED_MERGING_RATIO 0.99

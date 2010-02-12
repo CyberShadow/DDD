@@ -1343,12 +1343,6 @@ size_t deduplicate(COMPRESSED_STATE* start, size_t records)
 
 // ********************************************* File names *********************************************
 
-/*
-#define formatFileName(name) formatProblemFileName(name, "bin")
-
-#define formatFileNameG(name, g) formatProblemFileName(name, 
-*/
-
 const char* formatFileName(const char* name)
 {
 	return formatProblemFileName(name, NULL, "bin");
