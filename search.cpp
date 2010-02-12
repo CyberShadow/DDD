@@ -1604,7 +1604,7 @@ void initExpansion()
 	expansionChunkWriteInProgress = false;
 
 	expansionBufferRegions.clear();
-	expansionBufferRegionsToMerge.c.clear();
+	expansionBufferRegionsToMerge = std::queue<expansionBufferSortedRegion>();
 	OpenNode* slot = expansionBuffer;
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 	{
