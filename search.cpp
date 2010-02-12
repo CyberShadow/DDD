@@ -156,6 +156,11 @@ typedef int32_t FRAME_GROUP;
 
 enum { PREFERRED_STATE_COMPRESSED, PREFERRED_STATE_UNCOMPRESSED, PREFERRED_STATE_NEITHER };
 
+// ************************************* CompressedState comparison *************************************
+
+#define     PIECE(block,byteoffset,type)      (*(const type*)(((const uint8_t*)&(block))+(byteoffset)))
+#define MASKPIECE(block,byteoffset,type,mask) (*(const type*)(((const uint8_t*)&(block))+(byteoffset))&mask)
+
 // ********************************************** Problem ***********************************************
 
 #include STRINGIZE(PROBLEM/PROBLEM.cpp)
@@ -182,9 +187,6 @@ typedef uint32_t PACKED_FRAME;
 // It is very important that these comparison operators are as fast as possible.
 // Note that the optimized comparison operators are incompatible with the memcmp operators, due to the former being "middle-endian" and the latter being big-endian.
 // TODO: relax ranges for !GROUP_FRAMES
-
-#define     PIECE(block,byteoffset,type)      (*(const type*)(((const uint8_t*)&(block))+(byteoffset)))
-#define MASKPIECE(block,byteoffset,type,mask) (*(const type*)(((const uint8_t*)&(block))+(byteoffset))&mask)
 
 #if   (!defined(USE_MEMCMP) && COMPRESSED_BITS >   0 && COMPRESSED_BITS <=   8) // 1 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,0,uint8_t) == PIECE(b,0,uint8_t); }
@@ -1408,14 +1410,16 @@ bool dequeueState(Node* state)
 	return true;
 }
 
-template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID)>
+void doNothing(THREAD_ID threadID) {}
+
+template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID), void (*FINALIZATION_HANDLER)(THREAD_ID threadID)>
 void worker(THREAD_ID threadID)
 {
 	Node cs;
 	while (dequeueState(&cs))
 		STATE_HANDLER(&cs, threadID);
 
-	expansionSortFinalRegions(threadID);
+	FINALIZATION_HANDLER(threadID);
 
     /* LOCK */
 	{
@@ -1425,7 +1429,7 @@ void worker(THREAD_ID threadID)
 	}
 }
 
-template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID)>
+template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID), void (*FINALIZATION_HANDLER)(THREAD_ID threadID)>
 void startWorkers()
 {
 #ifdef ENABLE_EXPANSION_SPILLOVER
@@ -1433,7 +1437,7 @@ void startWorkers()
 		SCOPED_LOCK lock(processQueueMutex);
 		runningSpecialWorkers++;
 	}
-	THREAD_CREATE(expansionReadSpilloverThread, 0);
+	THREAD_CREATE<expansionReadSpilloverThread>(0);
 #endif
 
 	{
@@ -1441,7 +1445,7 @@ void startWorkers()
 		runningWorkers += WORKERS;
 	}
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-		THREAD_CREATE(worker<STATE_HANDLER>, threadID);
+		THREAD_CREATE<worker<STATE_HANDLER,FINALIZATION_HANDLER>>(threadID);
 }
 
 void flushProcessingQueue()
@@ -1805,7 +1809,7 @@ void sortExpansionRegion(std::list<expansionBufferRegion>::iterator& regionToSor
 		SCOPED_LOCK lock(processQueueMutex);
 		runningSpecialWorkers++;
 	}
-	THREAD_CREATE(expansionWriteChunkThread, 0);
+	THREAD_CREATE<expansionWriteChunkThread>(0);
 }
 
 #ifdef ENABLE_EXPANSION_SPILLOVER
@@ -2199,7 +2203,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 
 			expansionSpilloverLocked = true;
 
-			THREAD_CREATE(expansionWriteSpilloverThread, 0);
+			THREAD_CREATE<expansionWriteSpilloverThread>(0);
 
 			continue;
 		}
@@ -2469,7 +2473,7 @@ void expansionWriteFinalChunk()
 			runningSpecialWorkers += WORKERS;
 		}
 		for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-			THREAD_CREATE(sortExpansionSpilloverThread, threadID);
+			THREAD_CREATE<sortExpansionSpilloverThread>(threadID);
 		{
 			SCOPED_LOCK lock(processQueueMutex);
 			while (runningSpecialWorkers)
@@ -2650,6 +2654,7 @@ void saveExitTrace(Step *steps, int stepNr)
 {
 	FILE* f = fopen(formatFileName("solution"), "wb");
 	fwrite(&exitSearchFrameGroup, sizeof(exitSearchFrameGroup), 1, f);
+	fwrite(&exitSearchStateFrame, sizeof(exitSearchStateFrame), 1, f);
 	fwrite(&exitSearchState     , sizeof(exitSearchState)     , 1, f);
 	fwrite(&stepNr              , sizeof(stepNr)              , 1, f);
 	fwrite(steps, sizeof(Step), stepNr, f);
@@ -2663,13 +2668,18 @@ void traceExit(const State* exitState, FRAME exitFrame)
 	
 	if (fileExists(formatFileName("solution")))
 	{
-		printf("Resuming exit trace...\n");
 		FILE* f = fopen(formatFileName("solution"), "rb");
 		fread(&exitSearchFrameGroup, sizeof(exitSearchFrameGroup), 1, f);
+		fread(&exitSearchStateFrame, sizeof(exitSearchStateFrame), 1, f);
 		fread(&exitSearchState     , sizeof(exitSearchState)     , 1, f);
 		fread(&stepNr              , sizeof(stepNr)              , 1, f);
 		fread(steps, sizeof(Step), stepNr, f);
 		fclose(f);
+
+		printTime();
+		printf("Resuming exit trace from frame" GROUP_STR " " GROUP_FORMAT "...\n", exitSearchFrameGroup);
+
+		exitSearchFrameGroup++;
 
 		if (exitSearchFrameGroup < 0)
 			goto found;
@@ -2695,13 +2705,14 @@ void traceExit(const State* exitState, FRAME exitFrame)
 		{
 			saveExitTrace(steps, stepNr);
 
+			printTime();
 			printf("Frame" GROUP_STR " " GROUP_FORMAT "... \r", exitSearchFrameGroup);
 
 			exitSearchState.compress(&exitSearchCompressedState);
 			exitSearchStateFound = false;
 				
 #ifdef MULTITHREADING
-			startWorkers<&processExitState>();
+			startWorkers<&processExitState,&doNothing>();
 #endif
 
 			BufferedInputStream<Node> input(formatFileName("closed", exitSearchFrameGroup));
@@ -2710,11 +2721,14 @@ void traceExit(const State* exitState, FRAME exitFrame)
 			while (cs = input.read())
 			{
 				DEBUG_ONLY(statesQueued++);
+				if (canStatesBeParentAndChild(&cs->getState(), &exitSearchCompressedState))
+				{
 #ifdef MULTITHREADING
-				queueState(cs);
+					queueState(cs);
 #else
-				processExitState(cs);
+					processExitState(cs);
 #endif
+				}
 				if (exitSearchStateFound)
 					break;
 			}
@@ -3058,6 +3072,11 @@ void searchRecalculateNodeCounts()
 	}
 }
 
+const size_t relativeSizeClosed      =   2;
+const size_t relativeSizeExpanded    =  11;
+const size_t relativeSizeCombined    = 100;
+const size_t relativeSizeCombinedNew = 101;
+
 int search()
 {
 	if (fileExists(formatProblemFileName(NULL, NULL, "txt")))
@@ -3167,9 +3186,6 @@ int search()
 		
 		printf("Extracting..."); fflush(stdout);
 
-		const size_t relativeSizeClosed      = 1;
-		const size_t relativeSizeExpanded    = 10;
-		
 		const size_t sizeClosed   = (OPENNODE_BUFFER_SIZE             ) * relativeSizeClosed   / (relativeSizeClosed + relativeSizeExpanded) ?
 		                            (OPENNODE_BUFFER_SIZE             ) * relativeSizeClosed   / (relativeSizeClosed + relativeSizeExpanded) : 1;
 		const size_t sizeExpanded = (OPENNODE_BUFFER_SIZE - sizeClosed) * relativeSizeExpanded / (                     relativeSizeExpanded) ?
@@ -3216,7 +3232,7 @@ int search()
 			initExpansion();
 
 #ifdef MULTITHREADING
-			startWorkers<&processState>();
+			startWorkers<&processState,&expansionSortFinalRegions>();
 #endif
 			copyStream<Node>(&input, &output);
 #ifdef MULTITHREADING
@@ -3238,7 +3254,9 @@ int search()
 		if (exitFound)
 		{
 			assert(currentFrameGroup == exitFrame / FRAMES_PER_GROUP);
-			printf("\nExit found (at frame %u), tracing path...\n", exitFrame);
+			putchar('\n');
+			printTime();
+			printf("Exit found (at frame %u), tracing path...\n", exitFrame);
 			traceExit(&exitState, exitFrame);
 			return EXIT_OK;
 		}
@@ -3284,11 +3302,6 @@ int search()
 		
 		printf("Combining..."); fflush(stdout);
 
-		const size_t relativeSizeClosed      = 1;
-		const size_t relativeSizeExpanded    = 10;
-		const size_t relativeSizeCombined    = 14;
-		const size_t relativeSizeCombinedNew = 18;
-		
 		const size_t sizeClosed   =    (OPENNODE_BUFFER_SIZE                                           ) * relativeSizeClosed      / (relativeSizeClosed + relativeSizeExpanded + relativeSizeCombined + relativeSizeCombinedNew) ?
 		                               (OPENNODE_BUFFER_SIZE                                           ) * relativeSizeClosed      / (relativeSizeClosed + relativeSizeExpanded + relativeSizeCombined + relativeSizeCombinedNew) : 1;
 		const size_t sizeExpanded =    (OPENNODE_BUFFER_SIZE - sizeClosed                              ) * relativeSizeExpanded    / (                     relativeSizeExpanded + relativeSizeCombined + relativeSizeCombinedNew) ?
@@ -3485,7 +3498,9 @@ int groupedSearch(FRAME_GROUP groupSize, bool filterFirst)
 
 		if (exitFound)
 		{
-			printf("\nExit found (at frame %u), tracing path...\n", exitFrame);
+			putchar('\n');
+			printTime();
+			printf("Exit found (at frame %u), tracing path...\n", exitFrame);
 			traceExit(&exitState, exitFrame);
 			return EXIT_OK;
 		}
@@ -4059,6 +4074,7 @@ int findExit()
 				if (s.isFinish())
 				{
 					FRAME exitFrame = GET_FRAME(currentFrameGroup, *cs);
+					printTime();
 					printf("Exit found (at frame %u), tracing path...\n", exitFrame);
 					traceExit(&s, exitFrame);
 					return EXIT_OK;
@@ -4084,6 +4100,7 @@ int writePartialSolution()
 
 	FILE* f = fopen(formatFileName("solution"), "rb");
 	fread(&exitSearchFrameGroup, sizeof(exitSearchFrameGroup), 1, f);
+	fread(&exitSearchStateFrame, sizeof(exitSearchStateFrame), 1, f);
 	fread(&exitSearchState     , sizeof(exitSearchState)     , 1, f);
 	fread(&stepNr              , sizeof(stepNr)              , 1, f);
 	fread(steps, sizeof(Step), stepNr, f);

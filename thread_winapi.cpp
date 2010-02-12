@@ -20,7 +20,12 @@ DWORD WINAPI CallCFunction(__in LPVOID lpParameter)
 }
 
 #define THREAD HANDLE
-#define THREAD_CREATE(_delegate,threadID) CreateThread(NULL, 0, &CallCFunction<_delegate>, (void*)threadID, 0, NULL)
+//#define THREAD_CREATE(_delegate,threadID) CreateThread(NULL, 0, &CallCFunction<_delegate>, (void*)threadID, 0, NULL)
 #define THREAD_JOIN(thread) WaitForSingleObject(thread, INFINITE);
 #define THREAD_DESTROY(thread) CloseHandle(thread)
 
+template<void (*WORKER_FUNCTION)(THREAD_ID threadID)>
+void THREAD_CREATE(THREAD_ID threadID)
+{
+	CreateThread(NULL, 0, &CallCFunction<WORKER_FUNCTION>, (void*)threadID, 0, NULL);
+}
