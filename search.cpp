@@ -3077,10 +3077,10 @@ void searchRecalculateNodeCounts()
 	}
 }
 
-const size_t relativeSizeClosed      =   2;
-const size_t relativeSizeExpanded    =  11;
-const size_t relativeSizeCombined    = 100;
-const size_t relativeSizeCombinedNew = 101;
+const size_t RELATIVE_SIZE_CLOSED    =   2;
+const size_t RELATIVE_SIZE_EXPANDED  =  11;
+const size_t RELATIVE_SIZE_COMBINED  = 100;
+const size_t RELATIVE_SIZE_COMBINING = 101;
 
 int search()
 {
@@ -3195,10 +3195,10 @@ int search()
 		
 		printf("Extracting..."); fflush(stdout);
 
-		const size_t sizeClosed   = (OPENNODE_BUFFER_SIZE             ) * relativeSizeClosed   / (relativeSizeClosed + relativeSizeExpanded) ?
-		                            (OPENNODE_BUFFER_SIZE             ) * relativeSizeClosed   / (relativeSizeClosed + relativeSizeExpanded) : 1;
-		const size_t sizeExpanded = (OPENNODE_BUFFER_SIZE - sizeClosed) * relativeSizeExpanded / (                     relativeSizeExpanded) ?
-		                            (OPENNODE_BUFFER_SIZE - sizeClosed) * relativeSizeExpanded / (                     relativeSizeExpanded) : 1;
+		const size_t sizeClosed   = (OPENNODE_BUFFER_SIZE             ) * RELATIVE_SIZE_CLOSED   / (RELATIVE_SIZE_CLOSED + RELATIVE_SIZE_EXPANDED) ?
+		                            (OPENNODE_BUFFER_SIZE             ) * RELATIVE_SIZE_CLOSED   / (RELATIVE_SIZE_CLOSED + RELATIVE_SIZE_EXPANDED) : 1;
+		const size_t sizeExpanded = (OPENNODE_BUFFER_SIZE - sizeClosed) * RELATIVE_SIZE_EXPANDED / (                     RELATIVE_SIZE_EXPANDED) ?
+		                            (OPENNODE_BUFFER_SIZE - sizeClosed) * RELATIVE_SIZE_EXPANDED / (                     RELATIVE_SIZE_EXPANDED) : 1;
 
 		closedNodeFile.setWriteBuffer((Node*)ram, sizeClosed * sizeof(OpenNode) / sizeof(Node));
 		closedNodeFile.open(formatFileName("closing", currentFrameGroup), false);
@@ -3311,14 +3311,14 @@ int search()
 		
 		printf("Combining..."); fflush(stdout);
 
-		const size_t sizeClosed   =    (OPENNODE_BUFFER_SIZE                                           ) * relativeSizeClosed      / (relativeSizeClosed + relativeSizeExpanded + relativeSizeCombined + relativeSizeCombinedNew) ?
-		                               (OPENNODE_BUFFER_SIZE                                           ) * relativeSizeClosed      / (relativeSizeClosed + relativeSizeExpanded + relativeSizeCombined + relativeSizeCombinedNew) : 1;
-		const size_t sizeExpanded =    (OPENNODE_BUFFER_SIZE - sizeClosed                              ) * relativeSizeExpanded    / (                     relativeSizeExpanded + relativeSizeCombined + relativeSizeCombinedNew) ?
-		                               (OPENNODE_BUFFER_SIZE - sizeClosed                              ) * relativeSizeExpanded    / (                     relativeSizeExpanded + relativeSizeCombined + relativeSizeCombinedNew) : 1;
-		const size_t sizeCombined =    (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded               ) * relativeSizeCombined    / (                                            relativeSizeCombined + relativeSizeCombinedNew) ?
-		                               (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded               ) * relativeSizeCombined    / (                                            relativeSizeCombined + relativeSizeCombinedNew) : 1;
-		const size_t sizeCombinedNew = (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded - sizeCombined) * relativeSizeCombinedNew / (                                                                   relativeSizeCombinedNew) ?
-		                               (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded - sizeCombined) * relativeSizeCombinedNew / (                                                                   relativeSizeCombinedNew) : 1;
+		const size_t sizeClosed   =    (OPENNODE_BUFFER_SIZE                                           ) * RELATIVE_SIZE_CLOSED      / (RELATIVE_SIZE_CLOSED + RELATIVE_SIZE_EXPANDED + RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) ?
+		                               (OPENNODE_BUFFER_SIZE                                           ) * RELATIVE_SIZE_CLOSED      / (RELATIVE_SIZE_CLOSED + RELATIVE_SIZE_EXPANDED + RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) : 1;
+		const size_t sizeExpanded =    (OPENNODE_BUFFER_SIZE - sizeClosed                              ) * RELATIVE_SIZE_EXPANDED    / (                     RELATIVE_SIZE_EXPANDED + RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) ?
+		                               (OPENNODE_BUFFER_SIZE - sizeClosed                              ) * RELATIVE_SIZE_EXPANDED    / (                     RELATIVE_SIZE_EXPANDED + RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) : 1;
+		const size_t sizeCombined =    (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded               ) * RELATIVE_SIZE_COMBINED    / (                                            RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) ?
+		                               (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded               ) * RELATIVE_SIZE_COMBINED    / (                                            RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) : 1;
+		const size_t sizeCombinedNew = (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded - sizeCombined) * RELATIVE_SIZE_COMBINING / (                                                                   RELATIVE_SIZE_COMBINING) ?
+		                               (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded - sizeCombined) * RELATIVE_SIZE_COMBINING / (                                                                   RELATIVE_SIZE_COMBINING) : 1;
 
 		closedNodeFile.setWriteBuffer((Node*)ram, sizeClosed * sizeof(OpenNode) / sizeof(Node));
 		closedNodeFile.open(formatFileName("closing", currentFrameGroup+1), false);
