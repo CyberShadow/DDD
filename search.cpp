@@ -125,6 +125,8 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 #define DEBUG_ONLY(x) do{}while(0)
 #endif
 
+#include "TimSort.h"
+
 const char* hexDump(const void* data, size_t size, int columns = 0)
 {
 	char* buf = getTempString();
@@ -1728,6 +1730,7 @@ struct ExpansionBufferSortedRegion
 std::queue<ExpansionBufferSortedRegion> expansionBufferRegionsToMerge;
 unsigned numSortsInProgress;
 bool expansionChunkWriteInProgress;
+BufferedOutputStream<OpenNode> expansionWriteChunkThreadStream;
 bool expansionThreadFinalized[WORKERS];
 #ifdef DEBUG_EXPANSION
 FILE *expansionDebug;
@@ -1789,6 +1792,7 @@ void initExpansion()
 
 	numSortsInProgress = 0;
 	expansionChunkWriteInProgress = false;
+	expansionWriteChunkThreadStream.setWriteBufferSize(64*1024*1024 / sizeof(OpenNode));
 
 	expansionBufferRegions.clear();
 	expansionBufferRegionsToMerge = std::queue<ExpansionBufferSortedRegion>();
@@ -1889,13 +1893,15 @@ void expansionRegionMarkEmpty(std::list<ExpansionBufferRegion>::iterator& region
 		regionToEmpty->type = EXPANSION_BUFFER_REGION_EMPTY;
 }
 
-OutputStream<OpenNode> expansionWriteChunkThreadStream;
+//OutputStream<OpenNode> expansionWriteChunkThreadStream;
 OpenNode* expansionWriteChunkThreadBuffer;
-size_t expansionWriteChunkThreadCount;
+unsigned expansionWriteChunkThreadCount;
 std::list<ExpansionBufferRegion>::iterator expansionWriteChunkThreadRegion;
 void expansionWriteChunkThread(THREAD_ID threadID)
 {
-	expansionWriteChunkThreadStream.write(expansionWriteChunkThreadBuffer, expansionWriteChunkThreadCount);
+	//expansionWriteChunkThreadStream.write(expansionWriteChunkThreadBuffer, expansionWriteChunkThreadCount);
+	//expansionWriteChunkThreadStream.close();
+	mergeChunks<OpenNode, EXPANSION_NODES_PER_QUEUE_ELEMENT>(expansionWriteChunkThreadBuffer, expansionWriteChunkThreadCount, &expansionWriteChunkThreadStream);
 	expansionWriteChunkThreadStream.close();
 
 	{
@@ -1931,40 +1937,28 @@ void sortExpansionRegion(std::list<ExpansionBufferRegion>::iterator& regionToSor
 
 	regionToSort->type = EXPANSION_BUFFER_REGION_SORTING;
 	OpenNode *bufferToSort = EXPANSION_BUFFER + regionToSort->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
-	size_t count = regionToSort->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
+	unsigned count = regionToSort->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 	
 #ifdef DEBUG_EXPANSION
 	dumpExpansionDebug(threadID);
 #endif
 
-	numSortsInProgress++;
-	lock.unlock();
-	
-	std::sort(bufferToSort, bufferToSort + count);
-	count = deduplicate(bufferToSort, count);
-
-	lock.lock();
-	numSortsInProgress--;
-
-	unsigned oldLength = regionToSort->length;
-	unsigned newLength = (unsigned)((count + EXPANSION_NODES_PER_QUEUE_ELEMENT-1) / EXPANSION_NODES_PER_QUEUE_ELEMENT);
-	regionToSort->length = newLength;
 	regionToSort->type = EXPANSION_BUFFER_REGION_WRITING;
 	std::list<ExpansionBufferRegion>::iterator nextRegion = regionToSort; ++nextRegion;
-	if (nextRegion != expansionBufferRegions.end() && nextRegion->type == EXPANSION_BUFFER_REGION_EMPTY)
+	/*if (nextRegion != expansionBufferRegions.end() && nextRegion->type == EXPANSION_BUFFER_REGION_EMPTY)
 	{
 		nextRegion->pos    -= oldLength - newLength;
 		nextRegion->length += oldLength - newLength;
 	}
 	else
-	if (oldLength > newLength)
+	if (oldLength > regionToSort->length)
 	{
 		ExpansionBufferRegion region;
-		region.pos = regionToSort->pos + newLength;
-		region.length = oldLength - newLength;
+		region.pos = regionToSort->pos + regionToSort->length;
+		region.length = oldLength - regionToSort->length;
 		region.type = EXPANSION_BUFFER_REGION_EMPTY;
 		expansionBufferRegions.insert(nextRegion, region);
-	}
+	}*/
 
 #ifdef DEBUG_EXPANSION
 	dumpExpansionDebug(threadID);
@@ -2236,6 +2230,14 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 	SCOPED_LOCK lock(expansionMutex);
 
 	expansionRegionMarkFilled(expansionThreadIter[threadID], threadID);
+
+	lock.unlock();
+	{
+		TimSort<OpenNode> sort;
+		sort.sort(expansionThread[threadID].buffer, EXPANSION_NODES_PER_QUEUE_ELEMENT);
+	}
+	lock.lock();
+
 	expansionThread[threadID].buffer = NULL;
 
 	while (true)
