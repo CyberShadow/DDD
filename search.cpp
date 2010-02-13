@@ -125,8 +125,6 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 #define DEBUG_ONLY(x) do{}while(0)
 #endif
 
-#include "TimSort.h"
-
 const char* hexDump(const void* data, size_t size, int columns = 0)
 {
 	char* buf = getTempString();
@@ -1728,6 +1726,8 @@ size_t   expansionSpilloverChunkInPos;
 size_t expansionSpilloverNodesQueued;
 #endif
 
+
+#include "TimSort.cpp"
 
 #define EXPANSION_BUFFER_SLOTS (OPENNODE_BUFFER_SIZE / EXPANSION_NODES_PER_QUEUE_ELEMENT)
 #define EXPANSION_BUFFER_SIZE (EXPANSION_BUFFER_SLOTS * EXPANSION_NODES_PER_QUEUE_ELEMENT)
