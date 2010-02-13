@@ -1022,36 +1022,48 @@ void copyFile(const char* from, const char* to)
 
 // ***************************************** Hybrid operations ******************************************
 
-template<class NODE, unsigned CHUNK_SIZE>
-class InputHeapChunked
+struct HeapNode
 {
-protected:
+	unsigned pos, end;
+};
+
+template<class NODE>
+class InputOffset
+{
+public:
 	NODE* input;
 
-	struct HeapNode { unsigned pos, end; };
+	bool operator() (const HeapNode& a, const HeapNode& b) { return input[a.pos] < input[b.pos]; }
+};
 
+template<class NODE, unsigned CHUNK_SIZE>
+class InputHeapChunked : public InputOffset<NODE>
+{
+protected:
 	HeapNode *heap, *head;
 	int size;
 
 public:
-	bool operator() (const HeapNode& a, const HeapNode& b) { return input[a.pos] < input[b.pos]; }
-
-	InputHeapChunked(NODE* input, unsigned numChunks)
+	InputHeapChunked(NODE* input, unsigned inputSize)
 	{
-		if (numChunks==0)
+		if (inputSize==0)
 			error("No inputs");
+		unsigned numChunks = (inputSize + CHUNK_SIZE-1) / CHUNK_SIZE;
 		heap = new HeapNode[numChunks];
 		size = 0;
 		this->input = input;
-		unsigned pos = 0;
-		for (unsigned i=0; i<numChunks; i++)
+		for (unsigned pos=0;;)
 		{
 			heap[size].pos = pos;
 			pos += CHUNK_SIZE;
-			heap[size].end = pos;
-			size++;
+			if (pos >= inputSize)
+			{
+				heap[size++].end = inputSize;
+				break;
+			}
+			heap[size++].end = pos;
 		}
-		std::sort(heap, heap+size, *this);
+		std::sort(heap, heap+size, *(InputOffset*)this);
 		head = heap;
 		heap--; // heap[0] is now invalid, use heap[1] to heap[size] inclusively; head == heap[1]
 		head->pos--;
@@ -1134,9 +1146,9 @@ public:
 };
 
 template<class NODE, unsigned CHUNK_SIZE, class OUTPUT>
-void mergeChunks(NODE* input, unsigned numChunks, OUTPUT* output)
+void mergeChunks(NODE* input, unsigned inputSize, OUTPUT* output)
 {
-	InputHeapChunked<NODE, CHUNK_SIZE> heap(input, numChunks);
+	InputHeapChunked<NODE, CHUNK_SIZE> heap(input, inputSize);
 
 	const NODE* first = heap.read();
 	if (!first)
