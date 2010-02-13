@@ -865,6 +865,36 @@ public:
 	}
 };
 
+template<class NODE>
+class MemoryOutputStream
+{
+	NODE *start, *pos, *end;
+public:
+	MemoryOutputStream() {}
+	MemoryOutputStream(NODE* _start, NODE* _end) : start(_start), pos(_start), end(_end) {}
+	bool isOpen() const { return true; }
+
+	void open(NODE* _start, NODE* _end) { pos=start=_start; end=_end; }
+
+	void write(const NODE* p, bool verify=false)
+	{
+		debug_assert(pos < end);
+		*(pos++) = *p;
+#ifdef DEBUG
+		if (verify && pos > start)
+			assert(pos[-1] > pos[-2], "Output is not sorted");
+#endif
+	}
+	void rewind()
+	{
+		pos = start;
+	}
+	size_t size()
+	{
+		return pos - start;
+	}
+};
+
 #if 0
 template<class NODE>
 class SplitInputStream : public InputStream<NODE>
@@ -988,6 +1018,147 @@ void copyFile(const char* from, const char* to)
 	while (records = input.read(buffer, (size_t)amount))
 		output.write(buffer, records);
 	output.flush(); // force disk flush
+}
+
+// ***************************************** Hybrid operations ******************************************
+
+template<class NODE, unsigned CHUNK_SIZE>
+class InputHeapChunked
+{
+protected:
+	NODE* input;
+
+	struct HeapNode { unsigned pos, end; };
+
+	HeapNode *heap, *head;
+	int size;
+
+public:
+	bool operator() (const HeapNode& a, const HeapNode& b) { return input[a.pos] < input[b.pos]; }
+
+	InputHeapChunked(NODE* input, unsigned numChunks)
+	{
+		if (numChunks==0)
+			error("No inputs");
+		heap = new HeapNode[numChunks];
+		size = 0;
+		this->input = input;
+		unsigned pos = 0;
+		for (unsigned i=0; i<numChunks; i++)
+		{
+			heap[size].pos = pos;
+			pos += CHUNK_SIZE;
+			heap[size].end = pos;
+			size++;
+		}
+		std::sort(heap, heap+size, *this);
+		head = heap;
+		heap--; // heap[0] is now invalid, use heap[1] to heap[size] inclusively; head == heap[1]
+		head->pos--;
+	}
+
+	~InputHeapChunked()
+	{
+		heap++;
+		delete[] heap;
+	}
+
+	const NODE* getHead() const { return head->pos == head->end ? NULL : input + head->pos; }
+
+	bool next()
+	{
+		if (size == 0)
+			return false;
+		if (++head->pos == head->end)
+		{
+			*head = heap[size];
+			size--;
+			if (size==0)
+				return false;
+		}
+		bubbleDown();
+		test();
+		return true;
+	}
+
+	INLINE const NODE* read()
+	{
+		if (!next())
+		{
+			assert(getHead() == NULL);
+		}
+		return getHead();
+	}
+
+	void bubbleDown()
+	{
+		// Force local variables
+		intptr_t c = 1;
+		intptr_t size = this->size;
+		HeapNode* heap = this->heap;
+		HeapNode* pp = head; // pointer to parent
+		while (1)
+		{
+			c = c*2;
+			if (c > size)
+				return;
+			HeapNode* pc = &heap[c];
+			if (c < size) // if (c+1 <= size)
+			{
+				HeapNode* pc2 = pc+1;
+				if (input[pc2->pos] < input[pc->pos])
+				{
+					pc = pc2;
+					c++;
+				}
+			}
+			if (input[pp->pos] <= input[pc->pos])
+				return;
+			HeapNode t = *pp;
+			*pp = *pc;
+			*pc = t;
+			pp = pc;
+		}
+	}
+
+	void test() const
+	{
+#ifdef DEBUG
+		for (int p=1; p<size; p++)
+		{
+			assert(p*2   > size || input[heap[p].pos] <= input[heap[p*2  ].pos]);
+			assert(p*2+1 > size || input[heap[p].pos] <= input[heap[p*2+1].pos]);
+		}
+#endif
+	}
+};
+
+template<class NODE, unsigned CHUNK_SIZE, class OUTPUT>
+void mergeChunks(NODE* input, unsigned numChunks, OUTPUT* output)
+{
+	InputHeapChunked<NODE, CHUNK_SIZE> heap(input, numChunks);
+
+	const NODE* first = heap.read();
+	if (!first)
+		return;
+	NODE cs = *(NODE*)first;
+	const NODE* cs2;
+
+	while (cs2 = heap.read())
+	{
+		debug_assert(*cs2 >= cs);
+		if (cs == *cs2) // CompressedState::operator== does not compare subframe
+		{
+			if (getFrame(&cs) > getFrame(cs2)) // in case of duplicate frames, pick the one from the smallest frame
+				setFrame(&cs,   getFrame(cs2));
+		}
+		else
+		{
+			output->write(&cs, true);
+			cs = *cs2;
+		}
+	}
+	output->write(&cs, true);
 }
 
 // ***************************************** Stream operations ******************************************
