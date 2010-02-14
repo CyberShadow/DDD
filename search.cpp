@@ -3279,10 +3279,10 @@ void searchRecalculateNodeCounts()
 	}
 }
 
-const size_t RELATIVE_SIZE_CLOSED    =   5;
-const size_t RELATIVE_SIZE_EXPANDED  =  34;
-const size_t RELATIVE_SIZE_COMBINED  =  52;
-const size_t RELATIVE_SIZE_COMBINING =  63;
+const size_t RELATIVE_SIZE_CLOSING   =  20;
+const size_t RELATIVE_SIZE_EXPANDED  = 142;
+const size_t RELATIVE_SIZE_COMBINED  = 189;
+const size_t RELATIVE_SIZE_COMBINING = 234;
 
 int search()
 {
@@ -3397,18 +3397,18 @@ int search()
 		
 		printf("Extracting..."); fflush(stdout);
 
-		const size_t sizeClosed   = (OPENNODE_BUFFER_SIZE             ) * RELATIVE_SIZE_CLOSED   / (RELATIVE_SIZE_CLOSED + RELATIVE_SIZE_EXPANDED) ?
-		                            (OPENNODE_BUFFER_SIZE             ) * RELATIVE_SIZE_CLOSED   / (RELATIVE_SIZE_CLOSED + RELATIVE_SIZE_EXPANDED) : 1;
-		const size_t sizeExpanded = (OPENNODE_BUFFER_SIZE - sizeClosed) * RELATIVE_SIZE_EXPANDED / (                     RELATIVE_SIZE_EXPANDED) ?
-		                            (OPENNODE_BUFFER_SIZE - sizeClosed) * RELATIVE_SIZE_EXPANDED / (                     RELATIVE_SIZE_EXPANDED) : 1;
+		const size_t sizeClosing   = (OPENNODE_BUFFER_SIZE              ) * RELATIVE_SIZE_CLOSING   / (RELATIVE_SIZE_CLOSING + RELATIVE_SIZE_COMBINING) ?
+		                             (OPENNODE_BUFFER_SIZE              ) * RELATIVE_SIZE_CLOSING   / (RELATIVE_SIZE_CLOSING + RELATIVE_SIZE_COMBINING) : 1;
+		const size_t sizeCombining = (OPENNODE_BUFFER_SIZE - sizeClosing) * RELATIVE_SIZE_COMBINING / (                        RELATIVE_SIZE_COMBINING) ?
+		                             (OPENNODE_BUFFER_SIZE - sizeClosing) * RELATIVE_SIZE_COMBINING / (                        RELATIVE_SIZE_COMBINING) : 1;
 
-		closedNodeFile.setWriteBuffer((Node*)ram, sizeClosed * sizeof(OpenNode) / sizeof(Node));
+		closedNodeFile.setWriteBuffer((Node*)ram, sizeClosing * sizeof(OpenNode) / sizeof(Node));
 		closedNodeFile.open(formatFileName("closing", currentFrameGroup), false);
 
 		ClosedNodeFilterOutput output;
 
 		BufferedInputStream<OpenNode> input;
-		input.setReadBuffer((OpenNode*)ram + sizeClosed, sizeExpanded);
+		input.setReadBuffer((OpenNode*)ram + sizeClosing, sizeCombining);
 		input.open(formatFileName("combined", currentFrameGroup));
 
 		copyStream<OpenNode>(&input, &output);
@@ -3513,29 +3513,29 @@ int search()
 		
 		printf("Combining..."); fflush(stdout);
 
-		const size_t sizeClosed   =    (OPENNODE_BUFFER_SIZE                                           ) * RELATIVE_SIZE_CLOSED      / (RELATIVE_SIZE_CLOSED + RELATIVE_SIZE_EXPANDED + RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) ?
-		                               (OPENNODE_BUFFER_SIZE                                           ) * RELATIVE_SIZE_CLOSED      / (RELATIVE_SIZE_CLOSED + RELATIVE_SIZE_EXPANDED + RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) : 1;
-		const size_t sizeExpanded =    (OPENNODE_BUFFER_SIZE - sizeClosed                              ) * RELATIVE_SIZE_EXPANDED    / (                     RELATIVE_SIZE_EXPANDED + RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) ?
-		                               (OPENNODE_BUFFER_SIZE - sizeClosed                              ) * RELATIVE_SIZE_EXPANDED    / (                     RELATIVE_SIZE_EXPANDED + RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) : 1;
-		const size_t sizeCombined =    (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded               ) * RELATIVE_SIZE_COMBINED    / (                                            RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) ?
-		                               (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded               ) * RELATIVE_SIZE_COMBINED    / (                                            RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) : 1;
-		const size_t sizeCombinedNew = (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded - sizeCombined) * RELATIVE_SIZE_COMBINING / (                                                                   RELATIVE_SIZE_COMBINING) ?
-		                               (OPENNODE_BUFFER_SIZE - sizeClosed - sizeExpanded - sizeCombined) * RELATIVE_SIZE_COMBINING / (                                                                   RELATIVE_SIZE_COMBINING) : 1;
+		const size_t sizeClosing  =    (OPENNODE_BUFFER_SIZE                                            ) * RELATIVE_SIZE_CLOSING   / (RELATIVE_SIZE_CLOSING + RELATIVE_SIZE_EXPANDED + RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) ?
+		                               (OPENNODE_BUFFER_SIZE                                            ) * RELATIVE_SIZE_CLOSING   / (RELATIVE_SIZE_CLOSING + RELATIVE_SIZE_EXPANDED + RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) : 1;
+		const size_t sizeExpanded =    (OPENNODE_BUFFER_SIZE - sizeClosing                              ) * RELATIVE_SIZE_EXPANDED  / (                        RELATIVE_SIZE_EXPANDED + RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) ?
+		                               (OPENNODE_BUFFER_SIZE - sizeClosing                              ) * RELATIVE_SIZE_EXPANDED  / (                        RELATIVE_SIZE_EXPANDED + RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) : 1;
+		const size_t sizeCombined =    (OPENNODE_BUFFER_SIZE - sizeClosing - sizeExpanded               ) * RELATIVE_SIZE_COMBINED  / (                                                 RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) ?
+		                               (OPENNODE_BUFFER_SIZE - sizeClosing - sizeExpanded               ) * RELATIVE_SIZE_COMBINED  / (                                                 RELATIVE_SIZE_COMBINED + RELATIVE_SIZE_COMBINING) : 1;
+		const size_t sizeCombinedNew = (OPENNODE_BUFFER_SIZE - sizeClosing - sizeExpanded - sizeCombined) * RELATIVE_SIZE_COMBINING / (                                                                          RELATIVE_SIZE_COMBINING) ?
+		                               (OPENNODE_BUFFER_SIZE - sizeClosing - sizeExpanded - sizeCombined) * RELATIVE_SIZE_COMBINING / (                                                                          RELATIVE_SIZE_COMBINING) : 1;
 
-		closedNodeFile.setWriteBuffer((Node*)ram, sizeClosed * sizeof(OpenNode) / sizeof(Node));
+		closedNodeFile.setWriteBuffer((Node*)ram, sizeClosing * sizeof(OpenNode) / sizeof(Node));
 		closedNodeFile.open(formatFileName("closing", currentFrameGroup+1), false);
 
 		{
 			BufferedInputStream<OpenNode> inputs[2];
 			DoubleOutput<OpenNode, ClosedNodeFilterOutput, BufferedOutputStream<OpenNode>> output;
 
-			inputs[1].setReadBuffer((OpenNode*)ram + sizeClosed, sizeExpanded);
+			inputs[1].setReadBuffer((OpenNode*)ram + sizeClosing, sizeExpanded);
 			inputs[1].open(formatFileName("expanded", currentFrameGroup));
 
-			inputs[0].setReadBuffer((OpenNode*)ram + sizeClosed + sizeExpanded, sizeCombined);
+			inputs[0].setReadBuffer((OpenNode*)ram + sizeClosing + sizeExpanded, sizeCombined);
 			inputs[0].open(formatFileName("combined", currentFrameGroup));
 
-			output.b()->setWriteBuffer((OpenNode*)ram + sizeClosed + sizeExpanded + sizeCombined, sizeCombinedNew);
+			output.b()->setWriteBuffer((OpenNode*)ram + sizeClosing + sizeExpanded + sizeCombined, sizeCombinedNew);
 			output.b()->open(formatFileName("combining", currentFrameGroup+1), false);
 
 			mergeStreams<OpenNode>(inputs, 2, &output);
