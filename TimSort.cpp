@@ -58,6 +58,9 @@
  *
  * Ported from Java to C++ by David Ellsworth
  */
+
+#include <functional>
+
 template<class T>
 class TimSort
 {
@@ -79,7 +82,7 @@ private:
 	 * of the minimum stack length required as a function of the length
 	 * of the array being sorted and the minimum merge sequence length.
 	 */
-	enum { MIN_MERGE = 32 };
+	enum { MIN_MERGE = 16};//32 };
 
 	/**
 	 * The array being sorted.
@@ -91,7 +94,7 @@ private:
 	 * When we get into galloping mode, we stay there until both runs win less
 	 * often than MIN_GALLOP consecutive times.
 	 */
-	enum { MIN_GALLOP = 7 };
+	enum { MIN_GALLOP = 64};//7 };
 
 	/**
 	 * This controls when we get *into* galloping mode.  It is initialized
@@ -130,7 +133,7 @@ private:
 	int *runLen;
 
 public:
-	TimSort() : minGallop(MIN_GALLOP), stackSize(0), tmp(NULL), runBase(NULL), runLen(NULL) {}
+	//TimSort() : minGallop(MIN_GALLOP), stackSize(0), tmp(NULL), runBase(NULL), runLen(NULL) {}
 
 	/**
 	 * Creates a TimSort instance to maintain the state of an ongoing sort.
@@ -143,10 +146,8 @@ public:
 		this->a = a;
 		this->a_len = len;
 
-		int newLength = len < 2 * INITIAL_TMP_STORAGE_LENGTH ? ((unsigned)len >> 1) : INITIAL_TMP_STORAGE_LENGTH;
-		T *newArray = new T [newLength];
-		tmp = newArray;
-		tmp_len = newLength;
+		tmp_len = len < 2 * INITIAL_TMP_STORAGE_LENGTH ? ((unsigned)len >> 1) : INITIAL_TMP_STORAGE_LENGTH;
+		tmp = new T [tmp_len];
 
 		/*
 		 * Allocate runs-to-be-merged stack (which cannot be expanded).  The
@@ -161,6 +162,7 @@ public:
 		int stackLen = (len <    120  ?  5 :
 						len <   1542  ? 10 :
 						len < 119151  ? 19 : 40);
+		stackLen *= 2; // because of changed MIN_MERGE
 		runBase = new int[stackLen];
 		runLen = new int[stackLen];
 	}
@@ -178,13 +180,20 @@ public:
 	 * of the public method with the same signature in java.util.Arrays.
 	 */
 
-	void sort(T *a, int len)
+	static void sort(T *a, int len)
 	{
-		sort(a, len, 0, len);
+		sort(a, len, 0, len, std::less<T>());
+	}
+
+	template<class PR>
+	static void sort(T *a, int len, PR pred)
+	{
+		sort(a, len, 0, len, pred);
 	}
 
 private:
-	void sort(T *a, int len, int lo, int hi)
+	template<class PR>
+	static void sort(T *a, int len, int lo, int hi, PR pred)
 	{
 		rangeCheck(len, lo, hi);
 		int nRemaining  = hi - lo;
@@ -194,8 +203,8 @@ private:
 		// If array is small, do a "mini-TimSort" with no merges
 		if (nRemaining < MIN_MERGE)
 		{
-			int initRunLen = countRunAndMakeAscending(a, lo, hi);
-			binarySort(a, lo, hi, lo + initRunLen);
+			int initRunLen = countRunAndMakeAscending(a, lo, hi, pred);
+			binarySort(a, lo, hi, lo + initRunLen, pred);
 			return;
 		}
 
@@ -208,18 +217,18 @@ private:
 		int minRun = minRunLength(nRemaining);
 		do {
 			// Identify next run
-			int runLen = countRunAndMakeAscending(a, lo, hi);
+			int runLen = countRunAndMakeAscending(a, lo, hi, pred);
 
 			// If run is short, extend to min(minRun, nRemaining)
 			if (runLen < minRun) {
 				int force = nRemaining <= minRun ? nRemaining : minRun;
-				binarySort(a, lo, lo + force, lo + runLen);
+				binarySort(a, lo, lo + force, lo + runLen, pred);
 				runLen = force;
 			}
 
 			// Push run onto pending-run stack, and maybe merge
 			ts.pushRun(lo, runLen);
-			ts.mergeCollapse();
+			ts.mergeCollapse(pred);
 
 			// Advance to find next run
 			lo += runLen;
@@ -228,7 +237,7 @@ private:
 
 		// Merge all remaining runs to complete sort
 		assert(lo == hi);
-		ts.mergeForceCollapse();
+		ts.mergeForceCollapse(pred);
 		assert(ts.stackSize == 1);
 	}
 
@@ -250,7 +259,8 @@ private:
 	 *        not already known to be sorted (@code lo <= start <= hi}
 	 * @param c comparator to used for the sort
 	 */
-	void binarySort(T *a, int lo, int hi, int start)
+	template<class PR>
+	static void binarySort(T *a, int lo, int hi, int start, PR pred)
 	{
 		assert(lo <= start && start <= hi);
 		if (start == lo)
@@ -269,7 +279,7 @@ private:
 			 */
 			while (left < right) {
 				int mid = (unsigned)(left + right) >> 1;
-				if (pivot < a[mid])
+				if (pred(pivot, a[mid]))
 					right = mid;
 				else
 					left = mid + 1;
@@ -320,7 +330,8 @@ private:
 	 * @return  the length of the run beginning at the specified position in
 	 *          the specified array
 	 */
-	int countRunAndMakeAscending(T *a, int lo, int hi)
+	template<class PR>
+	static int countRunAndMakeAscending(T *a, int lo, int hi, PR pred)
 	{
 		assert(lo < hi);
 		int runHi = lo + 1;
@@ -328,12 +339,12 @@ private:
 			return 1;
 
 		// Find end of run, and reverse range if descending
-		if (a[runHi++] < a[lo]) { // Descending
-			while(runHi < hi && a[runHi] < a[runHi - 1])
+		if (pred(a[runHi++], a[lo])) { // Descending
+			while(runHi < hi && pred(a[runHi], a[runHi - 1]))
 				runHi++;
 			reverseRange(a, lo, runHi);
 		} else {                              // Ascending
-			while (runHi < hi && a[runHi] >= a[runHi - 1])
+			while (runHi < hi && !pred(a[runHi], a[runHi - 1]))
 				runHi++;
 		}
 
@@ -347,7 +358,7 @@ private:
 	 * @param lo the index of the first element in the range to be reversed
 	 * @param hi the index after the last element in the range to be reversed
 	 */
-	void reverseRange(T *a, int lo, int hi) {
+	static void reverseRange(T *a, int lo, int hi) {
 		hi--;
 		while (lo < hi) {
 			T t = a[lo];
@@ -373,7 +384,7 @@ private:
 	 * @param n the length of the array to be sorted
 	 * @return the length of the minimum run to be merged
 	 */
-	int minRunLength(int n)
+	static int minRunLength(int n)
 	{
 		assert(n >= 0);
 		int r = 0;      // Becomes 1 if any 1 bits are shifted off
@@ -408,16 +419,17 @@ private:
 	 * so the invariants are guaranteed to hold for i < stackSize upon
 	 * entry to the method.
 	 */
-	void mergeCollapse()
+	template<class PR>
+	void mergeCollapse(PR pred)
 	{
 		while (stackSize > 1) {
 			int n = stackSize - 2;
 			if (n > 0 && runLen[n-1] <= runLen[n] + runLen[n+1]) {
 				if (runLen[n - 1] < runLen[n + 1])
 					n--;
-				mergeAt(n);
+				mergeAt(n, pred);
 			} else if (runLen[n] <= runLen[n + 1]) {
-				mergeAt(n);
+				mergeAt(n, pred);
 			} else {
 				break; // Invariant is established
 			}
@@ -428,13 +440,14 @@ private:
 	 * Merges all runs on the stack until only one remains.  This method is
 	 * called once, to complete the sort.
 	 */
-	void mergeForceCollapse()
+	template<class PR>
+	void mergeForceCollapse(PR pred)
 	{
 		while (stackSize > 1) {
 			int n = stackSize - 2;
 			if (n > 0 && runLen[n - 1] < runLen[n + 1])
 				n--;
-			mergeAt(n);
+			mergeAt(n, pred);
 		}
 	}
 
@@ -445,7 +458,8 @@ private:
 	 *
 	 * @param i stack index of the first of the two runs to merge
 	 */
-	void mergeAt(int i)
+	template<class PR>
+	void mergeAt(int i, PR pred)
 	{
 		assert(stackSize >= 2);
 		assert(i >= 0);
@@ -474,7 +488,7 @@ private:
 		 * Find where the first element of run2 goes in run1. Prior elements
 		 * in run1 can be ignored (because they're already in place).
 		 */
-		int k = gallopRight(a[base2], a, base1, len1, 0);
+		int k = gallopRight(a[base2], a, base1, len1, 0, pred);
 		assert(k >= 0);
 		base1 += k;
 		len1 -= k;
@@ -485,16 +499,16 @@ private:
 		 * Find where the last element of run1 goes in run2. Subsequent elements
 		 * in run2 can be ignored (because they're already in place).
 		 */
-		len2 = gallopLeft(a[base1 + len1 - 1], a, base2, len2, len2 - 1);
+		len2 = gallopLeft(a[base1 + len1 - 1], a, base2, len2, len2 - 1, pred);
 		assert(len2 >= 0);
 		if (len2 == 0)
 			return;
 
 		// Merge remaining runs, using tmp array with min(len1, len2) elements
 		if (len1 <= len2)
-			mergeLo(base1, len1, base2, len2);
+			mergeLo(base1, len1, base2, len2, pred);
 		else
-			mergeHi(base1, len1, base2, len2);
+			mergeHi(base1, len1, base2, len2, pred);
 	}
 
 	/**
@@ -515,15 +529,16 @@ private:
 	 *    the first k elements of a should precede key, and the last n - k
 	 *    should follow it.
 	 */
-	int gallopLeft(T key, T *a, int base, int len, int hint)
+	template<class PR>
+	int gallopLeft(T key, T *a, int base, int len, int hint, PR pred)
 	{
 		assert(len > 0 && hint >= 0 && hint < len);
 		int lastOfs = 0;
 		int ofs = 1;
-		if (key > a[base + hint]) {
+		if (pred(a[base + hint], key)) {
 			// Gallop right until a[base+hint+lastOfs] < key <= a[base+hint+ofs]
 			int maxOfs = len - hint;
-			while (ofs < maxOfs && key > a[base + hint + ofs]) {
+			while (ofs < maxOfs && pred(a[base + hint + ofs], key)) {
 				lastOfs = ofs;
 				ofs = (ofs << 1) + 1;
 				if (ofs <= 0)   // int overflow
@@ -538,7 +553,7 @@ private:
 		} else { // key <= a[base + hint]
 			// Gallop left until a[base+hint-ofs] < key <= a[base+hint-lastOfs]
 			int maxOfs = hint + 1;
-			while (ofs < maxOfs && key <= a[base + hint - ofs]) {
+			while (ofs < maxOfs && !pred(a[base + hint - ofs], key)) {
 				lastOfs = ofs;
 				ofs = (ofs << 1) + 1;
 				if (ofs <= 0)   // int overflow
@@ -563,7 +578,7 @@ private:
 		while (lastOfs < ofs) {
 			int m = lastOfs + ((unsigned)(ofs - lastOfs) >> 1);
 
-			if (key > a[base + m])
+			if (pred(a[base + m], key))
 				lastOfs = m + 1;  // a[base + m] < key
 			else
 				ofs = m;          // key <= a[base + m]
@@ -585,15 +600,16 @@ private:
 	 * @param c the comparator used to order the range, and to search
 	 * @return the int k,  0 <= k <= n such that a[b + k - 1] <= key < a[b + k]
 	 */
-	int gallopRight(T key, T *a, int base, int len, int hint) {
+	template<class PR>
+	int gallopRight(T key, T *a, int base, int len, int hint, PR pred) {
 		assert(len > 0 && hint >= 0 && hint < len);
 
 		int ofs = 1;
 		int lastOfs = 0;
-		if (key < a[base + hint]) {
+		if (pred(key, a[base + hint])) {
 			// Gallop left until a[b+hint - ofs] <= key < a[b+hint - lastOfs]
 			int maxOfs = hint + 1;
-			while (ofs < maxOfs && key < a[base + hint - ofs]) {
+			while (ofs < maxOfs && pred(key, a[base + hint - ofs])) {
 				lastOfs = ofs;
 				ofs = (ofs << 1) + 1;
 				if (ofs <= 0)   // int overflow
@@ -609,7 +625,7 @@ private:
 		} else { // a[b + hint] <= key
 			// Gallop right until a[b+hint + lastOfs] <= key < a[b+hint + ofs]
 			int maxOfs = len - hint;
-			while (ofs < maxOfs && key >= a[base + hint + ofs]) {
+			while (ofs < maxOfs && !pred(key, a[base + hint + ofs])) {
 				lastOfs = ofs;
 				ofs = (ofs << 1) + 1;
 				if (ofs <= 0)   // int overflow
@@ -633,7 +649,7 @@ private:
 		while (lastOfs < ofs) {
 			int m = lastOfs + ((unsigned)(ofs - lastOfs) >> 1);
 
-			if (key < a[base + m])
+			if (pred(key, a[base + m]))
 				ofs = m;          // key < a[b + m]
 			else
 				lastOfs = m + 1;  // a[b + m] <= key
@@ -658,7 +674,8 @@ private:
 	 *        (must be aBase + aLen)
 	 * @param len2  length of second run to be merged (must be > 0)
 	 */
-	void mergeLo(int base1, int len1, int base2, int len2)
+	template<class PR>
+	void mergeLo(int base1, int len1, int base2, int len2, PR pred)
 	{
 		assert(len1 > 0 && len2 > 0 && base1 + len1 == base2);
 
@@ -695,7 +712,7 @@ private:
 			 */
 			do {
 				assert(len1 > 1 && len2 > 0);
-				if (a[cursor2] < tmp[cursor1]) {
+				if (pred(a[cursor2], tmp[cursor1])) {
 					a[dest++] = a[cursor2++];
 					count2++;
 					count1 = 0;
@@ -717,7 +734,7 @@ private:
 			 */
 			do {
 				assert(len1 > 1 && len2 > 0);
-				count1 = gallopRight(a[cursor2], tmp, cursor1, len1, 0);
+				count1 = gallopRight(a[cursor2], tmp, cursor1, len1, 0, pred);
 				if (count1 != 0) {
 					memcpy(a+dest, tmp+cursor1, count1 * sizeof(T));
 					dest += count1;
@@ -730,7 +747,7 @@ private:
 				if (--len2 == 0)
 					goto break_outer;
 
-				count2 = gallopLeft(tmp[cursor1], a, cursor2, len2, 0);
+				count2 = gallopLeft(tmp[cursor1], a, cursor2, len2, 0, pred);
 				if (count2 != 0) {
 					memcpy(a+dest, a+cursor2, count2 * sizeof(T));
 					dest += count2;
@@ -775,7 +792,8 @@ private:
 	 *        (must be aBase + aLen)
 	 * @param len2  length of second run to be merged (must be > 0)
 	 */
-	void mergeHi(int base1, int len1, int base2, int len2)
+	template<class PR>
+	void mergeHi(int base1, int len1, int base2, int len2, PR pred)
 	{
 		assert(len1 > 0 && len2 > 0 && base1 + len1 == base2);
 
@@ -813,7 +831,7 @@ private:
 			 */
 			do {
 				assert(len1 > 0 && len2 > 1);
-				if (tmp[cursor2] < a[cursor1]) {
+				if (pred(tmp[cursor2], a[cursor1])) {
 					a[dest--] = a[cursor1--];
 					count1++;
 					count2 = 0;
@@ -835,7 +853,7 @@ private:
 			 */
 			do {
 				assert(len1 > 0 && len2 > 1);
-				count1 = len1 - gallopRight(tmp[cursor2], a, base1, len1, len1 - 1);
+				count1 = len1 - gallopRight(tmp[cursor2], a, base1, len1, len1 - 1, pred);
 				if (count1 != 0) {
 					dest -= count1;
 					cursor1 -= count1;
@@ -848,7 +866,7 @@ private:
 				if (--len2 == 1)
 					goto break_outer;
 
-				count2 = len2 - gallopLeft(a[cursor1], tmp, 0, len2, len2 - 1);
+				count2 = len2 - gallopLeft(a[cursor1], tmp, 0, len2, len2 - 1, pred);
 				if (count2 != 0) {
 					dest -= count2;
 					cursor2 -= count2;
@@ -927,7 +945,7 @@ private:
 	 * @throws ArrayIndexOutOfBoundsException if fromIndex < 0
 	 *         or toIndex > arrayLen
 	 */
-	void rangeCheck(int arrayLen, int fromIndex, int toIndex)
+	static void rangeCheck(int arrayLen, int fromIndex, int toIndex)
 	{
 		if (fromIndex > toIndex)
 			throw format("IllegalArgumentException, fromIndex(%d) > toIndex(%d)", fromIndex, toIndex);

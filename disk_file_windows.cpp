@@ -133,7 +133,7 @@ public:
 		if (li.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
 			windowsError(format("Seek error (%s)", filenameOpened));
 
-		sectorBufferUse = (WORD)pos % sizeof(sectorBuffer);
+		sectorBufferUse = (WORD)pos % (WORD)sizeof(sectorBuffer);
 
 		if (sectorBufferUse)
 		{
@@ -181,8 +181,8 @@ public:
 			BOOL b;
 			if (sectorBufferUse)
 			{
-				if (chunk > sizeof(sectorBuffer) - sectorBufferUse)
-					chunk = sizeof(sectorBuffer) - sectorBufferUse;
+				if (chunk > (WORD)sizeof(sectorBuffer) - (WORD)sectorBufferUse)
+					chunk = (WORD)sizeof(sectorBuffer) - (WORD)sectorBufferUse;
 				memcpy(sectorBuffer + sectorBufferUse, data + bytes, chunk);
 				sectorBufferUse += (WORD)chunk;
 				if (sectorBufferUse == sizeof(sectorBuffer))
@@ -328,7 +328,7 @@ public:
 	void seek(uint64_t pos)
 	{
 		filePosition = pos * sizeof(NODE);
-		sectorBufferPos = (unsigned)filePosition % sizeof(sectorBuffer);
+		sectorBufferPos = (unsigned)filePosition % (unsigned)sizeof(sectorBuffer);
 
 		LARGE_INTEGER li;
 		DWORD error;
@@ -411,7 +411,7 @@ public:
 			b = ReadFile(archive, data + bytes, chunk, &r, NULL);
 			if (b && r<chunk)
 			{
-				sectorBufferEnd = r % sizeof(sectorBuffer);
+				sectorBufferEnd = r % (DWORD)sizeof(sectorBuffer);
 				sectorBufferPos = sectorBufferEnd;
 				memcpy(sectorBuffer, data + bytes + r - sectorBufferEnd, sectorBufferEnd);
 				filePosition += r;

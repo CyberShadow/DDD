@@ -9,7 +9,7 @@ DWORD WINAPI CallCFunction(__in LPVOID lpParameter)
 {
 	try
 	{
-		WORKER_FUNCTION((THREAD_ID)lpParameter);
+		WORKER_FUNCTION((THREAD_ID&)lpParameter);
 	}
 	catch (const char* s)
 	{
@@ -27,5 +27,6 @@ DWORD WINAPI CallCFunction(__in LPVOID lpParameter)
 template<void (*WORKER_FUNCTION)(THREAD_ID threadID)>
 void THREAD_CREATE(THREAD_ID threadID)
 {
-	CreateThread(NULL, 0, &CallCFunction<WORKER_FUNCTION>, (void*)threadID, 0, NULL);
+	HANDLE thread = CreateThread(NULL, 0, &CallCFunction<WORKER_FUNCTION>, (void*)threadID, 0, NULL);
+	CloseHandle(thread);
 }

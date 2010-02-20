@@ -295,6 +295,7 @@ INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { ret
                                                                                    (PIECE(a,9,uint64_t) == PIECE(b,9,uint64_t) && (PIECE(a,1,uint64_t) <  PIECE(b,1,uint64_t) ||
                                                                                                                                   (PIECE(a,1,uint64_t) == PIECE(b,1,uint64_t) && PIECE(a,0,uint8_t) <= PIECE(b,0,uint8_t)))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 136 && COMPRESSED_BITS <= 144) // 18 bytes
+/*
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,10,uint64_t) == PIECE(b,10,uint64_t) &&  PIECE(a,2,uint64_t) == PIECE(b,2,uint64_t) && PIECE(a,0,uint16_t) == PIECE(b,0,uint16_t); }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,10,uint64_t) != PIECE(b,10,uint64_t) ||  PIECE(a,2,uint64_t) != PIECE(b,2,uint64_t) || PIECE(a,0,uint16_t) != PIECE(b,0,uint16_t); }
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,10,uint64_t) <  PIECE(b,10,uint64_t) || 
@@ -303,6 +304,137 @@ INLINE bool operator< (const CompressedState& a, const CompressedState& b) { ret
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,10,uint64_t) <  PIECE(b,10,uint64_t) || 
                                                                                    (PIECE(a,10,uint64_t) == PIECE(b,10,uint64_t) && (PIECE(a,2,uint64_t) <  PIECE(b,2,uint64_t) ||
                                                                                                                                     (PIECE(a,2,uint64_t) == PIECE(b,2,uint64_t) && PIECE(a,0,uint16_t) <= PIECE(b,0,uint16_t)))); }
+*/
+
+INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((PIECE(a,10,uint64_t) ^ PIECE(b,10,uint64_t)) | (PIECE(a,2,uint64_t) ^ PIECE(b,2,uint64_t)) | (PIECE(a,0,uint16_t) ^ PIECE(b,0,uint16_t))) == 0; }
+INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((PIECE(a,10,uint64_t) ^ PIECE(b,10,uint64_t)) | (PIECE(a,2,uint64_t) ^ PIECE(b,2,uint64_t)) | (PIECE(a,0,uint16_t) ^ PIECE(b,0,uint16_t))) != 0; }
+
+/*
+INLINE char operator==(const CompressedState& a, const CompressedState& b)
+{
+	uint32_t a0 = PIECE(a, 0,uint16_t);
+	uint64_t a1 = PIECE(a, 2,uint64_t);
+	uint64_t a2 = PIECE(a,10,uint64_t);
+	uint32_t b0 = PIECE(b, 0,uint16_t);
+	uint64_t b1 = PIECE(b, 2,uint64_t);
+	uint64_t b2 = PIECE(b,10,uint64_t);
+	uint64_t temp1;
+	uint64_t temp2;
+	char result;
+
+	__asm__(
+		"cmpl %3, %2;"
+		"sbbq %4, %0;"
+		"sbbq %5, %1;"
+		:
+		"=r"(temp1), "=r"(temp2)
+		:
+		"r"  (a0),
+		"emr"(b0), "emr"(b1), "emr"(b2),
+		           "0"  (a1), "1"  (a2));
+	__asm__(
+		"sete %0"
+		:
+		"=r"(result));
+
+	return result;
+}
+
+INLINE char operator!=(const CompressedState& a, const CompressedState& b)
+{
+	uint32_t a0 = PIECE(a, 0,uint16_t);
+	uint64_t a1 = PIECE(a, 2,uint64_t);
+	uint64_t a2 = PIECE(a,10,uint64_t);
+	uint32_t b0 = PIECE(b, 0,uint16_t);
+	uint64_t b1 = PIECE(b, 2,uint64_t);
+	uint64_t b2 = PIECE(b,10,uint64_t);
+	uint64_t temp1;
+	uint64_t temp2;
+	char result;
+
+	__asm__(
+		"cmpl %3, %2;"
+		"sbbq %4, %0;"
+		"sbbq %5, %1;"
+		:
+		"=r"(temp1), "=r"(temp2)
+		:
+		"r"  (a0),
+		"emr"(b0), "emr"(b1), "emr"(b2),
+		           "0"  (a1), "1"  (a2));
+	__asm__(
+		"setne %0"
+		:
+		"=r"(result));
+
+	return result;
+}
+*/
+
+INLINE int operator< (const CompressedState& a, const CompressedState& b)
+{
+	uint32_t a0 = PIECE(a, 0,uint16_t);
+	uint64_t a1 = PIECE(a, 2,uint64_t);
+	uint64_t a2 = PIECE(a,10,uint64_t);
+	uint32_t b0 = PIECE(b, 0,uint16_t);
+	uint64_t b1 = PIECE(b, 2,uint64_t);
+	uint64_t b2 = PIECE(b,10,uint64_t);
+	uint64_t temp1;
+	uint64_t temp2;
+	int result;
+
+	__asm__(
+		"cmpl %4, %3;"
+		"sbbq %5, %1;"
+		"sbbq %6, %2;"
+		"sbb %0, %0;"
+		:
+		"=r,1,2,3"(result),
+		"=r,r,r,r"(temp1),
+		"=r,r,r,r"(temp2)
+		:
+		"r,r,r,r"(a0),
+		"emr,emr,emr,emr"(b0),
+		"emr,emr,emr,emr"(b1),
+		"emr,emr,emr,emr"(b2),
+		"1"(a1),
+		"2"(a2));
+
+	return result;
+}
+
+INLINE char operator<=(const CompressedState& b, const CompressedState& a)
+{
+	uint32_t a0 = PIECE(a, 0,uint16_t);
+	uint64_t a1 = PIECE(a, 2,uint64_t);
+	uint64_t a2 = PIECE(a,10,uint64_t);
+	uint32_t b0 = PIECE(b, 0,uint16_t);
+	uint64_t b1 = PIECE(b, 2,uint64_t);
+	uint64_t b2 = PIECE(b,10,uint64_t);
+	uint64_t temp1;
+	uint64_t temp2;
+	char result;
+
+	__asm__(
+		"cmpl %4, %3;"
+		"sbbq %5, %1;"
+		"sbbq %6, %2;"
+		"setnc %b0;"
+		:
+		"=r,1,2,3"(result),
+		"=r,r,r,r"(temp1),
+		"=r,r,r,r"(temp2)
+		:
+		"r,r,r,r"(a0),
+		"emr,emr,emr,emr"(b0),
+		"emr,emr,emr,emr"(b1),
+		"emr,emr,emr,emr"(b2),
+		"1"(a1),
+		"2"(a2));
+
+	return result;
+}
+
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 144 && COMPRESSED_BITS <= 152) // 19 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,11,uint64_t) == PIECE(b,11,uint64_t) &&  PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) == (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,11,uint64_t) != PIECE(b,11,uint64_t) ||  PIECE(a,3,uint64_t) != PIECE(b,3,uint64_t) || (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) != (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
@@ -1122,7 +1254,11 @@ public:
 			}
 			heap[size++].end = pos;
 		}
+#if 0
 		std::sort(heap, heap+size, *(InputOffset*)this);
+#else
+		TimSort<HeapNode>::sort(heap, size, *(InputOffset*)this);
+#endif
 		head = heap;
 		heap--; // heap[0] is now invalid, use heap[1] to heap[size] inclusively; head == heap[1]
 		head->pos--;
@@ -1134,7 +1270,11 @@ public:
 		heap = inputHeap;
 		size = count;
 
+#if 0
 		std::sort(heap, heap+size, *(InputOffset*)this);
+#else
+		TimSort<HeapNode>::sort(heap, size, *(InputOffset*)this);
+#endif
 		head = heap;
 		heap--;
 		head->pos--;
@@ -1168,7 +1308,8 @@ public:
 	{
 		if (!next())
 		{
-			assert(getHead() == NULL);
+			debug_assert(getHead() == NULL);
+			return NULL;
 		}
 		return getHead();
 	}
@@ -1349,8 +1490,8 @@ public:
 	{
 		if (!next())
 		{
-			//return NULL;
-			assert(getHead() == NULL);
+			debug_assert(getHead() == NULL);
+			return NULL;
 		}
 		return getHead();
 	}
@@ -1830,7 +1971,7 @@ unsigned expansionBufferQueueNodesToMerge;
 std::queue<ExpansionBufferSortedRegion> expansionBufferRegionsToMerge;
 //unsigned numSortsInProgress;
 volatile unsigned expansionChunkWriteInProgress[WORKERS];
-BufferedOutputStream<OpenNode> expansionWriteChunkThreadStream[WORKERS];
+//BufferedOutputStream<OpenNode> expansionWriteChunkThreadStream[WORKERS];
 #ifdef DEBUG_EXPANSION
 FILE *expansionDebug;
 #endif
@@ -1849,7 +1990,7 @@ void dumpExpansionDebug(THREAD_ID threadID)
 {
 	timeb time1;
 	ftime(&time1);
-	fprintf(expansionDebug, "%9d.%03d: ", time1.time, time1.millitm);
+	fprintf(expansionDebug, "%9Id.%03Id: ", time1.time, time1.millitm);
 
 	fputc('1'+(char)threadID, expansionDebug);
 	fputc(':', expansionDebug);
@@ -1900,7 +2041,7 @@ void initExpansion()
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 	{
 		expansionChunkWriteInProgress[threadID] = false;
-		expansionWriteChunkThreadStream[threadID].setWriteBufferSize(64*1024*1024 / sizeof(OpenNode) / WORKERS);
+		//expansionWriteChunkThreadStream[threadID].setWriteBufferSize(64*1024*1024 / sizeof(OpenNode) / WORKERS);
 
 		expansionThread[threadID].buffer = slot;
 		slot += EXPANSION_NODES_PER_QUEUE_ELEMENT;
@@ -1993,15 +2134,15 @@ void expansionRegionMarkEmpty(std::list<ExpansionBufferRegion>::iterator& region
 		regionToEmpty->type = EXPANSION_BUFFER_REGION_EMPTY;
 }
 
-//OutputStream<OpenNode> expansionWriteChunkThreadStream;
+OutputStream<OpenNode> expansionWriteChunkThreadStream[WORKERS];
 OpenNode* expansionWriteChunkThreadBuffer[WORKERS];
 unsigned expansionWriteChunkThreadCount[WORKERS];
 std::list<ExpansionBufferRegion>::iterator expansionWriteChunkThreadRegion[WORKERS];
 void expansionWriteChunkThread(THREAD_ID threadID)
 {
-	//expansionWriteChunkThreadStream.write(expansionWriteChunkThreadBuffer, expansionWriteChunkThreadCount);
-	//expansionWriteChunkThreadStream.close();
-	mergeChunks<OpenNode, EXPANSION_NODES_PER_QUEUE_ELEMENT>(expansionWriteChunkThreadBuffer[threadID], expansionWriteChunkThreadCount[threadID], &expansionWriteChunkThreadStream[threadID]);
+	expansionWriteChunkThreadStream[threadID].write(expansionWriteChunkThreadBuffer[threadID], expansionWriteChunkThreadCount[threadID]);
+	//mergeChunks<OpenNode, EXPANSION_NODES_PER_QUEUE_ELEMENT>(expansionWriteChunkThreadBuffer[threadID], expansionWriteChunkThreadCount[threadID], &expansionWriteChunkThreadStream[threadID]);
+	
 	expansionWriteChunkThreadStream[threadID].close();
 
 	{
@@ -2331,12 +2472,12 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 
 	expansionRegionMarkFilled(expansionThreadIter[threadID], threadID);
 
-	lock.unlock();
+	/*lock.unlock();
 	{
 		TimSort<OpenNode> sort;
 		sort.sort(expansionThread[threadID].buffer, EXPANSION_NODES_PER_QUEUE_ELEMENT);
 	}
-	lock.lock();
+	lock.lock();*/
 
 	expansionThread[threadID].buffer = NULL;
 
@@ -2551,8 +2692,8 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 {
 	if (expansionThread[threadID].buffer && expansionThread[threadID].i != 0)
 	{
-		TimSort<OpenNode> sort;
-		sort.sort(expansionThread[threadID].buffer, expansionThread[threadID].i);
+		//TimSort<OpenNode> sort;
+		TimSort<OpenNode>::sort(expansionThread[threadID].buffer, expansionThread[threadID].i);
 
 		{
 			SCOPED_LOCK lock(expansionMutex);
@@ -2625,8 +2766,8 @@ void expansionWriteFinalChunk()
 	}
 #endif*/
 
-	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-		expansionWriteChunkThreadStream[threadID].deallocateBuffer();
+	/*for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+		expansionWriteChunkThreadStream[threadID].deallocateBuffer();*/
 
 	if (expansionBufferQueueNodesToMerge)
 		expansionMergeRegionsToDisk();
@@ -2644,7 +2785,7 @@ void expansionWriteFinalChunk()
 		{
 			timeb time1;
 			ftime(&time1);
-			fprintf(expansionDebug, "%9d.%03d: Reading %llu nodes of spillover...\n", time1.time, time1.millitm, count);
+			fprintf(expansionDebug, "%9Id.%03Id: Reading %llu nodes of spillover...\n", time1.time, time1.millitm, count);
 			fflush(expansionDebug);
 		}
 #endif
@@ -2663,7 +2804,7 @@ void expansionWriteFinalChunk()
 		{
 			timeb time1;
 			ftime(&time1);
-			fprintf(expansionDebug, "%9d.%03d: Sorting spillover with %u threads...\n", time1.time, time1.millitm, WORKERS);
+			fprintf(expansionDebug, "%9Id.%03Id: Sorting spillover with %u threads...\n", time1.time, time1.millitm, WORKERS);
 			fflush(expansionDebug);
 		}
 #endif
@@ -2684,7 +2825,7 @@ void expansionWriteFinalChunk()
 		{
 			timeb time1;
 			ftime(&time1);
-			fprintf(expansionDebug, "%9d.%03d: Merging sorted spillover to disk...\n", time1.time, time1.millitm);
+			fprintf(expansionDebug, "%9Id.%03Id: Merging sorted spillover to disk...\n", time1.time, time1.millitm);
 			fflush(expansionDebug);
 		}
 #endif
@@ -2697,7 +2838,7 @@ void expansionWriteFinalChunk()
 	{
 		timeb time1;
 		ftime(&time1);
-		fprintf(expansionDebug, "%9d.%03d: Finished writing final expansion chunk.\n", time1.time, time1.millitm);
+		fprintf(expansionDebug, "%9Id.%03Id: Finished writing final expansion chunk.\n", time1.time, time1.millitm);
 		fflush(expansionDebug);
 	}
 #endif
@@ -2719,7 +2860,7 @@ void mergeExpanded()
 		
 		if (expansionChunks <= OPENNODE_BUFFER_SIZE && bufferSize && (expansionChunks+1)*bufferSize <= OPENNODE_BUFFER_SIZE)
 		{
-			output->setWriteBuffer((OpenNode*)ram + expansionChunks*bufferSize, OPENNODE_BUFFER_SIZE - expansionChunks*bufferSize);
+			output->setWriteBuffer((OpenNode*)ram + expansionChunks*bufferSize, (uint32_t)(OPENNODE_BUFFER_SIZE - expansionChunks*bufferSize));
 			for (unsigned i=0; i<expansionChunks; i++)
 				inputs[i].setReadBuffer((OpenNode*)ram + i*bufferSize, (uint32_t)bufferSize);
 		}
@@ -3279,10 +3420,10 @@ void searchRecalculateNodeCounts()
 	}
 }
 
-const size_t RELATIVE_SIZE_CLOSING   =  20;
-const size_t RELATIVE_SIZE_EXPANDED  = 142;
-const size_t RELATIVE_SIZE_COMBINED  = 189;
-const size_t RELATIVE_SIZE_COMBINING = 234;
+const size_t RELATIVE_SIZE_CLOSING   =  56;
+const size_t RELATIVE_SIZE_EXPANDED  = 409;
+const size_t RELATIVE_SIZE_COMBINED  = 541;
+const size_t RELATIVE_SIZE_COMBINING = 662;
 
 int search()
 {
@@ -3475,7 +3616,7 @@ int search()
 		ftime(&time2);
 		{
 			time_t ms = (time2.time - time1.time)*1000 + (time2.millitm - time1.millitm);
-			printf("%4d.%03d s", ms/1000, ms%1000);
+			printf("%4Id.%03Id s", ms/1000, ms%1000);
 		}
 
 		if (checkStop(true))
@@ -3498,7 +3639,7 @@ int search()
 			uint64_t expandedNodes = getSize.size();
 
 			time_t ms = (time3.time - time2.time)*1000 + (time3.millitm - time2.millitm);
-			printf("%4d.%03d s, %12llu nodes", ms/1000, ms%1000, expandedNodes);
+			printf("%4Id.%03Id s, %12llu nodes", ms/1000, ms%1000, expandedNodes);
 		}
 
 		if (checkStop(true))
@@ -3559,9 +3700,9 @@ int search()
 			time_t ms_total   = (time4.time - time1.time)*1000 + (time4.millitm - time1.millitm);
 #ifdef PRINT_RUNNING_TOTAL_TIME
 			time_t ms_running = (time4.time - time0.time)*1000 + (time4.millitm - time0.millitm);
-			printf("%4d.%03d s (%4d.%03d s, %6d.%03d s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000, ms_running/1000, ms_running%1000);
+			printf("%4Id.%03Id s (%4Id.%03Id s, %6Id.%03Id s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000, ms_running/1000, ms_running%1000);
 #else
-			printf("%4d.%03d s (%4d.%03d s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000);
+			printf("%4Id.%03Id s (%4Id.%03Id s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000);
 #endif
 		}
 		time1 = time4;
@@ -4379,7 +4520,7 @@ void printExecutionTime()
 	ftime(&endTime);
 	time_t ms = (endTime.time - startTime.time)*1000
 	       + (endTime.millitm - startTime.millitm);
-	printf("Time: %d.%03d seconds.\n", ms/1000, ms%1000);
+	printf("Time: %Id.%03Id seconds.\n", ms/1000, ms%1000);
 }
 
 // ***********************************************************************************
@@ -4577,7 +4718,7 @@ int run(int argc, const char* argv[])
 #endif
 #endif // MULTITHREADING
 	
-	printf("Compressed state is %u bits (%u bytes data, %u bytes per closed node, %u bytes per open node)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(Node), sizeof(OpenNode));
+	printf("Compressed state is %u bits (%u bytes data, %Iu bytes per closed node, %Iu bytes per open node)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(Node), sizeof(OpenNode));
 #ifdef SLOW_COMPARE
 	printf("Using memcmp for CompressedState comparison\n");
 #endif
