@@ -155,7 +155,7 @@ void printTime()
 typedef int32_t FRAME;
 typedef int32_t FRAME_GROUP;
 
-enum { PREFERRED_STATE_COMPRESSED, PREFERRED_STATE_UNCOMPRESSED, PREFERRED_STATE_NEITHER };
+enum { PREFERRED_STATE_COMPRESSED, PREFERRED_STATE_UNCOMPRESSED, PREFERRED_STATE_TRANSFORM, PREFERRED_STATE_NEITHER };
 
 // ************************************* CompressedState comparison *************************************
 
@@ -295,82 +295,18 @@ INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { ret
                                                                                    (PIECE(a,9,uint64_t) == PIECE(b,9,uint64_t) && (PIECE(a,1,uint64_t) <  PIECE(b,1,uint64_t) ||
                                                                                                                                   (PIECE(a,1,uint64_t) == PIECE(b,1,uint64_t) && PIECE(a,0,uint8_t) <= PIECE(b,0,uint8_t)))); }
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 136 && COMPRESSED_BITS <= 144) // 18 bytes
-/*
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,10,uint64_t) == PIECE(b,10,uint64_t) &&  PIECE(a,2,uint64_t) == PIECE(b,2,uint64_t) && PIECE(a,0,uint16_t) == PIECE(b,0,uint16_t); }
 INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return PIECE(a,10,uint64_t) != PIECE(b,10,uint64_t) ||  PIECE(a,2,uint64_t) != PIECE(b,2,uint64_t) || PIECE(a,0,uint16_t) != PIECE(b,0,uint16_t); }
+//INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((PIECE(a,10,uint64_t) ^ PIECE(b,10,uint64_t)) | (PIECE(a,2,uint64_t) ^ PIECE(b,2,uint64_t)) | (PIECE(a,0,uint16_t) ^ PIECE(b,0,uint16_t))) == 0; }
+//INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((PIECE(a,10,uint64_t) ^ PIECE(b,10,uint64_t)) | (PIECE(a,2,uint64_t) ^ PIECE(b,2,uint64_t)) | (PIECE(a,0,uint16_t) ^ PIECE(b,0,uint16_t))) != 0; }
+#if 1
 INLINE bool operator< (const CompressedState& a, const CompressedState& b) { return PIECE(a,10,uint64_t) <  PIECE(b,10,uint64_t) || 
                                                                                    (PIECE(a,10,uint64_t) == PIECE(b,10,uint64_t) && (PIECE(a,2,uint64_t) <  PIECE(b,2,uint64_t) ||
                                                                                                                                     (PIECE(a,2,uint64_t) == PIECE(b,2,uint64_t) && PIECE(a,0,uint16_t) <  PIECE(b,0,uint16_t)))); }
 INLINE bool operator<=(const CompressedState& a, const CompressedState& b) { return PIECE(a,10,uint64_t) <  PIECE(b,10,uint64_t) || 
                                                                                    (PIECE(a,10,uint64_t) == PIECE(b,10,uint64_t) && (PIECE(a,2,uint64_t) <  PIECE(b,2,uint64_t) ||
                                                                                                                                     (PIECE(a,2,uint64_t) == PIECE(b,2,uint64_t) && PIECE(a,0,uint16_t) <= PIECE(b,0,uint16_t)))); }
-*/
-
-INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return ((PIECE(a,10,uint64_t) ^ PIECE(b,10,uint64_t)) | (PIECE(a,2,uint64_t) ^ PIECE(b,2,uint64_t)) | (PIECE(a,0,uint16_t) ^ PIECE(b,0,uint16_t))) == 0; }
-INLINE bool operator!=(const CompressedState& a, const CompressedState& b) { return ((PIECE(a,10,uint64_t) ^ PIECE(b,10,uint64_t)) | (PIECE(a,2,uint64_t) ^ PIECE(b,2,uint64_t)) | (PIECE(a,0,uint16_t) ^ PIECE(b,0,uint16_t))) != 0; }
-
-/*
-INLINE char operator==(const CompressedState& a, const CompressedState& b)
-{
-	uint32_t a0 = PIECE(a, 0,uint16_t);
-	uint64_t a1 = PIECE(a, 2,uint64_t);
-	uint64_t a2 = PIECE(a,10,uint64_t);
-	uint32_t b0 = PIECE(b, 0,uint16_t);
-	uint64_t b1 = PIECE(b, 2,uint64_t);
-	uint64_t b2 = PIECE(b,10,uint64_t);
-	uint64_t temp1;
-	uint64_t temp2;
-	char result;
-
-	__asm__(
-		"cmpl %3, %2;"
-		"sbbq %4, %0;"
-		"sbbq %5, %1;"
-		:
-		"=r"(temp1), "=r"(temp2)
-		:
-		"r"  (a0),
-		"emr"(b0), "emr"(b1), "emr"(b2),
-		           "0"  (a1), "1"  (a2));
-	__asm__(
-		"sete %0"
-		:
-		"=r"(result));
-
-	return result;
-}
-
-INLINE char operator!=(const CompressedState& a, const CompressedState& b)
-{
-	uint32_t a0 = PIECE(a, 0,uint16_t);
-	uint64_t a1 = PIECE(a, 2,uint64_t);
-	uint64_t a2 = PIECE(a,10,uint64_t);
-	uint32_t b0 = PIECE(b, 0,uint16_t);
-	uint64_t b1 = PIECE(b, 2,uint64_t);
-	uint64_t b2 = PIECE(b,10,uint64_t);
-	uint64_t temp1;
-	uint64_t temp2;
-	char result;
-
-	__asm__(
-		"cmpl %3, %2;"
-		"sbbq %4, %0;"
-		"sbbq %5, %1;"
-		:
-		"=r"(temp1), "=r"(temp2)
-		:
-		"r"  (a0),
-		"emr"(b0), "emr"(b1), "emr"(b2),
-		           "0"  (a1), "1"  (a2));
-	__asm__(
-		"setne %0"
-		:
-		"=r"(result));
-
-	return result;
-}
-*/
-
+#else
 INLINE int operator< (const CompressedState& a, const CompressedState& b)
 {
 	uint32_t a0 = PIECE(a, 0,uint16_t);
@@ -378,62 +314,84 @@ INLINE int operator< (const CompressedState& a, const CompressedState& b)
 	uint64_t a2 = PIECE(a,10,uint64_t);
 	uint32_t b0 = PIECE(b, 0,uint16_t);
 	uint64_t b1 = PIECE(b, 2,uint64_t);
+	uint64_t temp1 = a1;
+	uint64_t temp2 = a2;
+
+#if 0
 	uint64_t b2 = PIECE(b,10,uint64_t);
-	uint64_t temp1;
-	uint64_t temp2;
-	int result;
+
+	bool result;
 
 	__asm__(
-		"cmpl %4, %3;"
+		"cmpl %3, %2;"
+		"sbbq %4, %0;"
 		"sbbq %5, %1;"
-		"sbbq %6, %2;"
-		"sbb %0, %0;"
-		:
-		"=r,1,2,3"(result),
-		"=r,r,r,r"(temp1),
-		"=r,r,r,r"(temp2)
-		:
-		"r,r,r,r"(a0),
-		"emr,emr,emr,emr"(b0),
-		"emr,emr,emr,emr"(b1),
-		"emr,emr,emr,emr"(b2),
-		"1"(a1),
-		"2"(a2));
+		: // outputs:
+		/*0*/ "=r"(temp1),
+		/*1*/ "=r"(temp2)
+		: // inputs:
+		/*2*/ "r"(a0),
+		/*3*/ "emr"(b0),
+		/*4*/ "emr"(b1),
+		/*5*/ "emr"(b2),
+		"0"(temp1),
+		"1"(temp2)
+		: // clobbers:
+		);
 
 	return result;
+#else
+	__asm__(
+		"cmpl %3, %2;"
+		"sbbq %4, %0;"
+		"sbbq %5, %1;"
+		: // outputs:
+		/*0*/ "=r"(temp1),
+		/*1*/ "=r"(temp2)
+		: // inputs:
+		/*2*/ "r"(a0),
+		/*3*/ "emr"(b0),
+		/*4*/ "emr"(b1),
+		/*5*/ "er"(0),
+		"0"(temp1),
+		"1"(temp2));
+
+	uint64_t b2 = PIECE(b,10,uint64_t);
+
+	return temp2 < b2;
+#endif
 }
 
-INLINE char operator<=(const CompressedState& b, const CompressedState& a)
+INLINE int operator<=(const CompressedState& b, const CompressedState& a)
 {
 	uint32_t a0 = PIECE(a, 0,uint16_t);
 	uint64_t a1 = PIECE(a, 2,uint64_t);
 	uint64_t a2 = PIECE(a,10,uint64_t);
 	uint32_t b0 = PIECE(b, 0,uint16_t);
 	uint64_t b1 = PIECE(b, 2,uint64_t);
-	uint64_t b2 = PIECE(b,10,uint64_t);
-	uint64_t temp1;
-	uint64_t temp2;
-	char result;
+	uint64_t temp1 = a1;
+	uint64_t temp2 = a2;
 
 	__asm__(
-		"cmpl %4, %3;"
+		"cmpl %3, %2;"
+		"sbbq %4, %0;"
 		"sbbq %5, %1;"
-		"sbbq %6, %2;"
-		"setnc %b0;"
-		:
-		"=r,1,2,3"(result),
-		"=r,r,r,r"(temp1),
-		"=r,r,r,r"(temp2)
-		:
-		"r,r,r,r"(a0),
-		"emr,emr,emr,emr"(b0),
-		"emr,emr,emr,emr"(b1),
-		"emr,emr,emr,emr"(b2),
-		"1"(a1),
-		"2"(a2));
+		: // outputs:
+		/*0*/ "=r"(temp1),
+		/*1*/ "=r"(temp2)
+		: // inputs:
+		/*2*/ "r"(a0),
+		/*3*/ "emr"(b0),
+		/*4*/ "emr"(b1),
+		/*5*/ "er"(0),
+		"0"(temp1),
+		"1"(temp2));
 
-	return result;
+	uint64_t b2 = PIECE(b,10,uint64_t);
+
+	return temp2 >= b2;
 }
+#endif
 
 #elif (!defined(USE_MEMCMP) && COMPRESSED_BITS > 144 && COMPRESSED_BITS <= 152) // 19 bytes
 INLINE bool operator==(const CompressedState& a, const CompressedState& b) { return PIECE(a,11,uint64_t) == PIECE(b,11,uint64_t) &&  PIECE(a,3,uint64_t) == PIECE(b,3,uint64_t) && (MASKPIECE(a,-1,uint32_t,0xFFFFFF00)) == (MASKPIECE(b,-1,uint32_t,0xFFFFFF00)); }
@@ -1801,6 +1759,10 @@ CONDITION specialWorkersExitCondition;
 volatile int runningSpecialWorkers = 0;
 volatile bool stopSpecialWorkers = false;
 
+#ifdef USE_TRANSFORM_INVARIANT_SORTING
+
+#endif
+
 #ifdef ENABLE_EXPANSION_SPILLOVER
 void expansionReadSpilloverThread(THREAD_ID threadID);
 #endif
@@ -2674,6 +2636,10 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 	}
 }
 
+void writeOpenStateTransform(CompressedStateTransform transform, FRAME frame, THREAD_ID threadID)
+{
+}
+
 template<class NODE>
 void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
 {
@@ -2894,6 +2860,7 @@ void mergeExpanded()
 
 // *********************************************** Cache ************************************************
 
+#if 0
 INLINE uint32_t hashState(const CompressedState* state)
 {
 	// Based on MurmurHash ( http://murmurhash.googlepages.com/MurmurHash2.cpp )
@@ -2925,10 +2892,16 @@ INLINE uint32_t hashState(const CompressedState* state)
 
 	return h;
 }
+#endif
 
 void addState(const CompressedState* cs, FRAME frame, THREAD_ID threadID)
 {
 	writeOpenState(cs, frame, threadID);
+}
+
+void addStateTransform(CompressedStateTransform transform, FRAME frame, THREAD_ID threadID)
+{
+	writeOpenStateTransform(transform, frame, threadID);
 }
 
 // ******************************************** Exit tracing ********************************************
@@ -2950,6 +2923,11 @@ class FinishCheckChildHandler
 {
 public:
 	enum { PREFERRED = PREFERRED_STATE_NEITHER };
+
+	static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, CompressedStateTransform transform, FRAME frame, THREAD_ID threadID)
+	{
+		/* no need to do anything, since this will never be called for FinishCheckChildHandler */
+	}
 
 	static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const State* state, FRAME frame, THREAD_ID threadID)
 	{
@@ -3324,7 +3302,16 @@ void processState(const Node* cs, THREAD_ID threadID)
 	class AddStateChildHandler
 	{
 	public:
+#ifdef USE_TRANSFORM_INVARIANT_SORTING
+		enum { PREFERRED = PREFERRED_STATE_TRANSFORM };
+#else
 		enum { PREFERRED = PREFERRED_STATE_COMPRESSED };
+#endif
+
+		static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, CompressedStateTransform transform, FRAME frame, THREAD_ID threadID)
+		{
+			addStateTransform(transform, frame, threadID);
+		}
 
 		static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const CompressedState* cs, FRAME frame, THREAD_ID threadID)
 		{
