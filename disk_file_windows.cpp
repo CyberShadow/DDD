@@ -181,8 +181,8 @@ public:
 			BOOL b;
 			if (sectorBufferUse)
 			{
-				if (chunk > (WORD)sizeof(sectorBuffer) - (WORD)sectorBufferUse)
-					chunk = (WORD)sizeof(sectorBuffer) - (WORD)sectorBufferUse;
+				if (chunk > (DWORD)sizeof(sectorBuffer) - (DWORD)sectorBufferUse)
+					chunk = (DWORD)sizeof(sectorBuffer) - (DWORD)sectorBufferUse;
 				memcpy(sectorBuffer + sectorBufferUse, data + bytes, chunk);
 				sectorBufferUse += (WORD)chunk;
 				if (sectorBufferUse == sizeof(sectorBuffer))
