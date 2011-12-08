@@ -2,6 +2,13 @@
 #error Wrong platform?
 #endif
 
+long _InterlockedExchangeAdd(
+   long volatile * Addend,
+   long Value
+);
+
+#define INTERLOCKED_EXCHANGE_ADD(addend,value) _InterlockedExchangeAdd(addend,value)
+
 class CriticalSection
 {
 private:
