@@ -155,7 +155,11 @@ void printTime()
 typedef int32_t FRAME;
 typedef int32_t FRAME_GROUP;
 
+#ifdef USE_TRANSFORM_INVARIANT_SORTING
 enum { PREFERRED_STATE_COMPRESSED, PREFERRED_STATE_UNCOMPRESSED, PREFERRED_STATE_TRANSFORM, PREFERRED_STATE_NEITHER };
+#else
+enum { PREFERRED_STATE_COMPRESSED, PREFERRED_STATE_UNCOMPRESSED, PREFERRED_STATE_NEITHER };
+#endif
 
 // ************************************* CompressedState comparison *************************************
 
@@ -2636,9 +2640,11 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 	}
 }
 
+#ifdef USE_TRANSFORM_INVARIANT_SORTING
 void writeOpenStateTransform(CompressedStateTransform transform, FRAME frame, THREAD_ID threadID)
 {
 }
+#endif
 
 template<class NODE>
 void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
@@ -2899,10 +2905,12 @@ void addState(const CompressedState* cs, FRAME frame, THREAD_ID threadID)
 	writeOpenState(cs, frame, threadID);
 }
 
+#ifdef USE_TRANSFORM_INVARIANT_SORTING
 void addStateTransform(CompressedStateTransform transform, FRAME frame, THREAD_ID threadID)
 {
 	writeOpenStateTransform(transform, frame, threadID);
 }
+#endif
 
 // ******************************************** Exit tracing ********************************************
 
@@ -2924,10 +2932,12 @@ class FinishCheckChildHandler
 public:
 	enum { PREFERRED = PREFERRED_STATE_NEITHER };
 
+#ifdef USE_TRANSFORM_INVARIANT_SORTING
 	static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, CompressedStateTransform transform, FRAME frame, THREAD_ID threadID)
 	{
 		/* no need to do anything, since this will never be called for FinishCheckChildHandler */
 	}
+#endif
 
 	static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const State* state, FRAME frame, THREAD_ID threadID)
 	{
@@ -3308,10 +3318,12 @@ void processState(const Node* cs, THREAD_ID threadID)
 		enum { PREFERRED = PREFERRED_STATE_COMPRESSED };
 #endif
 
+#ifdef USE_TRANSFORM_INVARIANT_SORTING
 		static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, CompressedStateTransform transform, FRAME frame, THREAD_ID threadID)
 		{
 			addStateTransform(transform, frame, threadID);
 		}
+#endif
 
 		static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const CompressedState* cs, FRAME frame, THREAD_ID threadID)
 		{
