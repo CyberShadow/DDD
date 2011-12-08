@@ -1216,11 +1216,7 @@ public:
 			}
 			heap[size++].end = pos;
 		}
-#if 0
 		std::sort(heap, heap+size, *(InputOffset*)this);
-#else
-		TimSort<HeapNode>::sort(heap, size, *(InputOffset*)this);
-#endif
 		head = heap;
 		heap--; // heap[0] is now invalid, use heap[1] to heap[size] inclusively; head == heap[1]
 		head->pos--;
@@ -1232,11 +1228,7 @@ public:
 		heap = inputHeap;
 		size = count;
 
-#if 0
 		std::sort(heap, heap+size, *(InputOffset*)this);
-#else
-		TimSort<HeapNode>::sort(heap, size, *(InputOffset*)this);
-#endif
 		head = heap;
 		heap--;
 		head->pos--;
@@ -1270,8 +1262,7 @@ public:
 	{
 		if (!next())
 		{
-			debug_assert(getHead() == NULL);
-			return NULL;
+			assert(getHead() == NULL);
 		}
 		return getHead();
 	}
@@ -1452,8 +1443,8 @@ public:
 	{
 		if (!next())
 		{
-			debug_assert(getHead() == NULL);
-			return NULL;
+			//return NULL;
+			assert(getHead() == NULL);
 		}
 		return getHead();
 	}
@@ -1937,7 +1928,7 @@ unsigned expansionBufferQueueNodesToMerge;
 std::queue<ExpansionBufferSortedRegion> expansionBufferRegionsToMerge;
 //unsigned numSortsInProgress;
 volatile unsigned expansionChunkWriteInProgress[WORKERS];
-//BufferedOutputStream<OpenNode> expansionWriteChunkThreadStream[WORKERS];
+BufferedOutputStream<OpenNode> expansionWriteChunkThreadStream[WORKERS];
 #ifdef DEBUG_EXPANSION
 FILE *expansionDebug;
 #endif
@@ -1956,7 +1947,7 @@ void dumpExpansionDebug(THREAD_ID threadID)
 {
 	timeb time1;
 	ftime(&time1);
-	fprintf(expansionDebug, "%9Id.%03Id: ", time1.time, time1.millitm);
+	fprintf(expansionDebug, "%9d.%03d: ", time1.time, time1.millitm);
 
 	fputc('1'+(char)threadID, expansionDebug);
 	fputc(':', expansionDebug);
@@ -2007,7 +1998,7 @@ void initExpansion()
 	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
 	{
 		expansionChunkWriteInProgress[threadID] = false;
-		//expansionWriteChunkThreadStream[threadID].setWriteBufferSize(64*1024*1024 / sizeof(OpenNode) / WORKERS);
+		expansionWriteChunkThreadStream[threadID].setWriteBufferSize(64*1024*1024 / sizeof(OpenNode) / WORKERS);
 
 		expansionThread[threadID].buffer = slot;
 		slot += EXPANSION_NODES_PER_QUEUE_ELEMENT;
@@ -2100,15 +2091,15 @@ void expansionRegionMarkEmpty(std::list<ExpansionBufferRegion>::iterator& region
 		regionToEmpty->type = EXPANSION_BUFFER_REGION_EMPTY;
 }
 
-OutputStream<OpenNode> expansionWriteChunkThreadStream[WORKERS];
+//OutputStream<OpenNode> expansionWriteChunkThreadStream;
 OpenNode* expansionWriteChunkThreadBuffer[WORKERS];
 unsigned expansionWriteChunkThreadCount[WORKERS];
 std::list<ExpansionBufferRegion>::iterator expansionWriteChunkThreadRegion[WORKERS];
 void expansionWriteChunkThread(THREAD_ID threadID)
 {
-	expansionWriteChunkThreadStream[threadID].write(expansionWriteChunkThreadBuffer[threadID], expansionWriteChunkThreadCount[threadID]);
-	//mergeChunks<OpenNode, EXPANSION_NODES_PER_QUEUE_ELEMENT>(expansionWriteChunkThreadBuffer[threadID], expansionWriteChunkThreadCount[threadID], &expansionWriteChunkThreadStream[threadID]);
-	
+	//expansionWriteChunkThreadStream.write(expansionWriteChunkThreadBuffer, expansionWriteChunkThreadCount);
+	//expansionWriteChunkThreadStream.close();
+	mergeChunks<OpenNode, EXPANSION_NODES_PER_QUEUE_ELEMENT>(expansionWriteChunkThreadBuffer[threadID], expansionWriteChunkThreadCount[threadID], &expansionWriteChunkThreadStream[threadID]);
 	expansionWriteChunkThreadStream[threadID].close();
 
 	{
@@ -2438,12 +2429,12 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 
 	expansionRegionMarkFilled(expansionThreadIter[threadID], threadID);
 
-	/*lock.unlock();
+	lock.unlock();
 	{
 		TimSort<OpenNode> sort;
 		sort.sort(expansionThread[threadID].buffer, EXPANSION_NODES_PER_QUEUE_ELEMENT);
 	}
-	lock.lock();*/
+	lock.lock();
 
 	expansionThread[threadID].buffer = NULL;
 
@@ -2664,8 +2655,8 @@ void expansionSortFinalRegions(THREAD_ID threadID)
 {
 	if (expansionThread[threadID].buffer && expansionThread[threadID].i != 0)
 	{
-		//TimSort<OpenNode> sort;
-		TimSort<OpenNode>::sort(expansionThread[threadID].buffer, expansionThread[threadID].i);
+		TimSort<OpenNode> sort;
+		sort.sort(expansionThread[threadID].buffer, expansionThread[threadID].i);
 
 		{
 			SCOPED_LOCK lock(expansionMutex);
@@ -2738,8 +2729,8 @@ void expansionWriteFinalChunk()
 	}
 #endif*/
 
-	/*for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
-		expansionWriteChunkThreadStream[threadID].deallocateBuffer();*/
+	for (THREAD_ID threadID=0; threadID<WORKERS; threadID++)
+		expansionWriteChunkThreadStream[threadID].deallocateBuffer();
 
 	if (expansionBufferQueueNodesToMerge)
 		expansionMergeRegionsToDisk();
@@ -2757,7 +2748,7 @@ void expansionWriteFinalChunk()
 		{
 			timeb time1;
 			ftime(&time1);
-			fprintf(expansionDebug, "%9Id.%03Id: Reading %llu nodes of spillover...\n", time1.time, time1.millitm, count);
+			fprintf(expansionDebug, "%9d.%03d: Reading %llu nodes of spillover...\n", time1.time, time1.millitm, count);
 			fflush(expansionDebug);
 		}
 #endif
@@ -2776,7 +2767,7 @@ void expansionWriteFinalChunk()
 		{
 			timeb time1;
 			ftime(&time1);
-			fprintf(expansionDebug, "%9Id.%03Id: Sorting spillover with %u threads...\n", time1.time, time1.millitm, WORKERS);
+			fprintf(expansionDebug, "%9d.%03d: Sorting spillover with %u threads...\n", time1.time, time1.millitm, WORKERS);
 			fflush(expansionDebug);
 		}
 #endif
@@ -2797,7 +2788,7 @@ void expansionWriteFinalChunk()
 		{
 			timeb time1;
 			ftime(&time1);
-			fprintf(expansionDebug, "%9Id.%03Id: Merging sorted spillover to disk...\n", time1.time, time1.millitm);
+			fprintf(expansionDebug, "%9d.%03d: Merging sorted spillover to disk...\n", time1.time, time1.millitm);
 			fflush(expansionDebug);
 		}
 #endif
@@ -2810,7 +2801,7 @@ void expansionWriteFinalChunk()
 	{
 		timeb time1;
 		ftime(&time1);
-		fprintf(expansionDebug, "%9Id.%03Id: Finished writing final expansion chunk.\n", time1.time, time1.millitm);
+		fprintf(expansionDebug, "%9d.%03d: Finished writing final expansion chunk.\n", time1.time, time1.millitm);
 		fflush(expansionDebug);
 	}
 #endif
@@ -2832,7 +2823,7 @@ void mergeExpanded()
 		
 		if (expansionChunks <= OPENNODE_BUFFER_SIZE && bufferSize && (expansionChunks+1)*bufferSize <= OPENNODE_BUFFER_SIZE)
 		{
-			output->setWriteBuffer((OpenNode*)ram + expansionChunks*bufferSize, (uint32_t)(OPENNODE_BUFFER_SIZE - expansionChunks*bufferSize));
+			output->setWriteBuffer((OpenNode*)ram + expansionChunks*bufferSize, OPENNODE_BUFFER_SIZE - expansionChunks*bufferSize);
 			for (unsigned i=0; i<expansionChunks; i++)
 				inputs[i].setReadBuffer((OpenNode*)ram + i*bufferSize, (uint32_t)bufferSize);
 		}
@@ -3419,10 +3410,10 @@ void searchRecalculateNodeCounts()
 	}
 }
 
-const size_t RELATIVE_SIZE_CLOSING   =  56;
-const size_t RELATIVE_SIZE_EXPANDED  = 409;
-const size_t RELATIVE_SIZE_COMBINED  = 541;
-const size_t RELATIVE_SIZE_COMBINING = 662;
+const size_t RELATIVE_SIZE_CLOSING   =  20;
+const size_t RELATIVE_SIZE_EXPANDED  = 142;
+const size_t RELATIVE_SIZE_COMBINED  = 189;
+const size_t RELATIVE_SIZE_COMBINING = 234;
 
 int search()
 {
@@ -3615,7 +3606,7 @@ int search()
 		ftime(&time2);
 		{
 			time_t ms = (time2.time - time1.time)*1000 + (time2.millitm - time1.millitm);
-			printf("%4Id.%03Id s", ms/1000, ms%1000);
+			printf("%4d.%03d s", ms/1000, ms%1000);
 		}
 
 		if (checkStop(true))
@@ -3638,7 +3629,7 @@ int search()
 			uint64_t expandedNodes = getSize.size();
 
 			time_t ms = (time3.time - time2.time)*1000 + (time3.millitm - time2.millitm);
-			printf("%4Id.%03Id s, %12llu nodes", ms/1000, ms%1000, expandedNodes);
+			printf("%4d.%03d s, %12llu nodes", ms/1000, ms%1000, expandedNodes);
 		}
 
 		if (checkStop(true))
@@ -3699,9 +3690,9 @@ int search()
 			time_t ms_total   = (time4.time - time1.time)*1000 + (time4.millitm - time1.millitm);
 #ifdef PRINT_RUNNING_TOTAL_TIME
 			time_t ms_running = (time4.time - time0.time)*1000 + (time4.millitm - time0.millitm);
-			printf("%4Id.%03Id s (%4Id.%03Id s, %6Id.%03Id s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000, ms_running/1000, ms_running%1000);
+			printf("%4d.%03d s (%4d.%03d s, %6d.%03d s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000, ms_running/1000, ms_running%1000);
 #else
-			printf("%4Id.%03Id s (%4Id.%03Id s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000);
+			printf("%4d.%03d s (%4d.%03d s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000);
 #endif
 		}
 		time1 = time4;
@@ -4519,7 +4510,7 @@ void printExecutionTime()
 	ftime(&endTime);
 	time_t ms = (endTime.time - startTime.time)*1000
 	       + (endTime.millitm - startTime.millitm);
-	printf("Time: %Id.%03Id seconds.\n", ms/1000, ms%1000);
+	printf("Time: %d.%03d seconds.\n", ms/1000, ms%1000);
 }
 
 // ***********************************************************************************
@@ -4717,7 +4708,7 @@ int run(int argc, const char* argv[])
 #endif
 #endif // MULTITHREADING
 	
-	printf("Compressed state is %u bits (%u bytes data, %Iu bytes per closed node, %Iu bytes per open node)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(Node), sizeof(OpenNode));
+	printf("Compressed state is %u bits (%u bytes data, %u bytes per closed node, %u bytes per open node)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(Node), sizeof(OpenNode));
 #ifdef SLOW_COMPARE
 	printf("Using memcmp for CompressedState comparison\n");
 #endif
