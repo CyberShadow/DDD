@@ -25,8 +25,9 @@ DWORD WINAPI CallCFunction(__in LPVOID lpParameter)
 #define THREAD_DESTROY(thread) CloseHandle(thread)
 
 template<void (*WORKER_FUNCTION)(THREAD_ID threadID)>
-void THREAD_CREATE(THREAD_ID threadID)
+void THREAD_CREATE(THREAD_ID threadID, int priority=/*THREAD_PRIORITY_NORMAL*/THREAD_PRIORITY_BELOW_NORMAL)
 {
 	HANDLE thread = CreateThread(NULL, 0, &CallCFunction<WORKER_FUNCTION>, (void*)threadID, 0, NULL);
+    SetThreadPriority(thread, priority);
 	CloseHandle(thread);
 }
