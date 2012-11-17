@@ -1,12 +1,18 @@
 // DEBUG enables asserts and some other debug checks.
 //#define DEBUG
+//#define KEEP_PAST_FILES
+//#define USE_MEMCMP
 #define PRINT_RUNNING_TOTAL_TIME
 
 // Which problem to solve?
 #define PROBLEM SampleMaze
 
-// Add problem settings (such as level to solve) here.
-//#define POWER_LEVEL 9001
+// Specify the level to solve here.
+//#define LEVEL 18
+
+// An unfinished feature, work in progress; sort new nodes as they are added; eliminates the need to do sorting as a postprocessing step
+// Needs to be supported by PROBLEM; should result in a huge speed boost
+//#define USE_TRANSFORM_INVARIANT_SORTING
 
 // Use this in combination with DISK_WINFILES to achieve more efficient disk I/O when the data set has gotten very large (however, this is slower with small data sets)
 //#define USE_UNBUFFERED_DISK_IO
@@ -65,3 +71,8 @@
 #ifdef DEBUG
 #define NO_DISK_FLUSH
 #endif
+
+// Keep a file with all nodes to filter against, instead of filtering against each individual frame. 
+// The "all" file contains the sorted contents of all "closed" nodes, and needs to be rewritten every frame/frame-group.
+// Enable USE_ALL to use less RAM/CPU and to optimize for sequential disk I/O. Disable USE_ALL if random disk access is very fast.
+#define USE_ALL
