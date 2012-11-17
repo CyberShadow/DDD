@@ -154,10 +154,10 @@ void replayStep(State* state, FRAME* frame, Step step)
 
 /// Templated function to enumerate a state's children.
 /// Children are collected via one of a few static functions in the template parameter class:
-/// static void handleChild(const State* parent, FRAME parentFrame, Step step, const State* state       , FRAME frame, THREAD_ID threadID)
-/// static void handleChild(const State* parent, FRAME parentFrame, Step step, const CompressedState* cs, FRAME frame, THREAD_ID threadID)
+/// static void handleChild(const State* parent, FRAME parentFrame, Step step, const State* state       , FRAME frame)
+/// static void handleChild(const State* parent, FRAME parentFrame, Step step, const CompressedState* cs, FRAME frame)
 template <class CHILD_HANDLER>
-void expandChildren(FRAME frame, const State* state, THREAD_ID threadID)
+void expandChildren(FRAME frame, const State* state)
 {
 	State newState = *state;
 	for (Action action = ACTION_FIRST; action <= ACTION_LAST; action++)
@@ -167,7 +167,7 @@ void expandChildren(FRAME frame, const State* state, THREAD_ID threadID)
 		if (res > 0)
 		{
 			step.action = action;
-			CHILD_HANDLER::handleChild(state, frame, step, &newState, frame + res, threadID);
+			CHILD_HANDLER::handleChild(state, frame, step, &newState, frame + res);
 		}
 		if (res >= 0)
 			newState = *state;

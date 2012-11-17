@@ -29,6 +29,21 @@
 #endif
 
 #ifdef MULTITHREADING
+
+typedef size_t THREAD_ID;
+
+#if defined(TLS_BOOST)
+#include "tls_boost.cpp"
+#elif defined(TLS_WINAPI)
+#include "tls_winapi.cpp"
+#elif defined(TLS_VC)
+#include "tls_vc.cpp"
+#elif defined(TLS_GNU)
+#include "tls_gnu.cpp"
+#else
+#error TLS plugin not set
+#endif
+
 #if defined(THREAD_BOOST)
 #include "thread_boost.cpp"
 #elif defined(THREAD_WINAPI)
@@ -49,7 +64,8 @@
 #error Sync plugin not set
 #endif
 // TODO: look into user-mode scheduling
-#endif
+
+#endif // MULTITHREADING
 
 // ******************************************** Utility code ********************************************
 
@@ -1759,9 +1775,9 @@ volatile bool stopSpecialWorkers = false;
 #endif
 
 #ifdef ENABLE_EXPANSION_SPILLOVER
-void expansionReadSpilloverThread(THREAD_ID threadID);
+void expansionReadSpilloverThread();
 #endif
-void expansionSortFinalRegions(THREAD_ID threadID);
+void expansionSortFinalRegions();
 
 void queueState(const Node* state)
 {
@@ -1776,7 +1792,7 @@ void queueState(const Node* state)
 bool dequeueState(Node* state)
 {
 	SCOPED_LOCK lock(processQueueMutex);
-		
+
 	while (processQueueHead == processQueueTail) // while empty
 	{
 		if (stopWorkers)
@@ -1788,16 +1804,16 @@ bool dequeueState(Node* state)
 	return true;
 }
 
-void doNothing(THREAD_ID threadID) {}
+void doNothing() {}
 
-template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID), void (*FINALIZATION_HANDLER)(THREAD_ID threadID)>
-void worker(THREAD_ID threadID)
+template<void (*STATE_HANDLER)(const Node*), void (*FINALIZATION_HANDLER)()>
+void worker()
 {
 	Node cs;
 	while (dequeueState(&cs))
-		STATE_HANDLER(&cs, threadID);
+		STATE_HANDLER(&cs);
 
-	FINALIZATION_HANDLER(threadID);
+	FINALIZATION_HANDLER();
 
     /* LOCK */
 	{
@@ -1807,7 +1823,7 @@ void worker(THREAD_ID threadID)
 	}
 }
 
-template<void (*STATE_HANDLER)(const Node*, THREAD_ID threadID), void (*FINALIZATION_HANDLER)(THREAD_ID threadID)>
+template<void (*STATE_HANDLER)(const Node*), void (*FINALIZATION_HANDLER)()>
 void startWorkers()
 {
 #ifdef ENABLE_EXPANSION_SPILLOVER
@@ -1943,13 +1959,13 @@ struct
 } expansionThread[WORKERS];
 
 #ifdef DEBUG_EXPANSION
-void dumpExpansionDebug(THREAD_ID threadID)
+void dumpExpansionDebug()
 {
 	timeb time1;
 	ftime(&time1);
 	fprintf(expansionDebug, "%9d.%03d: ", time1.time, time1.millitm);
 
-	fputc('1'+(char)threadID, expansionDebug);
+	fputc('1'+(char)TLS_TLS_GET_THREAD_ID, expansionDebug);
 	fputc(':', expansionDebug);
 	fputc(' ', expansionDebug);
 
@@ -2029,7 +2045,7 @@ void initExpansion()
 #endif
 }
 
-void expansionRegionMarkFilled(std::list<ExpansionBufferRegion>::iterator& regionToFill, THREAD_ID threadID)
+void expansionRegionMarkFilled(std::list<ExpansionBufferRegion>::iterator& regionToFill)
 {
 	std::list<ExpansionBufferRegion>::iterator before = regionToFill;
 	std::list<ExpansionBufferRegion>::iterator after  = regionToFill; ++after;
@@ -2059,11 +2075,11 @@ void expansionRegionMarkFilled(std::list<ExpansionBufferRegion>::iterator& regio
 	regionToFill = expansionBufferRegions.end();
 
 #ifdef DEBUG_EXPANSION
-	dumpExpansionDebug(threadID);
+	dumpExpansionDebug();
 #endif
 }
 
-void expansionRegionMarkEmpty(std::list<ExpansionBufferRegion>::iterator& regionToEmpty, THREAD_ID threadID)
+void expansionRegionMarkEmpty(std::list<ExpansionBufferRegion>::iterator& regionToEmpty)
 {
 	std::list<ExpansionBufferRegion>::iterator before = regionToEmpty;
 	std::list<ExpansionBufferRegion>::iterator after  = regionToEmpty; ++after;
@@ -2095,10 +2111,11 @@ void expansionRegionMarkEmpty(std::list<ExpansionBufferRegion>::iterator& region
 OpenNode* expansionWriteChunkThreadBuffer[WORKERS];
 unsigned expansionWriteChunkThreadCount[WORKERS];
 std::list<ExpansionBufferRegion>::iterator expansionWriteChunkThreadRegion[WORKERS];
-void expansionWriteChunkThread(THREAD_ID threadID)
+void expansionWriteChunkThread()
 {
 	//expansionWriteChunkThreadStream.write(expansionWriteChunkThreadBuffer, expansionWriteChunkThreadCount);
 	//expansionWriteChunkThreadStream.close();
+	THREAD_ID threadID = TLS_GET_THREAD_ID;
 	mergeChunks<OpenNode, EXPANSION_NODES_PER_QUEUE_ELEMENT>(expansionWriteChunkThreadBuffer[threadID], expansionWriteChunkThreadCount[threadID], &expansionWriteChunkThreadStream[threadID]);
 	expansionWriteChunkThreadStream[threadID].close();
 
@@ -2107,7 +2124,7 @@ void expansionWriteChunkThread(THREAD_ID threadID)
 
 		expansionChunkWriteInProgress[threadID] = false;
 
-		expansionRegionMarkEmpty(expansionWriteChunkThreadRegion[threadID], threadID);
+		expansionRegionMarkEmpty(expansionWriteChunkThreadRegion[threadID]);
 #ifdef DEBUG_EXPANSION
 		dumpExpansionDebug(threadID);
 #endif
@@ -2120,7 +2137,7 @@ void expansionWriteChunkThread(THREAD_ID threadID)
 	}
 }
 
-void sortExpansionRegion(std::list<ExpansionBufferRegion>::iterator& regionToSort, THREAD_ID threadID, SCOPED_LOCK& lock)
+void sortExpansionRegion(std::list<ExpansionBufferRegion>::iterator& regionToSort, SCOPED_LOCK& lock)
 {
 	if (regionToSort->length > EXPANSION_BUFFER_FILL_THRESHOLD)
 	{
@@ -2138,7 +2155,7 @@ void sortExpansionRegion(std::list<ExpansionBufferRegion>::iterator& regionToSor
 	unsigned count = regionToSort->length * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 	
 #ifdef DEBUG_EXPANSION
-	dumpExpansionDebug(threadID);
+	dumpExpansionDebug();
 #endif
 
 	regionToSort->type = EXPANSION_BUFFER_REGION_WRITING;
@@ -2159,9 +2176,10 @@ void sortExpansionRegion(std::list<ExpansionBufferRegion>::iterator& regionToSor
 	}*/
 
 #ifdef DEBUG_EXPANSION
-	dumpExpansionDebug(threadID);
+	dumpExpansionDebug();
 #endif
 
+	THREAD_ID threadID = TLS_GET_THREAD_ID;
 	while (expansionChunkWriteInProgress[threadID])
 	{
 		lock.unlock();
@@ -2187,8 +2205,10 @@ void sortExpansionRegion(std::list<ExpansionBufferRegion>::iterator& regionToSor
 
 #ifdef ENABLE_EXPANSION_SPILLOVER
 
-void sortExpansionSpilloverThread(THREAD_ID threadID)
+void sortExpansionSpilloverThread()
 {
+	threadID = TLS_GET_THREAD_ID;
+
 	ExpansionBufferSortedRegion region;
 	region.start = expansionThread[threadID].buffer;
 	region.end = expansionThread[threadID].finalSortBufferEnd;
@@ -2320,7 +2340,7 @@ struct
 	std::list<ExpansionBufferRegion>::iterator region;
 } expansionSpilloverThreadBuffer[2];
 
-void expansionWriteSpilloverThread(THREAD_ID threadID)
+void expansionWriteSpilloverThread()
 {
 	expansionWriteSpillover(expansionSpilloverThreadBuffer[0].buffer, expansionSpilloverThreadBuffer[0].count);
 	if (expansionSpilloverThreadBuffer[1].buffer)
@@ -2331,16 +2351,16 @@ void expansionWriteSpilloverThread(THREAD_ID threadID)
 
 		expansionSpilloverLocked = false;
 
-		expansionRegionMarkEmpty(expansionSpilloverThreadBuffer[0].region, threadID);
+		expansionRegionMarkEmpty(expansionSpilloverThreadBuffer[0].region);
 		if (expansionSpilloverThreadBuffer[1].buffer)
-			expansionRegionMarkEmpty(expansionSpilloverThreadBuffer[1].region, threadID);
+			expansionRegionMarkEmpty(expansionSpilloverThreadBuffer[1].region);
 #ifdef DEBUG_EXPANSION
-		dumpExpansionDebug(threadID);
+		dumpExpansionDebug();
 #endif
 	}
 }
 
-void expansionReadSpilloverThread(THREAD_ID threadID)
+void expansionReadSpilloverThread()
 {
 	SCOPED_LOCK lock(expansionMutex);
 
@@ -2396,7 +2416,7 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 					firstEmptyRegionToFill = expansionBufferRegions.insert(firstEmptyRegionToFill, region);
 				}
 	#ifdef DEBUG_EXPANSION
-				dumpExpansionDebug(threadID);
+				dumpExpansionDebug();
 	#endif
 
 				OpenNode *buffer = EXPANSION_BUFFER + firstEmptyRegionToFill->pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
@@ -2409,7 +2429,7 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 				lock.lock();
 				expansionSpilloverLocked = false;
 
-				expansionRegionMarkFilled(firstEmptyRegionToFill, threadID);
+				expansionRegionMarkFilled(firstEmptyRegionToFill);
 
 				continue;
 			}
@@ -2423,11 +2443,12 @@ void expansionReadSpilloverThread(THREAD_ID threadID)
 
 #endif
 
-void expansionHandleFilledQueueElement(THREAD_ID threadID)
+void expansionHandleFilledQueueElement()
 {
 	SCOPED_LOCK lock(expansionMutex);
+	THREAD_ID threadID = TLS_GET_THREAD_ID;
 
-	expansionRegionMarkFilled(expansionThreadIter[threadID], threadID);
+	expansionRegionMarkFilled(expansionThreadIter[threadID]);
 
 	lock.unlock();
 	{
@@ -2511,7 +2532,7 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 
 		if (longestFilledLength >= EXPANSION_BUFFER_FILL_THRESHOLD)
 		{
-			sortExpansionRegion(longestFilledRegionToSort, threadID, lock);
+			sortExpansionRegion(longestFilledRegionToSort, lock);
 			continue;
 		}
 
@@ -2632,27 +2653,29 @@ void expansionHandleFilledQueueElement(THREAD_ID threadID)
 }
 
 #ifdef USE_TRANSFORM_INVARIANT_SORTING
-void writeOpenStateTransform(CompressedStateTransform transform, FRAME frame, THREAD_ID threadID)
+void writeOpenStateTransform(CompressedStateTransform transform, FRAME frame)
 {
 }
 #endif
 
 template<class NODE>
-void writeOpenState(const NODE* state, FRAME frame, THREAD_ID threadID)
+void writeOpenState(const NODE* state, FRAME frame)
 {
 	if (frame > MAX_FRAMES)
 		return;
 	FRAME_GROUP group = frame/FRAMES_PER_GROUP;
+	THREAD_ID threadID = TLS_GET_THREAD_ID;
 
 	expansionThread[threadID].buffer[expansionThread[threadID].i].state = *state;
 	expansionThread[threadID].buffer[expansionThread[threadID].i].frame = (PACKED_FRAME)frame;
 	expansionThread[threadID].i++;
 	if (expansionThread[threadID].i == EXPANSION_NODES_PER_QUEUE_ELEMENT)
-		expansionHandleFilledQueueElement(threadID);
+		expansionHandleFilledQueueElement();
 }
 
-void expansionSortFinalRegions(THREAD_ID threadID)
+void expansionSortFinalRegions()
 {
+	THREAD_ID threadID = TLS_GET_THREAD_ID;
 	if (expansionThread[threadID].buffer && expansionThread[threadID].i != 0)
 	{
 		TimSort<OpenNode> sort;
@@ -2891,15 +2914,15 @@ INLINE uint32_t hashState(const CompressedState* state)
 }
 #endif
 
-void addState(const CompressedState* cs, FRAME frame, THREAD_ID threadID)
+void addState(const CompressedState* cs, FRAME frame)
 {
-	writeOpenState(cs, frame, threadID);
+	writeOpenState(cs, frame);
 }
 
 #ifdef USE_TRANSFORM_INVARIANT_SORTING
-void addStateTransform(CompressedStateTransform transform, FRAME frame, THREAD_ID threadID)
+void addStateTransform(CompressedStateTransform transform, FRAME frame)
 {
-	writeOpenStateTransform(transform, frame, threadID);
+	writeOpenStateTransform(transform, frame);
 }
 #endif
 
@@ -2924,19 +2947,19 @@ public:
 	enum { PREFERRED = PREFERRED_STATE_NEITHER };
 
 #ifdef USE_TRANSFORM_INVARIANT_SORTING
-	static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, CompressedStateTransform transform, FRAME frame, THREAD_ID threadID)
+	static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, CompressedStateTransform transform, FRAME frame)
 	{
 		/* no need to do anything, since this will never be called for FinishCheckChildHandler */
 	}
 #endif
 
-	static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const State* state, FRAME frame, THREAD_ID threadID)
+	static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const State* state, FRAME frame)
 	{
 		if (*state==exitSearchState && frame==exitSearchStateFrame)
 			found(step, parent, parentFrame);
 	}
 
-	static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const CompressedState* state, FRAME frame, THREAD_ID threadID)
+	static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const CompressedState* state, FRAME frame)
 	{
 		if (*state==exitSearchCompressedState && frame==exitSearchStateFrame)
 			found(step, parent, parentFrame);
@@ -2954,12 +2977,12 @@ public:
 	}
 };
 
-INLINE void processExitState(const Node* cs, THREAD_ID threadID)
+INLINE void processExitState(const Node* cs)
 {
 	State state;
 	state.decompress(&cs->getState());
 	FRAME frame = GET_FRAME(exitSearchFrameGroup, *cs);
-	expandChildren<FinishCheckChildHandler>(frame, &state, threadID);
+	expandChildren<FinishCheckChildHandler>(frame, &state);
 
 #ifdef DEBUG
 #ifdef MULTITHREADING
@@ -3273,7 +3296,7 @@ INLINE bool finishCheck(const State* s, FRAME frame)
 	return false;
 }
 
-void processState(const Node* cs, THREAD_ID threadID)
+void processState(const Node* cs)
 {
 	State s;
 	s.decompress(&cs->getState());
@@ -3310,26 +3333,26 @@ void processState(const Node* cs, THREAD_ID threadID)
 #endif
 
 #ifdef USE_TRANSFORM_INVARIANT_SORTING
-		static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, CompressedStateTransform transform, FRAME frame, THREAD_ID threadID)
+		static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, CompressedStateTransform transform, FRAME frame)
 		{
-			addStateTransform(transform, frame, threadID);
+			addStateTransform(transform, frame);
 		}
 #endif
 
-		static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const CompressedState* cs, FRAME frame, THREAD_ID threadID)
+		static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const CompressedState* cs, FRAME frame)
 		{
-			addState(cs, frame, threadID);
+			addState(cs, frame);
 		}
 
-		static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const State* state, FRAME frame, THREAD_ID threadID)
+		static INLINE void handleChild(const State* parent, FRAME parentFrame, Step step, const State* state, FRAME frame)
 		{
 			CompressedState cs;
 			state->compress(&cs);
-			addState(&cs, frame, threadID);
+			addState(&cs, frame);
 		}
 	};
 
-	expandChildren<AddStateChildHandler>(currentFrame, &s, threadID);
+	expandChildren<AddStateChildHandler>(currentFrame, &s);
 	assert(currentFrame/FRAMES_PER_GROUP == currentFrameGroup, format("Run-away currentFrameGroup: currentFrame=%u, currentFrameGroup=%u", currentFrame, currentFrameGroup));
 }
 
@@ -4696,15 +4719,27 @@ int run(int argc, const char* argv[])
 #endif
 
 #if defined(SYNC_BOOST)
-	printf("with Boost sync\n");
+	printf("with Boost sync ");
 #elif defined(SYNC_WINAPI)
-	printf("with WinAPI sync\n");
+	printf("with WinAPI sync ");
 #elif defined(SYNC_WINAPI_SPIN)
-	printf("with WinAPI spinlock sync\n");
+	printf("with WinAPI spinlock sync ");
 #elif defined(SYNC_INTEL_SPIN)
-	printf("with Intel spinlock sync\n");
+	printf("with Intel spinlock sync ");
 #else
 #error Sync plugin not set
+#endif
+
+#if defined(TLS_BOOST)
+	printf("and Boost TLS\n");
+#elif defined(TLS_WINAPI)
+	printf("and WinAPI TLS\n");
+#elif defined(TLS_VC)
+	printf("and Visual C++ TLS\n");
+#elif defined(TLS_GNU)
+	printf("and GNU TLS\n");
+#else
+#error TLS plugin not set
 #endif
 #endif // MULTITHREADING
 	

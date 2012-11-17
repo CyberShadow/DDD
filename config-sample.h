@@ -32,6 +32,12 @@
 //#define SYNC_WINAPI_SPIN
 #define SYNC_INTEL_SPIN
 
+// TLS_* selects how thread-local storage is done.
+#define TLS_VC
+//#define TLS_GNU
+//#define TLS_WINAPI
+//#define TLS_BOOST
+
 // How many bytes of RAM to use?
 #define RAM_SIZE (8LL*1024*1024*1024)
 
