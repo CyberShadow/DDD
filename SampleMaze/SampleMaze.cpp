@@ -65,6 +65,7 @@ struct State
 {
 	int x, y;
 
+	/// Private method, used in replayStep and expandChildren below.
 	/// Returns frame delay, 0 if move is invalid and the state was altered, -1 if move is invalid and the state was not altered.
 	int perform(Action action)
 	{
@@ -118,6 +119,10 @@ INLINE bool operator==(const State& a, const State& b)
 	return memcmp(&a, &b, sizeof (State))==0;
 }
 
+/// Allows the problem to provide an optimization.
+/// Currently, this is used for path backtracking when the solution is found:
+/// The function can return "false" to avoid unpacking the parent state and
+/// checking whether any of their expansion is the child state.
 INLINE bool canStatesBeParentAndChild(const CompressedState* parent, const CompressedState* child)
 {
 	return true;
@@ -137,7 +142,7 @@ struct Step
 	}
 };
 
-/// Private function.
+/// Private function, used in writeSolution below.
 void replayStep(State* state, FRAME* frame, Step step)
 {
 	int res = state->perform((Action)step.action);
@@ -147,8 +152,10 @@ void replayStep(State* state, FRAME* frame, Step step)
 
 // ******************************************************************************************************
 
-// Templated function to enumerate a state's children. Children are collected through a static function in the template parameter class: 
-// static void handleChild(const State* state, Step step, FRAME frame).
+/// Templated function to enumerate a state's children.
+/// Children are collected via one of a few static functions in the template parameter class:
+/// static void handleChild(const State* parent, FRAME parentFrame, Step step, const State* state       , FRAME frame, THREAD_ID threadID)
+/// static void handleChild(const State* parent, FRAME parentFrame, Step step, const CompressedState* cs, FRAME frame, THREAD_ID threadID)
 template <class CHILD_HANDLER>
 void expandChildren(FRAME frame, const State* state, THREAD_ID threadID)
 {
