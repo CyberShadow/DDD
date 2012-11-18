@@ -1,4 +1,4 @@
-#undef _CRT_SECURE_NO_WARNINGS
+#undef  _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
 
 #include "config.h"
@@ -12,57 +12,57 @@
 #include <queue>
 
 #ifdef _WIN32
-#include <windows.h>
+# include <windows.h>
 #endif
 
 #ifdef __GNUC__
-#include <stdint.h>
+# include <stdint.h>
 #else
-#include "pstdint.h"
+# include "pstdint.h"
 #endif
 
 #ifdef _WIN32
-#define SLEEP(x) Sleep(x)
+# define SLEEP(x) Sleep(x)
 #else
-#include <unistd.h>
-#define SLEEP(x) usleep((x)*1000)
+# include <unistd.h>
+# define SLEEP(x) usleep((x)*1000)
 #endif
 
 #ifdef MULTITHREADING
 
 typedef size_t THREAD_ID;
 
-#if defined(TLS_BOOST)
-#include "tls_boost.cpp"
-#elif defined(TLS_WINAPI)
-#include "tls_winapi.cpp"
-#elif defined(TLS_VC)
-#include "tls_vc.cpp"
-#elif defined(TLS_GNU)
-#include "tls_gnu.cpp"
-#else
-#error TLS plugin not set
-#endif
+# if defined(TLS_BOOST)
+#  include "tls_boost.cpp"
+# elif defined(TLS_WINAPI)
+#  include "tls_winapi.cpp"
+# elif defined(TLS_VC)
+#  include "tls_vc.cpp"
+# elif defined(TLS_GNU)
+#  include "tls_gnu.cpp"
+# else
+#  error TLS plugin not set
+# endif
 
-#if defined(THREAD_BOOST)
-#include "thread_boost.cpp"
-#elif defined(THREAD_WINAPI)
-#include "thread_winapi.cpp"
-#else
-#error Thread plugin not set
-#endif
+# if defined(THREAD_BOOST)
+#  include "thread_boost.cpp"
+# elif defined(THREAD_WINAPI)
+#  include "thread_winapi.cpp"
+# else
+#  error Thread plugin not set
+# endif
 
-#if defined(SYNC_BOOST)
-#include "sync_boost.cpp"
-#elif defined(SYNC_WINAPI)
-#include "sync_winapi.cpp"
-#elif defined(SYNC_WINAPI_SPIN)
-#include "sync_winapi_spin.cpp"
-#elif defined(SYNC_INTEL_SPIN)
-#include "sync_intel_spin.cpp"
-#else
-#error Sync plugin not set
-#endif
+# if defined(SYNC_BOOST)
+#  include "sync_boost.cpp"
+# elif defined(SYNC_WINAPI)
+#  include "sync_winapi.cpp"
+# elif defined(SYNC_WINAPI_SPIN)
+#  include "sync_winapi_spin.cpp"
+# elif defined(SYNC_INTEL_SPIN)
+#  include "sync_intel_spin.cpp"
+# else
+#  error Sync plugin not set
+# endif
 // TODO: look into user-mode scheduling
 
 #endif // MULTITHREADING
@@ -123,22 +123,22 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 
 #undef assert
 #ifdef DEBUG
-#define assert enforce
-#define debug_assert enforce
-#define INLINE
-#define DEBUG_ONLY(x) x
+# define assert enforce
+# define debug_assert enforce
+# define INLINE
+# define DEBUG_ONLY(x) x
 #else
-#if defined(_MSC_VER)
-#define assert(expr,...) __assume((expr)!=0)
-#define INLINE __forceinline
-#elif defined(__GNUC__)
-#define assert(expr,...) __builtin_expect(!(expr),0)
-#define INLINE inline
-#else
-#error Unknown compiler
-#endif
-#define debug_assert(...) do{}while(0)
-#define DEBUG_ONLY(x) do{}while(0)
+# if defined(_MSC_VER)
+#  define assert(expr,...) __assume((expr)!=0)
+#  define INLINE __forceinline
+# elif defined(__GNUC__)
+#  define assert(expr,...) __builtin_expect(!(expr),0)
+#  define INLINE inline
+# else
+#  error Unknown compiler
+# endif
+# define debug_assert(...) do{}while(0)
+# define DEBUG_ONLY(x) do{}while(0)
 #endif
 
 const char* hexDump(const void* data, size_t size, int columns = 0)
@@ -571,26 +571,26 @@ INLINE bool operator>=(const CompressedState& a, const CompressedState& b) { ret
 
 #ifdef GROUP_FRAMES
 
-#define GET_FRAME(frameGroup, cs) ((frameGroup) * FRAMES_PER_GROUP + (cs).subframe)
-#define SET_SUBFRAME(cs, frame) (cs).subframe = (frame) % FRAMES_PER_GROUP
+# define GET_FRAME(frameGroup, cs) ((frameGroup) * FRAMES_PER_GROUP + (cs).subframe)
+# define SET_SUBFRAME(cs, frame) (cs).subframe = (frame) % FRAMES_PER_GROUP
 
-#define GROUP_STR "-group"
-#if (FRAMES_PER_GROUP == 10)
-#define GROUP_FORMAT "%ux"
-#define GROUP_ALIGNED_FORMAT "%3ux"
-#else
-#define GROUP_FORMAT "g%u"
-#define GROUP_ALIGNED_FORMAT "g%3u"
-#endif
+# define GROUP_STR "-group"
+# if (FRAMES_PER_GROUP == 10)
+#  define GROUP_FORMAT "%ux"
+#  define GROUP_ALIGNED_FORMAT "%3ux"
+# else
+#  define GROUP_FORMAT "g%u"
+#  define GROUP_ALIGNED_FORMAT "g%3u"
+# endif
 
 #else // GROUP_FRAMES
 
-#define FRAMES_PER_GROUP 1
-#define GET_FRAME(frameGroup, cs) (frameGroup)
-#define SET_SUBFRAME(cs, frame)
-#define GROUP_STR ""
-#define GROUP_FORMAT "%u"
-#define GROUP_ALIGNED_FORMAT "%3u"
+# define FRAMES_PER_GROUP 1
+# define GET_FRAME(frameGroup, cs) (frameGroup)
+# define SET_SUBFRAME(cs, frame)
+# define GROUP_STR ""
+# define GROUP_FORMAT "%u"
+# define GROUP_ALIGNED_FORMAT "%3u"
 
 #endif
 
@@ -614,18 +614,18 @@ void* ram = malloc(RAM_SIZE);
 void* ramEnd = (char*)ram + RAM_SIZE;
 
 #ifndef STANDARD_BUFFER_SIZE
-#define STANDARD_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
+# define STANDARD_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
 #endif
 #ifndef ALL_FILE_BUFFER_SIZE
-#define ALL_FILE_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
+# define ALL_FILE_BUFFER_SIZE (1024*1024 / sizeof(Node)) // 1 MB
 #endif
 #ifndef EXPECTED_MERGING_RATIO
-#define EXPECTED_MERGING_RATIO 0.6
+# define EXPECTED_MERGING_RATIO 0.6
 #endif
 
 #ifndef USE_ALL
-#undef ALL_FILE_BUFFER_SIZE
-#define ALL_FILE_BUFFER_SIZE 0
+# undef  ALL_FILE_BUFFER_SIZE
+# define ALL_FILE_BUFFER_SIZE 0
 #endif
 
 struct PackedCompressedState
@@ -644,13 +644,13 @@ struct Node
 {
 	PackedCompressedState state;
 #ifdef GROUP_FRAMES
-#if COMPRESSED_BYTES%4 == 1
+# if COMPRESSED_BYTES%4 == 1
 	uint8_t _align1;
-#endif
+# endif
 	uint8_t subframe;
-#if (COMPRESSED_BYTES+(COMPRESSED_BYTES%4==1?1:0)+1)%4 != 0
+# if (COMPRESSED_BYTES+(COMPRESSED_BYTES%4==1?1:0)+1)%4 != 0
 	uint8_t _align2[4-(COMPRESSED_BYTES+(COMPRESSED_BYTES%4==1?1:0)+1)%4];
-#endif
+# endif
 #endif
 
 	CompressedState& getState() const { return (CompressedState&)state; }
@@ -1758,8 +1758,8 @@ const char* formatFileName(const char* name, FRAME_GROUP g, unsigned chunk)
 
 #ifdef MULTITHREADING
 
-#define WORKERS (THREADS-1)
-#define PROCESS_QUEUE_SIZE 0x100000
+# define WORKERS (THREADS-1)
+# define PROCESS_QUEUE_SIZE 0x100000
 Node processQueue[PROCESS_QUEUE_SIZE]; // circular buffer
 size_t processQueueHead=0, processQueueTail=0;
 MUTEX processQueueMutex; // for head/tail
@@ -1770,13 +1770,13 @@ CONDITION specialWorkersExitCondition;
 volatile int runningSpecialWorkers = 0;
 volatile bool stopSpecialWorkers = false;
 
-#ifdef USE_TRANSFORM_INVARIANT_SORTING
+# ifdef USE_TRANSFORM_INVARIANT_SORTING
 
-#endif
+# endif
 
-#ifdef ENABLE_EXPANSION_SPILLOVER
+# ifdef ENABLE_EXPANSION_SPILLOVER
 void expansionReadSpilloverThread();
-#endif
+# endif
 void expansionSortFinalRegions();
 
 void queueState(const Node* state)
@@ -1826,13 +1826,13 @@ void worker()
 template<void (*STATE_HANDLER)(const Node*), void (*FINALIZATION_HANDLER)()>
 void startWorkers()
 {
-#ifdef ENABLE_EXPANSION_SPILLOVER
+# ifdef ENABLE_EXPANSION_SPILLOVER
 	{
 		SCOPED_LOCK lock(processQueueMutex);
 		runningSpecialWorkers++;
 	}
 	THREAD_CREATE<expansionReadSpilloverThread>(0);
-#endif
+# endif
 
 	{
 		SCOPED_LOCK lock(processQueueMutex);
@@ -1846,13 +1846,13 @@ void flushProcessingQueue()
 {
 	SCOPED_LOCK lock(processQueueMutex);
 
-#ifdef ENABLE_EXPANSION_SPILLOVER
+# ifdef ENABLE_EXPANSION_SPILLOVER
 	// finish expansionReadSpilloverThread
 	stopSpecialWorkers = true;
 	while (runningSpecialWorkers)
 		CONDITION_WAIT(specialWorkersExitCondition, lock);
 	stopSpecialWorkers = false;
-#endif
+# endif
 
 	stopWorkers = true;
 	CONDITION_NOTIFY(processQueueWriteCondition, lock);
@@ -1867,7 +1867,7 @@ void flushProcessingQueue()
 	//stopSpecialWorkers = false;
 }
 
-#endif
+#endif // MULTITHREADING
 
 // ************************************** Disk queue (open nodes) ***************************************
 
@@ -2767,14 +2767,14 @@ void expansionWriteFinalChunk()
 		size_t count = OPENNODE_BUFFER_SIZE;
 		if (count > expansionSpilloverNodesQueued)
 			count = expansionSpilloverNodesQueued;
-#ifdef DEBUG_EXPANSION
+# ifdef DEBUG_EXPANSION
 		{
 			timeb time1;
 			ftime(&time1);
 			fprintf(expansionDebug, "%9d.%03d: Reading %llu nodes of spillover...\n", time1.time, time1.millitm, count);
 			fflush(expansionDebug);
 		}
-#endif
+# endif
 
 		expansionReadSpillover(EXPANSION_BUFFER, count);
 
@@ -2786,14 +2786,14 @@ void expansionWriteFinalChunk()
 			expansionThread[threadID].finalSortBufferEnd = EXPANSION_BUFFER + numerator/WORKERS;
 		}
 
-#ifdef DEBUG_EXPANSION
+# ifdef DEBUG_EXPANSION
 		{
 			timeb time1;
 			ftime(&time1);
 			fprintf(expansionDebug, "%9d.%03d: Sorting spillover with %u threads...\n", time1.time, time1.millitm, WORKERS);
 			fflush(expansionDebug);
 		}
-#endif
+# endif
 
 		{
 			SCOPED_LOCK lock(processQueueMutex);
@@ -2807,18 +2807,18 @@ void expansionWriteFinalChunk()
 				CONDITION_WAIT(specialWorkersExitCondition, lock);
 		}
 
-#ifdef DEBUG_EXPANSION
+# ifdef DEBUG_EXPANSION
 		{
 			timeb time1;
 			ftime(&time1);
 			fprintf(expansionDebug, "%9d.%03d: Merging sorted spillover to disk...\n", time1.time, time1.millitm);
 			fflush(expansionDebug);
 		}
-#endif
+# endif
 
 		expansionMergeRegionsToDisk();
 	}
-#endif
+#endif // ENABLE_EXPANSION_SPILLOVER
 
 #ifdef DEBUG_EXPANSION
 	{
@@ -2985,10 +2985,10 @@ INLINE void processExitState(const Node* cs)
 	expandChildren<FinishCheckChildHandler>(frame, &state);
 
 #ifdef DEBUG
-#ifdef MULTITHREADING
+# ifdef MULTITHREADING
 	static MUTEX mutex;
 	SCOPED_LOCK lock(mutex);
-#endif
+# endif
 	statesDequeued++;
 #endif
 }
@@ -4710,37 +4710,37 @@ int run(int argc, const char* argv[])
 #endif
 
 #ifdef MULTITHREADING
-#if defined(THREAD_BOOST)
+# if defined(THREAD_BOOST)
 	printf("Using %u Boost threads ", THREADS);
-#elif defined(THREAD_WINAPI)
+# elif defined(THREAD_WINAPI)
 	printf("Using %u WinAPI threads ", THREADS);
-#else
-#error Thread plugin not set
-#endif
+# else
+#  error Thread plugin not set
+# endif
 
-#if defined(SYNC_BOOST)
+# if defined(SYNC_BOOST)
 	printf("with Boost sync ");
-#elif defined(SYNC_WINAPI)
+# elif defined(SYNC_WINAPI)
 	printf("with WinAPI sync ");
-#elif defined(SYNC_WINAPI_SPIN)
+# elif defined(SYNC_WINAPI_SPIN)
 	printf("with WinAPI spinlock sync ");
-#elif defined(SYNC_INTEL_SPIN)
+# elif defined(SYNC_INTEL_SPIN)
 	printf("with Intel spinlock sync ");
-#else
-#error Sync plugin not set
-#endif
+# else
+#  error Sync plugin not set
+# endif
 
-#if defined(TLS_BOOST)
+# if defined(TLS_BOOST)
 	printf("and Boost TLS\n");
-#elif defined(TLS_WINAPI)
+# elif defined(TLS_WINAPI)
 	printf("and WinAPI TLS\n");
-#elif defined(TLS_VC)
+# elif defined(TLS_VC)
 	printf("and Visual C++ TLS\n");
-#elif defined(TLS_GNU)
+# elif defined(TLS_GNU)
 	printf("and GNU TLS\n");
-#else
-#error TLS plugin not set
-#endif
+# else
+#  error TLS plugin not set
+# endif
 #endif // MULTITHREADING
 	
 	printf("Compressed state is %u bits (%u bytes data, %u bytes per closed node, %u bytes per open node)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(Node), sizeof(OpenNode));
@@ -4754,15 +4754,15 @@ int run(int argc, const char* argv[])
 
 #if defined(DISK_WINFILES)
 	printf("Using Windows API files");
-#ifdef USE_UNBUFFERED_DISK_IO
+# ifdef USE_UNBUFFERED_DISK_IO
 	printf(" with unbuffered disk I/O\n");
-#else
+# else
 	printf(" with Windows disk I/O buffering\n");
-#endif
+# endif
 #elif defined(DISK_POSIX)
 	printf("Using POSIX files\n");
 #else
-#error Disk plugin not set
+# error Disk plugin not set
 #endif
 
 	if (fileExists(formatProblemFileName("stop", NULL, "txt")))
