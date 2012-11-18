@@ -33,30 +33,39 @@
 typedef size_t THREAD_ID;
 
 # if defined(TLS_BOOST)
+#  define PLUGIN_TLS "Boost"
 #  include "tls_boost.cpp"
 # elif defined(TLS_WINAPI)
+#  define PLUGIN_TLS "WinAPI"
 #  include "tls_winapi.cpp"
 # elif defined(TLS_COMPILER)
+#  define PLUGIN_TLS "compiler"
 #  include "tls_compiler.cpp"
 # else
 #  error TLS plugin not set
 # endif
 
 # if defined(THREAD_BOOST)
+#  define PLUGIN_THREAD "Boost"
 #  include "thread_boost.cpp"
 # elif defined(THREAD_WINAPI)
+#  define PLUGIN_THREAD "WinAPI"
 #  include "thread_winapi.cpp"
 # else
 #  error Thread plugin not set
 # endif
 
 # if defined(SYNC_BOOST)
+#  define PLUGIN_SYNC "Boost"
 #  include "sync_boost.cpp"
 # elif defined(SYNC_WINAPI)
+#  define PLUGIN_SYNC "WinAPI"
 #  include "sync_winapi.cpp"
 # elif defined(SYNC_WINAPI_SPIN)
+#  define PLUGIN_SYNC "WinAPI spinlock"
 #  include "sync_winapi_spin.cpp"
 # elif defined(SYNC_INTEL_SPIN)
+#  define PLUGIN_SYNC "Intel spinlock"
 #  include "sync_intel_spin.cpp"
 # else
 #  error Sync plugin not set
@@ -597,11 +606,13 @@ FRAME_GROUP currentFrameGroup;
 // ************************************************ Disk ************************************************
 
 #if defined(DISK_WINFILES)
-#include "disk_file_windows.cpp"
+# define PLUGIN_DISK "Windows"
+# include "disk_file_windows.cpp"
 #elif defined(DISK_POSIX)
-#include "disk_file_posix.cpp"
+# define PLUGIN_DISK "POSIX"
+# include "disk_file_posix.cpp"
 #else
-#error Disk plugin not set
+# error Disk plugin not set
 #endif
 
 // *********************************************** Memory ***********************************************
@@ -4708,36 +4719,8 @@ int run(int argc, const char* argv[])
 #endif
 
 #ifdef MULTITHREADING
-# if defined(THREAD_BOOST)
-	printf("Using %u Boost threads ", THREADS);
-# elif defined(THREAD_WINAPI)
-	printf("Using %u WinAPI threads ", THREADS);
-# else
-#  error Thread plugin not set
-# endif
-
-# if defined(SYNC_BOOST)
-	printf("with Boost sync ");
-# elif defined(SYNC_WINAPI)
-	printf("with WinAPI sync ");
-# elif defined(SYNC_WINAPI_SPIN)
-	printf("with WinAPI spinlock sync ");
-# elif defined(SYNC_INTEL_SPIN)
-	printf("with Intel spinlock sync ");
-# else
-#  error Sync plugin not set
-# endif
-
-# if defined(TLS_BOOST)
-	printf("and Boost TLS\n");
-# elif defined(TLS_WINAPI)
-	printf("and WinAPI TLS\n");
-# elif defined(TLS_COMPILER)
-	printf("and compiler TLS\n");
-# else
-#  error TLS plugin not set
-# endif
-#endif // MULTITHREADING
+	printf("Using %u "PLUGIN_THREAD" threads with "PLUGIN_SYNC" sync and "PLUGIN_TLS" TLS\n", THREADS);
+#endif
 	
 	printf("Compressed state is %u bits (%u bytes data, %u bytes per closed node, %u bytes per open node)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(Node), sizeof(OpenNode));
 #ifdef SLOW_COMPARE
