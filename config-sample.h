@@ -33,8 +33,7 @@
 #define SYNC_INTEL_SPIN
 
 // TLS_* selects how thread-local storage is done.
-#define TLS_VC
-//#define TLS_GNU
+#define TLS_COMPILER
 //#define TLS_WINAPI
 //#define TLS_BOOST
 

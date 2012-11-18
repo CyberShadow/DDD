@@ -36,10 +36,8 @@ typedef size_t THREAD_ID;
 #  include "tls_boost.cpp"
 # elif defined(TLS_WINAPI)
 #  include "tls_winapi.cpp"
-# elif defined(TLS_VC)
-#  include "tls_vc.cpp"
-# elif defined(TLS_GNU)
-#  include "tls_gnu.cpp"
+# elif defined(TLS_COMPILER)
+#  include "tls_compiler.cpp"
 # else
 #  error TLS plugin not set
 # endif
@@ -4734,10 +4732,8 @@ int run(int argc, const char* argv[])
 	printf("and Boost TLS\n");
 # elif defined(TLS_WINAPI)
 	printf("and WinAPI TLS\n");
-# elif defined(TLS_VC)
-	printf("and Visual C++ TLS\n");
-# elif defined(TLS_GNU)
-	printf("and GNU TLS\n");
+# elif defined(TLS_COMPILER)
+	printf("and compiler TLS\n");
 # else
 #  error TLS plugin not set
 # endif
