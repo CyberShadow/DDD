@@ -64,6 +64,9 @@ public:
 	{
 		if (archive)
 		{
+#ifdef PREALLOCATE_EXPANDED
+			SetEndOfFile(archive);
+#endif
 			CloseHandle(archive);
 			archive = 0;
 		}
@@ -166,6 +169,22 @@ public:
 			seek(size());
 	}
 
+#ifdef PREALLOCATE_EXPANDED
+	__declspec(noinline)
+	void preallocate(uint64_t size)
+	{
+		LARGE_INTEGER _size;
+		_size.QuadPart = size;
+		if (SetFilePointerEx(archive, _size, NULL, FILE_BEGIN))
+		{
+			if (SetEndOfFile(archive))
+				SetFileValidData(archive, _size.QuadPart);
+		}
+		_size.QuadPart = 0;
+		SetFilePointerEx(archive, _size, NULL, FILE_BEGIN);
+	}
+#endif
+
 	__declspec(noinline)
 	void write(const NODE* p, size_t n)
 	{
@@ -232,6 +251,9 @@ private:
 				FlushFileBuffers(archive);
 			else
 			{
+#ifdef PREALLOCATE_EXPANDED
+				SetEndOfFile(archive);
+#endif
 				CloseHandle(archive);
 				archive = 0;
 			}
@@ -242,7 +264,16 @@ private:
 		BOOL b;
 		DWORD w;
 		ULARGE_INTEGER size;
+#ifdef PREALLOCATE_EXPANDED
+		{
+			LARGE_INTEGER size0;
+			size0.QuadPart = 0;
+			if (!SetFilePointerEx(archive, size0, &(LARGE_INTEGER&)size, FILE_CURRENT))
+				windowsError("Seek error");
+		}
+#else
 		size.LowPart = GetFileSize(archive, &size.HighPart);
+#endif
 		size.QuadPart += sectorBufferUse;
 
 		b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &w, NULL);
@@ -601,3 +632,47 @@ uint64_t getFreeSpace()
 		windowsError("GetDiskFreeSpaceEx error");
 	return li.QuadPart;
 }
+
+#ifdef PREALLOCATE_EXPANDED
+static BOOL SetPrivilege(LPCTSTR lpszPrivilege, BOOL bEnablePrivilege)
+{
+	HANDLE hToken;
+	TOKEN_PRIVILEGES tp;
+	LUID luid;
+
+	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
+		return FALSE;
+
+	if (!LookupPrivilegeValue(NULL, lpszPrivilege, &luid ))
+	{
+		printf("LookupPrivilegeValue error: %u\n", GetLastError());
+		CloseHandle(hToken);
+		return FALSE; 
+	}
+
+	tp.PrivilegeCount = 1;
+	tp.Privileges[0].Luid = luid;
+	tp.Privileges[0].Attributes = bEnablePrivilege ? SE_PRIVILEGE_ENABLED : 0;
+
+	if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), (PTOKEN_PRIVILEGES)NULL, (PDWORD)NULL))
+	{ 
+		  printf("AdjustTokenPrivileges error: %u\n", GetLastError());
+		  CloseHandle(hToken);
+		  return FALSE; 
+	} 
+
+	if (GetLastError() == ERROR_NOT_ALL_ASSIGNED)
+	{
+		  printf("The token does not have the specified privilege. \n");
+		  CloseHandle(hToken);
+		  return FALSE;
+	} 
+
+	CloseHandle(hToken);
+	return TRUE;
+}
+void preparePreallocation()
+{
+	SetPrivilege(SE_MANAGE_VOLUME_NAME, TRUE);
+}
+#endif

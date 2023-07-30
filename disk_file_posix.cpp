@@ -107,3 +107,10 @@ bool fileExists(const char* filename)
 	// TODO
 	#error "Not implemented"
 }
+
+#ifdef PREALLOCATE_EXPANDED
+void preparePreallocation()
+{
+	// TODO
+}
+#endif

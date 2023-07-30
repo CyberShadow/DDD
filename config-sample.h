@@ -47,6 +47,11 @@
 // The expected ratio of Merging output/input
 #define EXPECTED_MERGING_RATIO 0.99
 
+// If defined, preallocate expanded chunks to this size to avoid disk fragmentation, then truncate them to their actual size upon closing. This
+// dramatically speeds up the Merging step when using magnetic hard drives (as opposed to solid state drives). it requires administrative-level
+// privilege, as the preallocated space contains whatever contents previously occupied that location on disk.
+//#define PREALLOCATE_EXPANDED 2760704000
+
 
 // The parameters for the multithreaded Expansion queue/scheduler
 

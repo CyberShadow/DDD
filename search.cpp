@@ -1009,6 +1009,9 @@ public:
 	BufferedOutputStream(uint32_t size = STANDARD_BUFFER_SIZE) : WriteBuffer(size) {}
 	BufferedOutputStream(const char* filename, bool resume=false, uint32_t size = STANDARD_BUFFER_SIZE) : WriteBuffer(size) { open(filename, resume); }
 	void open(const char* filename, bool resume=false) { s.open(filename, resume); buffer.allocate(); }
+#ifdef PREALLOCATE_EXPANDED
+	void preallocate(uint64_t size) { s.preallocate(size); }
+#endif
 };
 
 template<class NODE>
@@ -2199,6 +2202,9 @@ void sortExpansionRegion(std::list<ExpansionBufferRegion>::iterator& regionToSor
 	unsigned chunk = expansionChunks++;
 
 	expansionWriteChunkThreadStream[threadID].open(formatFileName("expanded", currentFrameGroup, chunk), false);
+#ifdef PREALLOCATE_EXPANDED
+	expansionWriteChunkThreadStream[threadID].preallocate(PREALLOCATE_EXPANDED);
+#endif
 	expansionWriteChunkThreadBuffer[threadID] = bufferToSort;
 	expansionWriteChunkThreadCount [threadID] = count;
 	expansionWriteChunkThreadRegion[threadID] = regionToSort;
@@ -4897,6 +4903,9 @@ int main(int argc, const char* argv[])
 }
 #else
 int main(int argc, const char* argv[]) {
+#ifdef PREALLOCATE_EXPANDED
+	preparePreallocation();
+#endif
 	try {
 		return run(argc, argv);
 	}
