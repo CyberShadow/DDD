@@ -3663,7 +3663,7 @@ int search()
 
 		ftime(&time3);
 		{
-			InputStream<Node> getSize(formatFileName("expanded", currentFrameGroup));
+			InputStream<OpenNode> getSize(formatFileName("expanded", currentFrameGroup));
 			uint64_t expandedNodes = getSize.size();
 
 			time_t ms = (time3.time - time2.time)*1000 + (time3.millitm - time2.millitm);
