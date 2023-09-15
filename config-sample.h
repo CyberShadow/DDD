@@ -52,6 +52,9 @@
 // privilege, as the preallocated space contains whatever contents previously occupied that location on disk.
 //#define PREALLOCATE_EXPANDED 2760704000
 
+// If defined, preallocate files outputted during the Combining step ("closing" and "combining")
+#define PREALLOCATE_COMBINING
+
 
 // The parameters for the multithreaded Expansion queue/scheduler
 

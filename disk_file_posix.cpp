@@ -108,7 +108,7 @@ bool fileExists(const char* filename)
 	#error "Not implemented"
 }
 
-#ifdef PREALLOCATE_EXPANDED
+#if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
 void preparePreallocation()
 {
 	// TODO

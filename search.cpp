@@ -1009,7 +1009,7 @@ public:
 	BufferedOutputStream(uint32_t size = STANDARD_BUFFER_SIZE) : WriteBuffer(size) {}
 	BufferedOutputStream(const char* filename, bool resume=false, uint32_t size = STANDARD_BUFFER_SIZE) : WriteBuffer(size) { open(filename, resume); }
 	void open(const char* filename, bool resume=false) { s.open(filename, resume); buffer.allocate(); }
-#ifdef PREALLOCATE_EXPANDED
+#if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
 	void preallocate(uint64_t size) { s.preallocate(size); }
 #endif
 };
@@ -3693,6 +3693,15 @@ int search()
 
 		closedNodeFile.setWriteBuffer((Node*)ram, sizeClosing * sizeof(OpenNode) / sizeof(Node));
 		closedNodeFile.open(formatFileName("closing", currentFrameGroup+1), false);
+#ifdef PREALLOCATE_COMBINING
+		uint64_t previousClosedSize;
+		{
+			InputStream<Node> getSize(formatFileName("closed", currentFrameGroup));
+			previousClosedSize = getSize.size() * sizeof(Node);
+			previousClosedSize = (previousClosedSize + 0x1FF) & -0x200;
+		}
+		closedNodeFile.preallocate(previousClosedSize);
+#endif
 
 		{
 			BufferedInputStream<OpenNode> inputs[2];
@@ -3706,6 +3715,15 @@ int search()
 
 			output.b()->setWriteBuffer((OpenNode*)ram + sizeClosing + sizeExpanded + sizeCombined, sizeCombinedNew);
 			output.b()->open(formatFileName("combining", currentFrameGroup+1), false);
+#ifdef PREALLOCATE_COMBINING
+			uint64_t previousCombinedSize;
+			{
+				InputStream<OpenNode> getSize(formatFileName("combined", currentFrameGroup));
+				previousCombinedSize = getSize.size() * sizeof(OpenNode);
+				previousCombinedSize = (previousCombinedSize + 0x1FF) & -0x200;
+			}
+			output.b()->preallocate(previousCombinedSize);
+#endif
 
 			mergeStreams<OpenNode>(inputs, 2, &output);
 		}
@@ -4903,7 +4921,7 @@ int main(int argc, const char* argv[])
 }
 #else
 int main(int argc, const char* argv[]) {
-#ifdef PREALLOCATE_EXPANDED
+#if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
 	preparePreallocation();
 #endif
 	try {

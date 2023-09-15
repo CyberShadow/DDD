@@ -64,7 +64,7 @@ public:
 	{
 		if (archive)
 		{
-#ifdef PREALLOCATE_EXPANDED
+#if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
 			SetEndOfFile(archive);
 #endif
 			CloseHandle(archive);
@@ -169,7 +169,7 @@ public:
 			seek(size());
 	}
 
-#ifdef PREALLOCATE_EXPANDED
+#if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
 	__declspec(noinline)
 	void preallocate(uint64_t size)
 	{
@@ -251,7 +251,7 @@ private:
 				FlushFileBuffers(archive);
 			else
 			{
-#ifdef PREALLOCATE_EXPANDED
+#if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
 				SetEndOfFile(archive);
 #endif
 				CloseHandle(archive);
@@ -264,7 +264,7 @@ private:
 		BOOL b;
 		DWORD w;
 		ULARGE_INTEGER size;
-#ifdef PREALLOCATE_EXPANDED
+#if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
 		{
 			LARGE_INTEGER size0;
 			size0.QuadPart = 0;
@@ -633,7 +633,7 @@ uint64_t getFreeSpace()
 	return li.QuadPart;
 }
 
-#ifdef PREALLOCATE_EXPANDED
+#if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
 static BOOL SetPrivilege(LPCTSTR lpszPrivilege, BOOL bEnablePrivilege)
 {
 	HANDLE hToken;
