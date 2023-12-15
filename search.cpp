@@ -649,16 +649,24 @@ struct PackedCompressedState
 
 typedef PackedCompressedState BareNode;
 
+#ifndef ALIGN_TO_32BITS
+# pragma pack( push, 1 )
+#endif
+
 struct Node
 {
 	PackedCompressedState state;
 #ifdef GROUP_FRAMES
-# if COMPRESSED_BYTES%4 == 1
+# ifdef ALIGN_TO_32BITS
+#  if COMPRESSED_BYTES%4 == 1
 	uint8_t _align1;
+#  endif
 # endif
 	uint8_t subframe;
-# if (COMPRESSED_BYTES+(COMPRESSED_BYTES%4==1?1:0)+1)%4 != 0
+# ifdef ALIGN_TO_32BITS
+#  if (COMPRESSED_BYTES+(COMPRESSED_BYTES%4==1?1:0)+1)%4 != 0
 	uint8_t _align2[4-(COMPRESSED_BYTES+(COMPRESSED_BYTES%4==1?1:0)+1)%4];
+#  endif
 # endif
 #endif
 
@@ -668,13 +676,19 @@ struct Node
 struct OpenNode
 {
 	PACKED_FRAME frame;
-#if (COMPRESSED_BYTES+PACKED_FRAME_BYTES)%4 != 0
+#ifdef ALIGN_TO_32BITS
+# if (COMPRESSED_BYTES+PACKED_FRAME_BYTES)%4 != 0
 	uint8_t padding[4-(COMPRESSED_BYTES+PACKED_FRAME_BYTES)%4];
+# endif
 #endif
 	PackedCompressedState state;
 
 	CompressedState& getState() const { return (CompressedState&)state; }
 };
+
+#ifndef ALIGN_TO_32BITS
+# pragma pack( pop )
+#endif
 
 INLINE bool operator==(const Node& a, const Node& b) { return a.getState() == b.getState(); }
 INLINE bool operator!=(const Node& a, const Node& b) { return a.getState() != b.getState(); }

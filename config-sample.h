@@ -74,6 +74,8 @@
 #define EXPANSION_BUFFER_FILL_RATIO (1./WORKERS)
 #endif
 
+//#define ALIGN_TO_32BITS
+
 
 // DISK_* selects the back-end storage to be used for the node disk files.
 #define DISK_WINFILES
