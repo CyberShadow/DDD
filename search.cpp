@@ -1835,9 +1835,17 @@ void doNothing() {}
 template<void (*STATE_HANDLER)(const Node*), void (*FINALIZATION_HANDLER)()>
 void worker()
 {
-	Node cs;
-	while (dequeueState(&cs))
-		STATE_HANDLER(&cs);
+	Node cs[QUEUE_CHUNK_SIZE];
+	for (;;)
+	{
+		int n=0;
+		while (n<QUEUE_CHUNK_SIZE && dequeueState(&cs[n]))
+			n++;
+		if (n == 0)
+			break;
+		for (int i=0; i<n; i++)
+			STATE_HANDLER(&cs[i]);
+	}
 
 	FINALIZATION_HANDLER();
 
@@ -4757,7 +4765,7 @@ int run(int argc, const char* argv[])
 #endif
 
 #ifdef MULTITHREADING
-	printf("Using %u "PLUGIN_THREAD" threads with "PLUGIN_SYNC" sync and "PLUGIN_TLS" TLS\n", THREADS);
+	printf("Using %u "PLUGIN_THREAD" threads (with %u node chunks) with "PLUGIN_SYNC" sync and "PLUGIN_TLS" TLS\n", THREADS, QUEUE_CHUNK_SIZE);
 #endif
 	
 	printf("Compressed state is %u bits (%u bytes data, %u bytes per closed node, %u bytes per open node)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(Node), sizeof(OpenNode));
