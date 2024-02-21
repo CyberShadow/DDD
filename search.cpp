@@ -4614,10 +4614,10 @@ void testCompressedState()
 
 	switch (COMPRESSED_BYTES % 4)
 	{
-		case 0: subframe = sizeof(Node)-4; break;
+		case 0: subframe = (int)sizeof(Node)-4; break;
 		case 1: // align to word - fall through
-		case 2: subframe = sizeof(Node)-2; break;
-		case 3: subframe = sizeof(Node)-1; break;
+		case 2: subframe = (int)sizeof(Node)-2; break;
+		case 3: subframe = (int)sizeof(Node)-1; break;
 	}
 
 	p1[subframe] = 0xFF;
