@@ -412,7 +412,8 @@ private:
 	{
 		while (stackSize > 1) {
 			int n = stackSize - 2;
-			if (n > 0 && runLen[n-1] <= runLen[n] + runLen[n+1]) {
+			if ((n > 0 && runLen[n-1] <= runLen[n] + runLen[n+1]) ||
+				(n > 1 && runLen[n-2] <= runLen[n-1] + runLen[n])) {
 				if (runLen[n - 1] < runLen[n + 1])
 					n--;
 				mergeAt(n);
