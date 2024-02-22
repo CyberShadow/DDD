@@ -4670,8 +4670,9 @@ Usage:\n\
 where <mode> is one of:\n\
 	search [max-frame"GROUP_STR"]\n\
 		Sorts, filters and expands open nodes. 	If no open node files\n\
-		are present, starts a new search from the initial state.\n\
-	grouped-search <size>\n\
+		are present, starts a new search from the initial state.\n"
+#if 0
+"	grouped-search <size>\n\
 		Performs the same operation as \"search\", but processes <size>\n\
 		open frame"GROUP_STR"s at once. The nodes for each frame"GROUP_STR"\n\
 		are expanded without being filtered, and all frame"GROUP_STR"s are\n\
@@ -4681,8 +4682,9 @@ where <mode> is one of:\n\
 	grouped-search-no-filter <size>\n\
 		Same as above, but does not sort and filter the node files\n\
 		before expanding them. Use with care, as it may lead to an\n\
-		explosion in the number of open nodes.\n\
-	dump <frame"GROUP_STR">\n\
+		explosion in the number of open nodes.\n"
+#endif
+"	dump <frame"GROUP_STR">\n\
 		Dumps all states from the specified frame"GROUP_STR", which\n\
 		can be either open or closed.\n\
 	sample <frame"GROUP_STR">\n\
@@ -4704,8 +4706,9 @@ where <mode> is one of:\n\
 #endif
 "	verify <filename>\n\
 		Verifies that the nodes in a file are correctly sorted and\n\
-		deduplicated, as well as a few additional integrity checks.\n\
-	pack-open [frame"GROUP_STR"-range]\n\
+		deduplicated, as well as a few additional integrity checks.\n"
+#if 0
+"	pack-open [frame"GROUP_STR"-range]\n\
 		Removes duplicates within each chunk for open node files in the\n\
 		specified range. Reads and writes open nodes only once.\n\
 	sort-open [frame"GROUP_STR"-range]\n\
@@ -4731,8 +4734,9 @@ where <mode> is one of:\n\
 		the search).\n\
 	create-all\n\
 		Creates the \"all\" file from closed node files. Use when\n\
-		turning on USE_ALL, or when the \"all\" file was corrupted.\n\
-	find-exit [frame"GROUP_STR"-range]\n\
+		turning on USE_ALL, or when the \"all\" file was corrupted.\n"
+#endif
+"	find-exit [frame"GROUP_STR"-range]\n\
 		Searches for exit frames in the specified frame"GROUP_STR" range\n\
 		(both closed an open node files). When a state is found which\n\
 		satisfies the isFinish condition, it is traced back and the\n\
@@ -4817,6 +4821,7 @@ int run(int argc, const char* argv[])
 		return search();
 	}
 #if 0
+	else
 	if (argc>1 && strcmp(argv[1], "grouped-search")==0)
 	{
 		enforce(argc==3, "Specify how many frame"GROUP_STR"s to process at once");
@@ -4828,8 +4833,8 @@ int run(int argc, const char* argv[])
 		enforce(argc==3, "Specify how many frame"GROUP_STR"s to process at once");
 		return groupedSearch(parseInt(argv[2]), false);
 	}
-	else
 #endif
+	else
 	if (argc>1 && strcmp(argv[1], "dump")==0)
 	{
 		enforce(argc==3, "Specify a frame"GROUP_STR" to dump");
@@ -4847,8 +4852,8 @@ int run(int argc, const char* argv[])
 		enforce(argc==4, "Specify two files to compare");
 		return compare(argv[2], argv[3]);
 	}
-	else
 #ifdef GROUP_FRAMES
+	else
 	if (argc>1 && strcmp(argv[1], "convert")==0)
 	{
 		parseFrameRange(argc-2, argv+2);
@@ -4866,8 +4871,8 @@ int run(int argc, const char* argv[])
 		parseFrameRange(argc-2, argv+2);
 		return count();
 	}
-	else
 #endif
+	else
 	if (argc>1 && strcmp(argv[1], "verify")==0)
 	{
 		enforce(argc==3, "Specify a file to verify");
@@ -4903,11 +4908,13 @@ int run(int argc, const char* argv[])
 		parseFrameRange(argc-2, argv+2);
 		return regenerateOpen();
 	}
+	else
 	if (argc>1 && strcmp(argv[1], "create-all")==0)
 	{
 		return createAll();
 	}
 #endif
+	else
 	if (argc>1 && strcmp(argv[1], "find-exit")==0)
 	{
 		parseFrameRange(argc-2, argv+2);
