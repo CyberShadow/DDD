@@ -4594,7 +4594,9 @@ void printExecutionTime()
 // Test the CompressedState comparison operators.
 void testCompressedState()
 {
+#ifdef ALIGN_TO_32BITS
 	enforce(sizeof(Node)%4 == 0);
+#endif
 #ifdef GROUP_FRAMES
 	enforce(COMPRESSED_BITS <= (sizeof(Node)-1)*8);
 #else
@@ -4610,6 +4612,7 @@ void testCompressedState()
 #ifdef GROUP_FRAMES
 	int subframe;
 
+#ifdef ALIGN_TO_32BITS
 	switch (COMPRESSED_BYTES % 4)
 	{
 		case 0: subframe = (int)sizeof(Node)-4; break;
@@ -4617,6 +4620,9 @@ void testCompressedState()
 		case 2: subframe = (int)sizeof(Node)-2; break;
 		case 3: subframe = (int)sizeof(Node)-1; break;
 	}
+#else
+	subframe = (int)sizeof(Node)-1;
+#endif
 
 	p1[subframe] = 0xFF;
 	enforce(c1 == c2, "Different subframe causes inequality");

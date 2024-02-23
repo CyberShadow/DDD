@@ -20,6 +20,17 @@ void windowsError(const char* where = NULL)
 		error((LPCSTR)lpMsgBuf);
 }
 
+uint64_t getFileSize(const char* filename)
+{
+	HANDLE archive = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
+	if (archive == INVALID_HANDLE_VALUE)
+		return 0;
+	ULARGE_INTEGER li;
+	li.LowPart = GetFileSize(archive, &li.HighPart);
+	CloseHandle(archive);
+	return li.QuadPart;
+}
+
 template<class NODE>
 class Stream
 {
