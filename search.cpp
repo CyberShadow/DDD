@@ -3718,8 +3718,7 @@ int search()
 #ifdef PREALLOCATE_COMBINING
 		uint64_t previousClosedSize;
 		{
-			InputStream<Node> getSize(formatFileName("closed", currentFrameGroup));
-			previousClosedSize = getSize.size() * sizeof(Node);
+			previousClosedSize = getFileSize(formatFileName("closed", currentFrameGroup));
 			previousClosedSize = (previousClosedSize + 0x1FF) & -0x200;
 		}
 		closedNodeFile.preallocate(previousClosedSize);
@@ -3740,8 +3739,7 @@ int search()
 #ifdef PREALLOCATE_COMBINING
 			uint64_t previousCombinedSize;
 			{
-				InputStream<OpenNode> getSize(formatFileName("combined", currentFrameGroup));
-				previousCombinedSize = getSize.size() * sizeof(OpenNode);
+				previousCombinedSize = getFileSize(formatFileName("combined", currentFrameGroup));
 				previousCombinedSize = (previousCombinedSize + 0x1FF) & -0x200;
 			}
 			output.b()->preallocate(previousCombinedSize);
