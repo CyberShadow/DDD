@@ -2883,12 +2883,12 @@ void mergeExpanded()
 		
 		if (expansionChunks <= OPENNODE_BUFFER_SIZE && bufferSize && (expansionChunks+1)*bufferSize <= OPENNODE_BUFFER_SIZE)
 		{
-			output->setWriteBuffer((OpenNode*)ram + expansionChunks*bufferSize, OPENNODE_BUFFER_SIZE - expansionChunks*bufferSize);
+			output->setWriteBuffer((OpenNode*)ram + expansionChunks*bufferSize, (uint32_t)OPENNODE_BUFFER_SIZE - expansionChunks*bufferSize);
 			for (unsigned i=0; i<expansionChunks; i++)
 				inputs[i].setReadBuffer((OpenNode*)ram + i*bufferSize, (uint32_t)bufferSize);
 		}
 		else
-			output->setWriteBuffer((OpenNode*)ram, OPENNODE_BUFFER_SIZE);
+			output->setWriteBuffer((OpenNode*)ram, (uint32_t)OPENNODE_BUFFER_SIZE);
 
 		for (unsigned i=0; i<expansionChunks; i++)
 			inputs[i].open(formatFileName("expanded", currentFrameGroup, i));
@@ -3089,7 +3089,7 @@ void traceExit(const State* exitState, FRAME exitFrame)
 			saveExitTrace(steps, stepNr);
 
 			printTime();
-			printf("Frame" GROUP_STR " " GROUP_FORMAT "... \r", exitSearchFrameGroup);
+			printf("Frame" GROUP_STR " " GROUP_FORMAT "... \n", exitSearchFrameGroup);
 
 			exitSearchState.compress(&exitSearchCompressedState);
 			exitSearchStateFound = false;
@@ -3599,7 +3599,7 @@ int search()
 		ClosedNodeFilterOutput output;
 
 		BufferedInputStream<OpenNode> input;
-		input.setReadBuffer((OpenNode*)ram + sizeClosing, sizeCombining);
+		input.setReadBuffer((OpenNode*)ram + sizeClosing, (uint32_t)sizeCombining);
 		input.open(formatFileName("combined", currentFrameGroup));
 
 		copyStream<OpenNode>(&input, &output);
@@ -3734,7 +3734,7 @@ int search()
 			inputs[0].setReadBuffer((OpenNode*)ram + sizeClosing + sizeExpanded, sizeCombined);
 			inputs[0].open(formatFileName("combined", currentFrameGroup));
 
-			output.b()->setWriteBuffer((OpenNode*)ram + sizeClosing + sizeExpanded + sizeCombined, sizeCombinedNew);
+			output.b()->setWriteBuffer((OpenNode*)ram + sizeClosing + sizeExpanded + sizeCombined, (uint32_t)sizeCombinedNew);
 			output.b()->open(formatFileName("combining", currentFrameGroup+1), false);
 #ifdef PREALLOCATE_COMBINING
 			uint64_t previousCombinedSize;
