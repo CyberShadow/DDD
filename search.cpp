@@ -2896,10 +2896,23 @@ void mergeExpanded()
 		else
 			output->setWriteBuffer((OpenNode*)ram, (uint32_t)OPENNODE_BUFFER_SIZE);
 
+#ifdef PREALLOCATE_COMBINING
+		uint64_t size = 0;
+#endif
 		for (unsigned i=0; i<expansionChunks; i++)
+		{
 			inputs[i].open(formatFileName("expanded", currentFrameGroup, i));
+#ifdef PREALLOCATE_COMBINING
+			size += inputs[i].size();
+#endif
+		}
 		
 		output->open(formatFileName("merging", currentFrameGroup));
+#ifdef PREALLOCATE_COMBINING
+		// We could multiply this by EXPECTED_MERGING_RATIO, but there's no point really, as nothing else is consuming space during this step
+		size = (size * sizeof(OpenNode) + 0x1FF) & -0x200;
+		output->preallocate(size);
+#endif
 
 		mergeStreams<OpenNode>(inputs, expansionChunks, output);
 		
