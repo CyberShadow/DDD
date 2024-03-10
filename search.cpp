@@ -2225,7 +2225,13 @@ void sortExpansionRegion(std::list<ExpansionBufferRegion>::iterator& regionToSor
 
 	expansionWriteChunkThreadStream[threadID].open(formatFileName("expanded", currentFrameGroup, chunk), false);
 #ifdef PREALLOCATE_EXPANDED
-	expansionWriteChunkThreadStream[threadID].preallocate(PREALLOCATE_EXPANDED);
+	expansionWriteChunkThreadStream[threadID].preallocate(
+#ifdef USE_UNBUFFERED_DISK_IO
+		(PREALLOCATE_EXPANDED + 0x1FF) & -0x200
+#else
+		PREALLOCATE_EXPANDED
+#endif
+		);
 #endif
 	expansionWriteChunkThreadBuffer[threadID] = bufferToSort;
 	expansionWriteChunkThreadCount [threadID] = count;
@@ -3719,7 +3725,9 @@ int search()
 		uint64_t previousClosedSize;
 		{
 			previousClosedSize = getFileSize(formatFileName("closed", currentFrameGroup));
+#ifdef USE_UNBUFFERED_DISK_IO
 			previousClosedSize = (previousClosedSize + 0x1FF) & -0x200;
+#endif
 		}
 		closedNodeFile.preallocate(previousClosedSize);
 #endif
@@ -3740,7 +3748,9 @@ int search()
 			uint64_t previousCombinedSize;
 			{
 				previousCombinedSize = getFileSize(formatFileName("combined", currentFrameGroup));
+#ifdef USE_UNBUFFERED_DISK_IO
 				previousCombinedSize = (previousCombinedSize + 0x1FF) & -0x200;
+#endif
 			}
 			output.b()->preallocate(previousCombinedSize);
 #endif
