@@ -15,11 +15,7 @@
 # include <windows.h>
 #endif
 
-#ifdef __GNUC__
-# include <stdint.h>
-#else
-# include "pstdint.h"
-#endif
+#include <stdint.h>
 
 #ifdef _WIN32
 # define SLEEP(x) Sleep(x)
