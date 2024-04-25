@@ -28,6 +28,7 @@
 //#define THREAD_WINAPI
 
 // SYNC_* selects the synchronization (mutex and condition) methods.
+//#define SYNC_STD
 //#define SYNC_BOOST
 //#define SYNC_WINAPI
 //#define SYNC_WINAPI_SPIN
