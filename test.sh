@@ -63,6 +63,12 @@ for USE_ALL                    in false true ; do
 		echo "$line: TODO!" >> report.txt
 		continue
 	fi
+	if [[ "$DISK" == DISK_POSIX ]] && $USE_UNBUFFERED_DISK_IO ; then
+		# disk_file_posix.cpp:71:2: error: Unfinished, TODO
+		echo "Skipping (TODO)"
+		echo "$line: TODO!" >> report.txt
+		continue
+	fi
 	if [[ "$line" == *_BOOST* && "$OS" == windows-* ]] ; then
 		# https://github.com/CyberShadow/DDD/issues/3
 		echo "Skipping (TODO)"
@@ -135,9 +141,21 @@ for USE_ALL                    in false true ; do
 			-o search
 		)
 	fi
-	if [[ "$line" == *_BOOST* ]] ; then
+	if [[ "$line" == *_BOOST* && "$OS" == windows-* ]] ; then
 		args+=(
 			-I"$BOOST_ROOT"/include
+		)
+	fi
+	if [[ "$line" == *_BOOST* ]] ; then
+		# TODO MSVC
+		args+=(
+			-lboost_thread
+		)
+	fi
+	if [[ "$line" == *_BOOST* && "$COMPILER" == g++ && "$OS" == ubuntu-* ]] ; then
+		# https://bugs.launchpad.net/ubuntu/+source/binutils/+bug/1415317
+		args+=(
+			-fuse-ld=gold
 		)
 	fi
 
