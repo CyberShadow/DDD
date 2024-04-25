@@ -908,7 +908,10 @@ private:
 			if (newSize < 0) // Not bloody likely!
 				newSize = minCapacity;
 			else
-				newSize = min(newSize, (int)((unsigned)a_len >> 1));
+			{
+				int a_len_2 = (int)((unsigned)a_len >> 1);
+				newSize = newSize < a_len_2 ? newSize : a_len_2;
+			}
 
 			delete [] tmp;
 			T *newArray = new T[newSize];
