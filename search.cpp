@@ -1537,10 +1537,12 @@ public:
 				bubbleDown();
 				test();
 				if (size==1)
+				{
 					if (*head->state < *target)
 						goto size1;
 					else
 						break;
+				}
 			} while (*head->state < *target);
 			test();
 			return (*head->state > *target);
