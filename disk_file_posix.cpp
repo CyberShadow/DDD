@@ -455,7 +455,7 @@ public:
 
 	void open(const char* filename, bool resume=false)
 	{
-		archive = ::open(filename, O_WRONLY | (resume ? 0 : O_CREAT | O_TRUNC) | O_DIRECT, 0666);
+		archive = ::open(filename, O_WRONLY | (resume ? 0 : O_CREAT | O_TRUNC), 0666);
 		if (archive < 0)
 			perror(format("File creation failure (%s)", filename));
 		if (resume)
