@@ -49,7 +49,7 @@ public:
 
 	void seek(uint64_t pos)
 	{
-		fseek(archive, pos * sizeof(NODE), SEEK_SET);
+		fseek(archive, (long)(pos * sizeof(NODE)), SEEK_SET);
 	}
 
 	void close()
