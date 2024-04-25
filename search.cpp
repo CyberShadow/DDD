@@ -3474,7 +3474,7 @@ void searchPrintHeader()
 
 void searchPrintNodeCounts()
 {
-	printf("%11llu nodes, %12llu total", closedNodesInCurrentFrameGroup, combinedNodesTotal);
+	printf("%11llu nodes, %12llu total", (unsigned long long)closedNodesInCurrentFrameGroup, (unsigned long long)combinedNodesTotal);
 	fflush(stdout);
 }
 
@@ -3685,7 +3685,7 @@ int search()
 
 		ftime(&time2);
 		{
-			time_t ms = (time2.time - time1.time)*1000 + (time2.millitm - time1.millitm);
+			int ms = (int)((time2.time - time1.time)*1000 + (time2.millitm - time1.millitm));
 			printf("%4d.%03d s", ms/1000, ms%1000);
 		}
 
@@ -3708,8 +3708,8 @@ int search()
 			InputStream<OpenNode> getSize(formatFileName("expanded", currentFrameGroup));
 			uint64_t expandedNodes = getSize.size();
 
-			time_t ms = (time3.time - time2.time)*1000 + (time3.millitm - time2.millitm);
-			printf("%4d.%03d s, %12llu nodes", ms/1000, ms%1000, expandedNodes);
+			int ms = (int)((time3.time - time2.time)*1000 + (time3.millitm - time2.millitm));
+			printf("%4d.%03d s, %12llu nodes", ms/1000, ms%1000, (unsigned long long)expandedNodes);
 		}
 
 		if (checkStop(true))
@@ -3786,10 +3786,10 @@ int search()
 		timeb time4;
 		ftime(&time4);
 		{
-			time_t ms         = (time4.time - time3.time)*1000 + (time4.millitm - time3.millitm);
-			time_t ms_total   = (time4.time - time1.time)*1000 + (time4.millitm - time1.millitm);
+			int ms         = (int)((time4.time - time3.time)*1000 + (time4.millitm - time3.millitm));
+			int ms_total   = (int)((time4.time - time1.time)*1000 + (time4.millitm - time1.millitm));
 #ifdef PRINT_RUNNING_TOTAL_TIME
-			time_t ms_running = (time4.time - time0.time)*1000 + (time4.millitm - time0.millitm);
+			int ms_running = (int)((time4.time - time0.time)*1000 + (time4.millitm - time0.millitm));
 			printf("%4d.%03d s (%4d.%03d s, %6d.%03d s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000, ms_running/1000, ms_running%1000);
 #else
 			printf("%4d.%03d s (%4d.%03d s)", ms/1000, ms%1000, ms_total/1000, ms_total%1000);
@@ -4060,7 +4060,7 @@ int sample(FRAME_GROUP g, unsigned count)
 int compare(const char* fn1, const char* fn2)
 {
 	BufferedInputStream<Node> i1(fn1), i2(fn2);
-	printf("%s: %llu states\n%s: %llu states\n", fn1, i1.size(), fn2, i2.size());
+	printf("%s: %llu states\n%s: %llu states\n", fn1, (unsigned long long)i1.size(), fn2, (unsigned long long)i2.size());
 	const Node *cs1, *cs2;
 	cs1 = i1.read();
 	cs2 = i2.read();
@@ -4087,8 +4087,8 @@ int compare(const char* fn1, const char* fn2)
 			switches++;
 		last = cur;
 	}
-	printf("%llu duplicate states\n", dups);
-	printf("%llu interweaves\n", switches);
+	printf("%llu duplicate states\n", (unsigned long long)dups);
+	printf("%llu interweaves\n", (unsigned long long)switches);
 	return EXIT_OK;
 }
 
@@ -4240,13 +4240,13 @@ int verify(const char* filename)
 		if (cs == *cs2)
 			if (!equalFound)
 			{
-				printf("Equal states found: %lld\n", pos);
+				printf("Equal states found: %lld\n", (long long)pos);
 				equalFound = true;
 			}
 		if (cs > *cs2)
 			if (!oooFound)
 			{
-				printf("Unordered states found: %lld\n", pos);
+				printf("Unordered states found: %lld\n", (long long)pos);
 				oooFound = true;
 			}
 #ifdef GROUP_FRAMES
@@ -4608,8 +4608,8 @@ void printExecutionTime()
 {
 	timeb endTime;
 	ftime(&endTime);
-	time_t ms = (endTime.time - startTime.time)*1000
-	       + (endTime.millitm - startTime.millitm);
+	int ms = (int)((endTime.time - startTime.time)*1000
+	             + (endTime.millitm - startTime.millitm));
 	printf("Time: %d.%03d seconds.\n", ms/1000, ms%1000);
 }
 
@@ -4800,7 +4800,7 @@ int run(int argc, const char* argv[])
 	printf("Using %u " PLUGIN_THREAD " threads (with %u node chunks) with " PLUGIN_SYNC " sync and " PLUGIN_TLS " TLS\n", THREADS, QUEUE_CHUNK_SIZE);
 #endif
 	
-	printf("Compressed state is %u bits (%u bytes data, %u bytes per closed node, %u bytes per open node)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(Node), sizeof(OpenNode));
+	printf("Compressed state is %u bits (%u bytes data, %u bytes per closed node, %u bytes per open node)\n", COMPRESSED_BITS, COMPRESSED_BYTES, (unsigned)sizeof(Node), (unsigned)sizeof(OpenNode));
 #ifdef SLOW_COMPARE
 	printf("Using memcmp for CompressedState comparison\n");
 #endif
