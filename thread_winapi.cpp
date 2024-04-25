@@ -14,7 +14,7 @@ DWORD WINAPI CallCFunction(/*__in*/ LPVOID lpParameter)
 	}
 	catch (const char* s)
 	{
-		puts(s);
+		fprintf(stderr, "%s\n", s);
 		exit(1);
 	}
 	return 0;
