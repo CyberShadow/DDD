@@ -38,7 +38,8 @@ public:
 		fseek(archive, 0, SEEK_END);
 		long size = ftell(archive);
 		fseek(archive, pos, SEEK_SET);
-		return size;
+		assert(size % sizeof(NODE) == 0, "Unaligned EOF");
+		return size / sizeof(NODE);
 	}
 
 	uint64_t position()
