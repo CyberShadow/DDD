@@ -6,7 +6,7 @@ ok=true
 for DEBUG                      in false true ; do
 for USE_MEMCMP                 in false true ; do
 for THREAD                     in THREAD_{BOOST,WINAPI} ; do
-for SYNC                       in SYNC_{BOOST,WINAPI,WINAPI_SPIN,INTEL_SPIN} ; do
+for SYNC                       in SYNC_{STD,BOOST,WINAPI,WINAPI_SPIN,INTEL_SPIN} ; do
 for TLS                        in TLS_{COMPILER,WINAPI,BOOST} ; do
 for DISK                       in DISK_{WINFILES,POSIX} ; do
 for USE_UNBUFFERED_DISK_IO     in false true ; do
@@ -96,7 +96,7 @@ for USE_ALL                    in false true ; do
 		-e '#define DEBUG\b'
 		-e '#define USE_MEMCMP\b'
 		-e '#define THREAD_\(BOOST\|WINAPI\)\b'
-		-e '#define SYNC_\(BOOST\|WINAPI\|WINAPI_SPIN\|INTEL_SPIN\)\b'
+		-e '#define SYNC_\(STD\|BOOST\|WINAPI\|WINAPI_SPIN\|INTEL_SPIN\)\b'
 		-e '#define TLS_\(COMPILER\|WINAPI\|BOOST\)\b'
 		-e '#define DISK_\(WINFILES\|POSIX\)\b'
 		-e '#define USE_UNBUFFERED_DISK_IO\b'

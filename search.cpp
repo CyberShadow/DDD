@@ -51,7 +51,10 @@ typedef size_t THREAD_ID;
 #  error Thread plugin not set
 # endif
 
-# if defined(SYNC_BOOST)
+# if defined(SYNC_STD)
+#  define PLUGIN_SYNC "Standard C++"
+#  include "sync_std.cpp"
+# elif defined(SYNC_BOOST)
 #  define PLUGIN_SYNC "Boost"
 #  include "sync_boost.cpp"
 # elif defined(SYNC_WINAPI)
