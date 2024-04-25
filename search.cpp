@@ -16,6 +16,7 @@
 #endif
 
 #include <stdint.h>
+#include <stdarg.h>
 
 #ifdef _WIN32
 # define SLEEP(x) Sleep(x)
