@@ -1732,7 +1732,7 @@ void filterStreams(CLOSED* closed, BufferedRewriteStream<NODE> open[], int openC
 				error(format("Unsorted open node file for frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT, group, openHeap.getHeadInput() - open));
 		} while (o == *openHeap.getHead());
 
-		int r = closed->scanTo<false>(&o, merged);
+		int r = closed->template scanTo<false>(&o, merged);
 		if (r == 0)
 			closed->next();
 		else
