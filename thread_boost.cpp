@@ -1,7 +1,13 @@
 #include <boost/thread/thread.hpp>
 
 #define THREAD boost::thread*
-#define THREAD_CREATE(delegate) new boost::thread(delegate)
+
+template<void (*WORKER_FUNCTION)()>
+void THREAD_CREATE(THREAD_ID threadID)
+{
+	new boost::thread(WORKER_FUNCTION);
+}
+
 #define THREAD_JOIN(thread) (thread)->join()
 #define THREAD_DESTROY(thread) delete (thread)
 
