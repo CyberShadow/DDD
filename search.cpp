@@ -25,6 +25,12 @@
 # define SLEEP(x) usleep((x)*1000)
 #endif
 
+#ifdef _MSC_VER
+# define NOINLINE(ret) __declspec(noinline) ret
+#else
+# define NOINLINE(ret) ret __attribute__((noinline))
+#endif
+
 #ifdef MULTITHREADING
 
 typedef size_t THREAD_ID;
