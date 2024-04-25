@@ -618,6 +618,9 @@ FRAME_GROUP currentFrameGroup;
 #elif defined(DISK_POSIX)
 # define PLUGIN_DISK "POSIX"
 # include "disk_file_posix.cpp"
+#elif defined(DISK_C)
+# define PLUGIN_DISK "C"
+# include "disk_file_c.cpp"
 #else
 # error Disk plugin not set
 #endif
@@ -4826,6 +4829,8 @@ int run(int argc, const char* argv[])
 # endif
 #elif defined(DISK_POSIX)
 	printf("Using POSIX files\n");
+#elif defined(DISK_C)
+	printf("Using C files\n");
 #else
 # error Disk plugin not set
 #endif
