@@ -1210,7 +1210,7 @@ void copyFile(const char* from, const char* to)
 	if (amount > BUFFER_SIZE)
 		amount = BUFFER_SIZE;
 	size_t records;
-	while (records = input.read(buffer, (size_t)amount))
+	while ((records = input.read(buffer, (size_t)amount)))
 		output.write(buffer, records);
 	output.flush(); // force disk flush
 }
@@ -1362,7 +1362,7 @@ void mergeChunks(NODE* input, unsigned inputSize, OUTPUT* output)
 	NODE cs = *(NODE*)first;
 	const NODE* cs2;
 
-	while (cs2 = heap.read())
+	while ((cs2 = heap.read()))
 	{
 		debug_assert(*cs2 >= cs);
 		if (cs == *cs2) // CompressedState::operator== does not compare subframe
@@ -1390,7 +1390,7 @@ void mergeChunks(NODE* inputBase, HeapNode* inputHeap, unsigned count, OUTPUT* o
 	NODE cs = *(NODE*)first;
 	const NODE* cs2;
 
-	while (cs2 = heap.read())
+	while ((cs2 = heap.read()))
 	{
 		debug_assert(*cs2 >= cs);
 		if (cs == *cs2) // CompressedState::operator== does not compare subframe
@@ -1611,7 +1611,7 @@ template <class NODE, class INPUT, class OUTPUT>
 void copyStream(INPUT* input, OUTPUT* output)
 {
 	const NODE* node;
-	while (node = input->read())
+	while ((node = input->read()))
 		output->write(node, false);
 }
 
@@ -1626,7 +1626,7 @@ void mergeStreams(INPUT inputs[], int inputCount, OUTPUT* output)
 	NODE cs = *(NODE*)first;
 	const NODE* cs2;
 	
-	while (cs2 = heap.read())
+	while ((cs2 = heap.read()))
 	{
 		debug_assert(*cs2 >= cs);
 		if (cs == *cs2) // CompressedState::operator== does not compare subframe
@@ -3100,7 +3100,7 @@ void traceExit(const State* exitState, FRAME exitFrame)
 			BufferedInputStream<Node> input(formatFileName("closed", exitSearchFrameGroup));
 			const Node *cs;
 			DEBUG_ONLY(statesQueued = statesDequeued = 0);
-			while (cs = input.read())
+			while ((cs = input.read()))
 			{
 				DEBUG_ONLY(statesQueued++);
 				if (canStatesBeParentAndChild(&cs->getState(), &exitSearchCompressedState))
@@ -3990,7 +3990,7 @@ int dump(FRAME_GROUP g)
 	
 	BufferedInputStream<Node> in(fn);
 	const Node* cs;
-	while (cs = in.read())
+	while ((cs = in.read()))
 	{
 #ifdef GROUP_FRAMES
 		printf("Frame %u:\n", GET_FRAME(g, *cs));
@@ -4489,7 +4489,7 @@ int findExit()
 			printTime(); printf("Frame" GROUP_STR " " GROUP_FORMAT "/" GROUP_FORMAT ": ", currentFrameGroup, maxFrameGroups); fflush(stdout);
 			BufferedInputStream<Node> input(fn);
 			const Node* cs;
-			while (cs = input.read())
+			while ((cs = input.read()))
 			{
 				State s;
 				s.decompress(&cs->getState());
