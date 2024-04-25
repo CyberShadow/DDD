@@ -16,6 +16,7 @@
 #endif
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdarg.h>
 
 #ifdef _WIN32
