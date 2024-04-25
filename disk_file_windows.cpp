@@ -123,8 +123,7 @@ public:
 		flush(true);
 	}
 
-	__declspec(noinline)
-	void seek(uint64_t pos)
+	NOINLINE(void) seek(uint64_t pos)
 	{
 		if (sectorBufferFlushed < sectorBufferUse)
 		{
@@ -166,8 +165,7 @@ public:
 		}
 	}
 
-	__declspec(noinline)
-	void open(const char* filename, bool resume=false)
+	NOINLINE(void) open(const char* filename, bool resume=false)
 	{
 		assert(this->archive==0);
 		sectorBufferUse = 0;
@@ -181,8 +179,7 @@ public:
 	}
 
 #if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
-	__declspec(noinline)
-	void preallocate(uint64_t size)
+	NOINLINE(void) preallocate(uint64_t size)
 	{
 		LARGE_INTEGER _size;
 		_size.QuadPart = size;
@@ -196,8 +193,7 @@ public:
 	}
 #endif
 
-	__declspec(noinline)
-	void write(const NODE* p, size_t n)
+	NOINLINE(void) write(const NODE* p, size_t n)
 	{
 		assert(this->archive, "File not open");
 		size_t total = n * sizeof(NODE);
@@ -250,8 +246,7 @@ public:
 	}
 
 private:
-	__declspec(noinline)
-	void flush(bool reopen)
+	NOINLINE(void) flush(bool reopen)
 	{
 		if (!this->archive)
 			return;
@@ -347,8 +342,7 @@ public:
 		open(filename);
 	}
 
-	__declspec(noinline)
-	void open(const char* filename)
+	NOINLINE(void) open(const char* filename)
 	{
 #ifdef DEBUG
 		strcpy(filenameOpened, filename);
@@ -366,8 +360,7 @@ public:
 		return filePosition / sizeof(NODE);
 	}
 
-	__declspec(noinline)
-	void seek(uint64_t pos)
+	NOINLINE(void) seek(uint64_t pos)
 	{
 		filePosition = pos * sizeof(NODE);
 		sectorBufferPos = (unsigned)filePosition % (unsigned)sizeof(sectorBuffer);
@@ -390,8 +383,7 @@ public:
 		}
 	}
 
-	__declspec(noinline)
-	size_t read(NODE* p, size_t n)
+	NOINLINE(size_t) read(NODE* p, size_t n)
 	{
 		assert(this->archive, "File not open");
 		size_t total = n * sizeof(NODE);
@@ -519,8 +511,7 @@ public:
 	}
 																
 #if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
-	__declspec(noinline)
-	void preallocate(uint64_t size)
+	NOINLINE(void) preallocate(uint64_t size)
 	{
 		LARGE_INTEGER _size;
 		_size.QuadPart = size;
