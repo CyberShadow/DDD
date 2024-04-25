@@ -129,7 +129,7 @@ public:
 		if (sectorBufferFlushed < sectorBufferUse)
 		{
 			DWORD w;
-			BOOL b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &w, NULL);
+			BOOL b = WriteFile(this->archive, sectorBuffer, sizeof(sectorBuffer), &w, NULL);
 			if (!b)
 				windowsError("Write error");
 			if (w != sizeof(sectorBuffer))
@@ -143,7 +143,7 @@ public:
 		LARGE_INTEGER li;
 		DWORD error;
 		li.QuadPart = pos & -(int64_t)sizeof(sectorBuffer);
-		li.LowPart = SetFilePointer(archive, li.LowPart, &li.HighPart, FILE_BEGIN);
+		li.LowPart = SetFilePointer(this->archive, li.LowPart, &li.HighPart, FILE_BEGIN);
 		if (li.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
 			windowsError(format("Seek error (%s)", filenameOpened));
 
@@ -153,14 +153,14 @@ public:
 		{
 			memset(sectorBuffer, 0, sizeof(sectorBuffer));
 			DWORD r;
-			BOOL b = ReadFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
+			BOOL b = ReadFile(this->archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
 			if (b && r!=sectorBufferUse)
 				windowsError(format("Read alignment error in write alignment (%s)", filenameOpened));
 			if (!b || r==0)
 				windowsError(format("Read error in write alignment (%s)", filenameOpened));
 
 			li.QuadPart = pos & -(int64_t)sizeof(sectorBuffer);
-			li.LowPart = SetFilePointer(archive, li.LowPart, &li.HighPart, FILE_BEGIN);
+			li.LowPart = SetFilePointer(this->archive, li.LowPart, &li.HighPart, FILE_BEGIN);
 			if (li.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
 				windowsError(format("Seek error after write alignment read (%s)", filenameOpened));
 		}
@@ -169,15 +169,15 @@ public:
 	__declspec(noinline)
 	void open(const char* filename, bool resume=false)
 	{
-		assert(archive==0);
+		assert(this->archive==0);
 		sectorBufferUse = 0;
 		sectorBufferFlushed = 0;
 		strcpy(filenameOpened, filename);
-		archive = CreateFile(filename, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
-		if (archive == INVALID_HANDLE_VALUE)
+		this->archive = CreateFile(filename, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
+		if (this->archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File creation failure (%s)", filename));
 		if (resume)
-			seek(size());
+			seek(this->size());
 	}
 
 #if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
@@ -186,20 +186,20 @@ public:
 	{
 		LARGE_INTEGER _size;
 		_size.QuadPart = size;
-		if (SetFilePointerEx(archive, _size, NULL, FILE_BEGIN))
+		if (SetFilePointerEx(this->archive, _size, NULL, FILE_BEGIN))
 		{
-			if (SetEndOfFile(archive))
-				SetFileValidData(archive, _size.QuadPart);
+			if (SetEndOfFile(this->archive))
+				SetFileValidData(this->archive, _size.QuadPart);
 		}
 		_size.QuadPart = 0;
-		SetFilePointerEx(archive, _size, NULL, FILE_BEGIN);
+		SetFilePointerEx(this->archive, _size, NULL, FILE_BEGIN);
 	}
 #endif
 
 	__declspec(noinline)
 	void write(const NODE* p, size_t n)
 	{
-		assert(archive, "File not open");
+		assert(this->archive, "File not open");
 		size_t total = n * sizeof(NODE);
 		size_t bytes = 0;
 		const BYTE* data = (const BYTE*)p;
@@ -217,7 +217,7 @@ public:
 				sectorBufferUse += (WORD)chunk;
 				if (sectorBufferUse == sizeof(sectorBuffer))
 				{
-					b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &w, NULL);
+					b = WriteFile(this->archive, sectorBuffer, sizeof(sectorBuffer), &w, NULL);
 					if (!b)
 						windowsError("Write error");
 					if (w != sizeof(sectorBuffer))
@@ -240,7 +240,7 @@ public:
 					return;
 				}
 			}
-			b = WriteFile(archive, data + bytes, chunk, &w, NULL);
+			b = WriteFile(this->archive, data + bytes, chunk, &w, NULL);
 			if (!b)
 				windowsError("Write error");
 			if (w == 0)
@@ -253,20 +253,20 @@ private:
 	__declspec(noinline)
 	void flush(bool reopen)
 	{
-		if (!archive)
+		if (!this->archive)
 			return;
 
 		if (sectorBufferFlushed == sectorBufferUse) // nothing to flush?
 		{
 			if (reopen)
-				FlushFileBuffers(archive);
+				FlushFileBuffers(this->archive);
 			else
 			{
 #if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
-				SetEndOfFile(archive);
+				SetEndOfFile(this->archive);
 #endif
-				CloseHandle(archive);
-				archive = 0;
+				CloseHandle(this->archive);
+				this->archive = 0;
 			}
 			return;
 		}
@@ -279,49 +279,49 @@ private:
 		{
 			LARGE_INTEGER size0;
 			size0.QuadPart = 0;
-			if (!SetFilePointerEx(archive, size0, &(LARGE_INTEGER&)size, FILE_CURRENT))
+			if (!SetFilePointerEx(this->archive, size0, &(LARGE_INTEGER&)size, FILE_CURRENT))
 				windowsError("Seek error");
 		}
 #else
-		size.LowPart = GetFileSize(archive, &size.HighPart);
+		size.LowPart = GetFileSize(this->archive, &size.HighPart);
 #endif
 		size.QuadPart += sectorBufferUse;
 
-		b = WriteFile(archive, sectorBuffer, sizeof(sectorBuffer), &w, NULL);
+		b = WriteFile(this->archive, sectorBuffer, sizeof(sectorBuffer), &w, NULL);
 		if (!b)
 			windowsError("Write error");
 		if (w != sizeof(sectorBuffer))
 			windowsError("Out of disk space?");
-		CloseHandle(archive);
+		CloseHandle(this->archive);
 
-		archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_WRITE_THROUGH, NULL);
-		if (archive == INVALID_HANDLE_VALUE)
+		this->archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_WRITE_THROUGH, NULL);
+		if (this->archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File creation failure upon reopening (%s) buffered", filenameOpened));
 		
 		ULARGE_INTEGER seekPos = size;
 		DWORD seek_error;
-		seekPos.LowPart = SetFilePointer(archive, seekPos.LowPart, (LONG*)&seekPos.HighPart, FILE_BEGIN);
+		seekPos.LowPart = SetFilePointer(this->archive, seekPos.LowPart, (LONG*)&seekPos.HighPart, FILE_BEGIN);
 		if (seekPos.LowPart == INVALID_SET_FILE_POINTER && (seek_error=GetLastError()) != NO_ERROR)
 			windowsError("SetFilePointer() #1 error");
 		if (seekPos.QuadPart != size.QuadPart)
 			error("Error setting file size");
-		b = SetEndOfFile(archive);
+		b = SetEndOfFile(this->archive);
 		if (!b)
 			windowsError("SetEndOfFile() error");
-		CloseHandle(archive);
+		CloseHandle(this->archive);
 		sectorBufferFlushed = sectorBufferUse;
 		if (!reopen)
 		{
-			archive = 0;
+			this->archive = 0;
 			return;
 		}
 
-		archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
-		if (archive == INVALID_HANDLE_VALUE)
+		this->archive = CreateFile(filenameOpened, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
+		if (this->archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File creation failure upon reopening (%s) unbuffered", filenameOpened));
 		size.QuadPart -= sectorBufferUse;
 		seekPos.QuadPart = size.QuadPart;
-		seekPos.LowPart = SetFilePointer(archive, seekPos.LowPart, (LONG*)&seekPos.HighPart, FILE_BEGIN);
+		seekPos.LowPart = SetFilePointer(this->archive, seekPos.LowPart, (LONG*)&seekPos.HighPart, FILE_BEGIN);
 		if (seekPos.QuadPart != size.QuadPart)
 			windowsError("SetFilePointer() #2 error");
 	}
@@ -353,11 +353,11 @@ public:
 #ifdef DEBUG
 		strcpy(filenameOpened, filename);
 #endif
-		assert(archive==0);
+		assert(this->archive==0);
 		sectorBufferPos = 0;
 		filePosition = 0;
-		archive = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
-		if (archive == INVALID_HANDLE_VALUE)
+		this->archive = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING, NULL);
+		if (this->archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File open failure (%s)", filename));
 	}
 
@@ -375,14 +375,14 @@ public:
 		LARGE_INTEGER li;
 		DWORD error;
 		li.QuadPart = filePosition & -(int64_t)sizeof(sectorBuffer);
-		li.LowPart = SetFilePointer(archive, li.LowPart, &li.HighPart, FILE_BEGIN);
+		li.LowPart = SetFilePointer(this->archive, li.LowPart, &li.HighPart, FILE_BEGIN);
 		if (li.LowPart == INVALID_SET_FILE_POINTER && (error=GetLastError()) != NO_ERROR)
 			windowsError("Seek error");
 
 		if (sectorBufferPos)
 		{
 			DWORD r;
-			BOOL b = ReadFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
+			BOOL b = ReadFile(this->archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
 			if (b)
 				sectorBufferEnd = r;
 			if (!b || r==0)
@@ -393,7 +393,7 @@ public:
 	__declspec(noinline)
 	size_t read(NODE* p, size_t n)
 	{
-		assert(archive, "File not open");
+		assert(this->archive, "File not open");
 		size_t total = n * sizeof(NODE);
 		size_t bytes = 0;
 		char* data = (char*)p;
@@ -428,7 +428,7 @@ public:
 					chunk &= -(int)sizeof(sectorBuffer);
 				else
 				{
-					b = ReadFile(archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
+					b = ReadFile(this->archive, sectorBuffer, sizeof(sectorBuffer), &r, NULL);
 					sectorBufferEnd = r;
 					if (b && r!=sizeof(sectorBuffer))
 					{
@@ -450,7 +450,7 @@ public:
 					return n;
 				}
 			}
-			b = ReadFile(archive, data + bytes, chunk, &r, NULL);
+			b = ReadFile(this->archive, data + bytes, chunk, &r, NULL);
 			if (b && r<chunk)
 			{
 				sectorBufferEnd = r % (DWORD)sizeof(sectorBuffer);
@@ -485,14 +485,14 @@ public:
 
 	void open(const char* filename, bool resume=false)
 	{
-		archive = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-		if (archive == INVALID_HANDLE_VALUE)
+		this->archive = CreateFile(filename, GENERIC_WRITE, FILE_SHARE_READ, NULL, resume ? OPEN_EXISTING : CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+		if (this->archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File creation failure (%s)", filename));
 		if (resume)
 		{
 			LARGE_INTEGER li;
 			li.QuadPart = 0;
-			BOOL b = SetFilePointerEx(archive, li, NULL, FILE_END);
+			BOOL b = SetFilePointerEx(this->archive, li, NULL, FILE_END);
 			if (!b)
 				windowsError("Append error");
 		}
@@ -500,7 +500,7 @@ public:
 
 	void write(const NODE* p, size_t n)
 	{
-		assert(archive, "File not open");
+		assert(this->archive, "File not open");
 		size_t total = n * sizeof(NODE);
 		size_t bytes = 0;
 		const char* data = (const char*)p;
@@ -509,7 +509,7 @@ public:
 			size_t left = total-bytes;
 			DWORD chunk = left > 256*1024 ? 256*1024 : (DWORD)left;
 			DWORD r;
-			BOOL b = WriteFile(archive, data + bytes, chunk, &r, NULL);
+			BOOL b = WriteFile(this->archive, data + bytes, chunk, &r, NULL);
 			if (!b)
 				windowsError("Write error");
 			if (r == 0)
@@ -524,19 +524,19 @@ public:
 	{
 		LARGE_INTEGER _size;
 		_size.QuadPart = size;
-		if (SetFilePointerEx(archive, _size, NULL, FILE_BEGIN))
+		if (SetFilePointerEx(this->archive, _size, NULL, FILE_BEGIN))
 		{
-			if (SetEndOfFile(archive))
-				SetFileValidData(archive, _size.QuadPart);
+			if (SetEndOfFile(this->archive))
+				SetFileValidData(this->archive, _size.QuadPart);
 		}
 		_size.QuadPart = 0;
-		SetFilePointerEx(archive, _size, NULL, FILE_BEGIN);
+		SetFilePointerEx(this->archive, _size, NULL, FILE_BEGIN);
 	}
 #endif
 
 	void flush()
 	{
-		FlushFileBuffers(archive);
+		FlushFileBuffers(this->archive);
 	}
 };
 
@@ -553,14 +553,14 @@ public:
 
 	void open(const char* filename)
 	{
-		archive = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-		if (archive == INVALID_HANDLE_VALUE)
+		this->archive = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+		if (this->archive == INVALID_HANDLE_VALUE)
 			windowsError(format("File open failure (%s)", filename));
 	}
 
 	size_t read(NODE* p, size_t n)
 	{
-		assert(archive, "File not open");
+		assert(this->archive, "File not open");
 		size_t total = n * sizeof(NODE);
 		size_t bytes = 0;
 		char* data = (char*)p;
@@ -569,7 +569,7 @@ public:
 			size_t left = total-bytes;
 			DWORD chunk = left > 256*1024 ? 256*1024 : (DWORD)left;
 			DWORD r = 0;
-			BOOL b = ReadFile(archive, data + bytes, chunk, &r, NULL);
+			BOOL b = ReadFile(this->archive, data + bytes, chunk, &r, NULL);
 			if ((!b && GetLastError() == ERROR_HANDLE_EOF) || (b && r==0))
 			{
 				assert(bytes % sizeof(NODE) == 0, "Unaligned EOF");
@@ -600,8 +600,8 @@ public:
 	
 	void open(const char* filename)
 	{
-		archive = CreateFile(filename, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-		if (archive == INVALID_HANDLE_VALUE)
+		this->archive = CreateFile(filename, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (this->archive == INVALID_HANDLE_VALUE)
 			windowsError("File creation failure");
 		readpos = writepos = 0;
 	}
@@ -609,23 +609,23 @@ public:
 	size_t read(NODE* p, size_t n)
 	{
 		assert(readpos >= writepos, "Write position overwritten");
-		seek(readpos);
-		size_t r = InputStream::read(p, n);
+		this->seek(readpos);
+		size_t r = InputStream<NODE>::read(p, n);
 		readpos += r;
 		return r;
 	}
 
 	void write(const NODE* p, size_t n)
 	{
-		seek(writepos);
-		OutputStream::write(p, n);
+		this->seek(writepos);
+		OutputStream<NODE>::write(p, n);
 		writepos += n;
 	}
 
 	void truncate()
 	{
-		seek(writepos);
-		SetEndOfFile(archive);
+		this->seek(writepos);
+		SetEndOfFile(this->archive);
 	}
 };
 
