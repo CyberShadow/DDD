@@ -518,6 +518,22 @@ public:
 		}
 	}
 																
+#if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
+	__declspec(noinline)
+	void preallocate(uint64_t size)
+	{
+		LARGE_INTEGER _size;
+		_size.QuadPart = size;
+		if (SetFilePointerEx(archive, _size, NULL, FILE_BEGIN))
+		{
+			if (SetEndOfFile(archive))
+				SetFileValidData(archive, _size.QuadPart);
+		}
+		_size.QuadPart = 0;
+		SetFilePointerEx(archive, _size, NULL, FILE_BEGIN);
+	}
+#endif
+
 	void flush()
 	{
 		FlushFileBuffers(archive);
