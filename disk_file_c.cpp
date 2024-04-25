@@ -44,12 +44,12 @@ public:
 
 	uint64_t position()
 	{
-		return ftell(archive);
+		return ftell(archive) / sizeof(NODE);
 	}
 
 	void seek(uint64_t pos)
 	{
-		fseek(archive, pos, SEEK_SET);
+		fseek(archive, pos * sizeof(NODE), SEEK_SET);
 	}
 
 	void close()

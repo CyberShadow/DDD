@@ -31,19 +31,22 @@ public:
 	{
 		struct stat st;
 		if (fstat(archive, &st) == 0)
-			return st.st_size;
+		{
+			assert(st.st_size % sizeof(NODE) == 0, "Unaligned EOF");
+			return st.st_size / sizeof(NODE);
+		}
 		perror("fstat");
 		return 0;
 	}
 
 	uint64_t position()
 	{
-		return lseek(archive, 0, SEEK_CUR);
+		return lseek(archive, 0, SEEK_CUR) / sizeof(NODE);
 	}
 
 	void seek(uint64_t pos)
 	{
-		off_t res = lseek(archive, pos, SEEK_SET);
+		off_t res = lseek(archive, pos * sizeof(NODE), SEEK_SET);
 		if (res == -1)
 			perror("lseek");
 	}
