@@ -82,6 +82,7 @@
 // DISK_* selects the back-end storage to be used for the node disk files.
 #define DISK_WINFILES
 //#define DISK_POSIX
+//#define DISK_C
 
 // This option disables flushing files to disk (fflush/FlushFileBuffers).
 // Turning this on will speed up search, but will likely cause data loss in case of system crash or power failure.

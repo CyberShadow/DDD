@@ -8,7 +8,7 @@ for USE_MEMCMP                 in false true ; do
 for THREAD                     in THREAD_{BOOST,WINAPI} ; do
 for SYNC                       in SYNC_{STD,BOOST,WINAPI,WINAPI_SPIN,INTEL_SPIN} ; do
 for TLS                        in TLS_{COMPILER,WINAPI,BOOST} ; do
-for DISK                       in DISK_{WINFILES,POSIX} ; do
+for DISK                       in DISK_{WINFILES,POSIX,C} ; do
 for USE_UNBUFFERED_DISK_IO     in false true ; do
 for MULTITHREADING             in false true ; do
 for PREALLOCATE_COMBINING      in false true ; do
@@ -41,6 +41,16 @@ for USE_ALL                    in false true ; do
 	fi
 	if [[ "$line" == *_POSIX* && "$OS" == windows-* ]] ; then
 		echo "Skipping (OS incompatibility)"
+		echo "$line: Skipped" >> report.txt
+		continue
+	fi
+	if [[ "$DISK" == DISK_C ]] && $USE_UNBUFFERED_DISK_IO ; then
+		echo "Skipping (unsupported configuration)"
+		echo "$line: Skipped" >> report.txt
+		continue
+	fi
+	if [[ "$DISK" == DISK_C ]] && $PREALLOCATE_COMBINING ; then
+		echo "Skipping (unsupported configuration)"
 		echo "$line: Skipped" >> report.txt
 		continue
 	fi
@@ -104,7 +114,7 @@ for USE_ALL                    in false true ; do
 		-e '#define THREAD_\(BOOST\|WINAPI\)\b'
 		-e '#define SYNC_\(STD\|BOOST\|WINAPI\|WINAPI_SPIN\|INTEL_SPIN\)\b'
 		-e '#define TLS_\(COMPILER\|WINAPI\|BOOST\)\b'
-		-e '#define DISK_\(WINFILES\|POSIX\)\b'
+		-e '#define DISK_\(WINFILES\|POSIX\|C\)\b'
 		-e '#define USE_UNBUFFERED_DISK_IO\b'
 		-e '#define MULTITHREADING\b'
 		-e '#define PREALLOCATE_COMBINING\b'
