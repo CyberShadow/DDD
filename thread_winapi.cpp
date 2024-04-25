@@ -3,7 +3,7 @@
 #endif
 
 template<void (*WORKER_FUNCTION)()>
-DWORD WINAPI CallCFunction(__in LPVOID lpParameter)
+DWORD WINAPI CallCFunction(/*__in*/ LPVOID lpParameter)
 {
 	try
 	{

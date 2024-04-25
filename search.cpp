@@ -4541,7 +4541,7 @@ int writePartialSolution()
 
 #if defined(_WIN32)
 #pragma comment(lib,"user32")
-DWORD WINAPI idleWatcher(__in LPVOID lpParameter)
+DWORD WINAPI idleWatcher(/*__in*/ LPVOID lpParameter)
 {
     LASTINPUTINFO lii;
     lii.cbSize = sizeof(LASTINPUTINFO);
