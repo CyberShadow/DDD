@@ -49,7 +49,9 @@ public:
 
 	void seek(uint64_t pos)
 	{
-		fseek(archive, (long)(pos * sizeof(NODE)), SEEK_SET);
+		long long_pos = (long)(pos * sizeof(NODE));
+		assert(long_pos / sizeof(NODE) == pos, "Overflow");
+		fseek(archive, long_pos, SEEK_SET);
 	}
 
 	void close()
