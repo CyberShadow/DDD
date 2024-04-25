@@ -4672,14 +4672,14 @@ Generic C++ DDD solver\n\
 Usage:\n\
 	search <mode> <parameters>\n\
 where <mode> is one of:\n\
-	search [max-frame"GROUP_STR"]\n\
+	search [max-frame" GROUP_STR "]\n\
 		Sorts, filters and expands open nodes. 	If no open node files\n\
 		are present, starts a new search from the initial state.\n"
 #if 0
 "	grouped-search <size>\n\
 		Performs the same operation as \"search\", but processes <size>\n\
-		open frame"GROUP_STR"s at once. The nodes for each frame"GROUP_STR"\n\
-		are expanded without being filtered, and all frame"GROUP_STR"s are\n\
+		open frame" GROUP_STR "s at once. The nodes for each frame" GROUP_STR "\n\
+		are expanded without being filtered, and all frame" GROUP_STR "s are\n\
 		sorted, filtered and \"closed\" at the end. This mode is useful\n\
 		when the open node files become much smaller than the total\n\
 		size of the closed node files.\n\
@@ -4688,34 +4688,34 @@ where <mode> is one of:\n\
 		before expanding them. Use with care, as it may lead to an\n\
 		explosion in the number of open nodes.\n"
 #endif
-"	dump <frame"GROUP_STR">\n\
-		Dumps all states from the specified frame"GROUP_STR", which\n\
+"	dump <frame" GROUP_STR ">\n\
+		Dumps all states from the specified frame" GROUP_STR ", which\n\
 		can be either open or closed.\n\
-	sample <frame"GROUP_STR">\n\
-		Displays a random state from the specified frame"GROUP_STR", which\n\
+	sample <frame" GROUP_STR ">\n\
+		Displays a random state from the specified frame" GROUP_STR ", which\n\
 		can be either open or closed.\n\
 	compare <filename-1> <filename-2>\n\
 		Counts the number of duplicate nodes in two files. The nodes in\n\
 		the files must be sorted and deduplicated.\n"
 #ifdef GROUP_FRAMES
-"	convert [frame"GROUP_STR"-range]\n\
-		Converts individual frame files to frame"GROUP_STR" files for the\n\
-		specified frame"GROUP_STR" range.\n\
-	unpack [frame"GROUP_STR"-range]\n\
-		Converts frame"GROUP_STR" files back to individual frame files\n\
+"	convert [frame" GROUP_STR "-range]\n\
+		Converts individual frame files to frame" GROUP_STR " files for the\n\
+		specified frame" GROUP_STR " range.\n\
+	unpack [frame" GROUP_STR "-range]\n\
+		Converts frame" GROUP_STR " files back to individual frame files\n\
 		(reverses the \"convert\" operation).\n\
-	count [frame"GROUP_STR"-range]\n\
+	count [frame" GROUP_STR "-range]\n\
 		Counts the number of nodes in individual frames for the\n\
-		specified frame"GROUP_STR" files.\n"
+		specified frame" GROUP_STR " files.\n"
 #endif
 "	verify <filename>\n\
 		Verifies that the nodes in a file are correctly sorted and\n\
 		deduplicated, as well as a few additional integrity checks.\n"
 #if 0
-"	pack-open [frame"GROUP_STR"-range]\n\
+"	pack-open [frame" GROUP_STR "-range]\n\
 		Removes duplicates within each chunk for open node files in the\n\
 		specified range. Reads and writes open nodes only once.\n\
-	sort-open [frame"GROUP_STR"-range]\n\
+	sort-open [frame" GROUP_STR "-range]\n\
 		Sorts and removes duplicates for open node files in the\n\
 		specified range. File are processed in reverse order.\n\
 	filter-open\n\
@@ -4723,14 +4723,14 @@ where <mode> is one of:\n\
 		be sorted and deduplicated (run sort-open before filter-open).\n\
 		Filtering is performed in-place. An aborted run shouldn't cause\n\
 		data loss, but will require re-sorting.\n\
-	seq-filter-open [frame"GROUP_STR"-range]\n\
+	seq-filter-open [frame" GROUP_STR "-range]\n\
 		Sorts, deduplicates and filters open node files in the\n\
 		specified range, one by one. Specify the range cautiously,\n\
 		as this function requires that previous open node files be\n\
 		sorted and deduplicated (and filtered for best performance).\n\
-	regenerate-open [frame"GROUP_STR"-range]\n\
-		Re-expands closed nodes in the specified frame"GROUP_STR" range.\n\
-		New (open) nodes are saved only for frame"GROUP_STR"s that don't\n\
+	regenerate-open [frame" GROUP_STR "-range]\n\
+		Re-expands closed nodes in the specified frame" GROUP_STR " range.\n\
+		New (open) nodes are saved only for frame" GROUP_STR "s that don't\n\
 		already have an open or closed node file. Use this when an open\n\
 		node file has been accidentally deleted or corrupted. To\n\
 		regenerate all open nodes, delete all open node files before\n\
@@ -4740,8 +4740,8 @@ where <mode> is one of:\n\
 		Creates the \"all\" file from closed node files. Use when\n\
 		turning on USE_ALL, or when the \"all\" file was corrupted.\n"
 #endif
-"	find-exit [frame"GROUP_STR"-range]\n\
-		Searches for exit frames in the specified frame"GROUP_STR" range\n\
+"	find-exit [frame" GROUP_STR "-range]\n\
+		Searches for exit frames in the specified frame" GROUP_STR " range\n\
 		(both closed an open node files). When a state is found which\n\
 		satisfies the isFinish condition, it is traced back and the\n\
 		solution is written, as during normal search.\n\
@@ -4750,12 +4750,12 @@ where <mode> is one of:\n\
 		solution file. Allows exit tracing inspection. Warning: uses\n\
 		the same code as when writing the full solution, and may\n\
 		overwrite an existing solution.\n\
-A [frame"GROUP_STR"-range] is a space-delimited list of zero, one or two frame"GROUP_STR"\n\
+A [frame" GROUP_STR "-range] is a space-delimited list of zero, one or two frame" GROUP_STR "\n\
 numbers. If zero numbers are specified, the range is assumed to be all\n\
-frame"GROUP_STR"s. If one number is specified, the range is set to only that\n\
-frame"GROUP_STR" number. If two numbers are specified, the range is set to start\n\
-from the first frame"GROUP_STR" number inclusively, and end at the second\n\
-frame"GROUP_STR" number NON-inclusively.\n\
+frame" GROUP_STR "s. If one number is specified, the range is set to only that\n\
+frame" GROUP_STR " number. If two numbers are specified, the range is set to start\n\
+from the first frame" GROUP_STR " number inclusively, and end at the second\n\
+frame" GROUP_STR " number NON-inclusively.\n\
 ";
 
 int run(int argc, const char* argv[])
@@ -4773,7 +4773,7 @@ int run(int argc, const char* argv[])
 #endif
 
 #ifdef MULTITHREADING
-	printf("Using %u "PLUGIN_THREAD" threads (with %u node chunks) with "PLUGIN_SYNC" sync and "PLUGIN_TLS" TLS\n", THREADS, QUEUE_CHUNK_SIZE);
+	printf("Using %u " PLUGIN_THREAD " threads (with %u node chunks) with " PLUGIN_SYNC " sync and " PLUGIN_TLS " TLS\n", THREADS, QUEUE_CHUNK_SIZE);
 #endif
 	
 	printf("Compressed state is %u bits (%u bytes data, %u bytes per closed node, %u bytes per open node)\n", COMPRESSED_BITS, COMPRESSED_BYTES, sizeof(Node), sizeof(OpenNode));
@@ -4828,26 +4828,26 @@ int run(int argc, const char* argv[])
 	else
 	if (argc>1 && strcmp(argv[1], "grouped-search")==0)
 	{
-		enforce(argc==3, "Specify how many frame"GROUP_STR"s to process at once");
+		enforce(argc==3, "Specify how many frame" GROUP_STR "s to process at once");
 		return groupedSearch(parseInt(argv[2]), true);
 	}
 	else
 	if (argc>1 && strcmp(argv[1], "grouped-search-no-filter")==0)
 	{
-		enforce(argc==3, "Specify how many frame"GROUP_STR"s to process at once");
+		enforce(argc==3, "Specify how many frame" GROUP_STR "s to process at once");
 		return groupedSearch(parseInt(argv[2]), false);
 	}
 #endif
 	else
 	if (argc>1 && strcmp(argv[1], "dump")==0)
 	{
-		enforce(argc==3, "Specify a frame"GROUP_STR" to dump");
+		enforce(argc==3, "Specify a frame" GROUP_STR " to dump");
 		return dump(parseInt(argv[2]));
 	}
 	else
 	if (argc>1 && strcmp(argv[1], "sample")==0)
 	{
-		enforce(argc==4, "Specify a frame"GROUP_STR" to sample and a number of samples");
+		enforce(argc==4, "Specify a frame" GROUP_STR " to sample and a number of samples");
 		return sample(parseInt(argv[2]), parseInt(argv[3]));
 	}
 	else
