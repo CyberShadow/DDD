@@ -123,7 +123,7 @@ const char* defaultstr(const char* a, const char* b = NULL) { return b ? b : a; 
 #define enforce(expr,...) \
 	while (!(expr)) \
 	{ \
-		error(defaultstr(format("Check failed at %s:%d", __FILE__,  __LINE__), __VA_ARGS__)); \
+		error(defaultstr(format("Check failed at %s:%d", __FILE__,  __LINE__), ##__VA_ARGS__)); \
 		throw "Unreachable"; \
 	}
 
