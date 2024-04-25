@@ -2009,9 +2009,9 @@ void dumpExpansionDebug()
 {
 	timeb time1;
 	ftime(&time1);
-	fprintf(expansionDebug, "%9d.%03d: ", time1.time, time1.millitm);
+	fprintf(expansionDebug, "%9d.%03d: ", (int)time1.time, time1.millitm);
 
-	fputc('1'+(char)TLS_TLS_GET_THREAD_ID, expansionDebug);
+	fputc('1'+(char)TLS_GET_THREAD_ID, expansionDebug);
 	fputc(':', expansionDebug);
 	fputc(' ', expansionDebug);
 
@@ -2087,7 +2087,7 @@ void initExpansion()
 #ifdef DEBUG_EXPANSION
 	expansionDebug = fopen("debug.log", "at");
 	fprintf(expansionDebug, "Frame group %u\n", currentFrameGroup);
-	dumpExpansionDebug(-1);
+	dumpExpansionDebug();
 #endif
 }
 
@@ -2172,7 +2172,7 @@ void expansionWriteChunkThread()
 
 		expansionRegionMarkEmpty(expansionWriteChunkThreadRegion[threadID]);
 #ifdef DEBUG_EXPANSION
-		dumpExpansionDebug(threadID);
+		dumpExpansionDebug();
 #endif
 	}
 
@@ -2690,7 +2690,7 @@ void expansionHandleFilledQueueElement()
 			debug_assert(expansionThread[threadID].buffer == NULL);
 			expansionThread[threadID].buffer = EXPANSION_BUFFER + region.pos * EXPANSION_NODES_PER_QUEUE_ELEMENT;
 	#ifdef DEBUG_EXPANSION
-			dumpExpansionDebug(threadID);
+			dumpExpansionDebug();
 	#endif
 			break;
 		}
@@ -2757,7 +2757,7 @@ void expansionMergeRegionsToDisk()
 
 		i->type = EXPANSION_BUFFER_REGION_MERGING;
 #ifdef DEBUG_EXPANSION
-		dumpExpansionDebug(0);
+		dumpExpansionDebug();
 #endif
 
 		ExpansionBufferSortedRegion region;
@@ -2826,7 +2826,7 @@ void expansionWriteFinalChunk()
 		{
 			timeb time1;
 			ftime(&time1);
-			fprintf(expansionDebug, "%9d.%03d: Reading %llu nodes of spillover...\n", time1.time, time1.millitm, count);
+			fprintf(expansionDebug, "%9d.%03d: Reading %llu nodes of spillover...\n", (int)time1.time, time1.millitm, count);
 			fflush(expansionDebug);
 		}
 # endif
@@ -2845,7 +2845,7 @@ void expansionWriteFinalChunk()
 		{
 			timeb time1;
 			ftime(&time1);
-			fprintf(expansionDebug, "%9d.%03d: Sorting spillover with %u threads...\n", time1.time, time1.millitm, WORKERS);
+			fprintf(expansionDebug, "%9d.%03d: Sorting spillover with %u threads...\n", (int)time1.time, time1.millitm, WORKERS);
 			fflush(expansionDebug);
 		}
 # endif
@@ -2866,7 +2866,7 @@ void expansionWriteFinalChunk()
 		{
 			timeb time1;
 			ftime(&time1);
-			fprintf(expansionDebug, "%9d.%03d: Merging sorted spillover to disk...\n", time1.time, time1.millitm);
+			fprintf(expansionDebug, "%9d.%03d: Merging sorted spillover to disk...\n", (int)time1.time, time1.millitm);
 			fflush(expansionDebug);
 		}
 # endif
@@ -2879,7 +2879,7 @@ void expansionWriteFinalChunk()
 	{
 		timeb time1;
 		ftime(&time1);
-		fprintf(expansionDebug, "%9d.%03d: Finished writing final expansion chunk.\n", time1.time, time1.millitm);
+		fprintf(expansionDebug, "%9d.%03d: Finished writing final expansion chunk.\n", (int)time1.time, time1.millitm);
 		fflush(expansionDebug);
 	}
 #endif
