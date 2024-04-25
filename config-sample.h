@@ -24,7 +24,8 @@
 #define QUEUE_CHUNK_SIZE 256 // increases the efficiency of multithreading by dequeueing in chunks of this many nodes, reducing the amount of time spent waiting for sync
 
 // THREAD_* defines how will threads be created.
-#define THREAD_BOOST
+#define THREAD_STD
+//#define THREAD_BOOST
 //#define THREAD_WINAPI
 
 // SYNC_* selects the synchronization (mutex and condition) methods.

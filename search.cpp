@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
 
 #ifdef _WIN32
 # define SLEEP(x) Sleep(x)
@@ -49,7 +50,10 @@ typedef size_t THREAD_ID;
 #  error TLS plugin not set
 # endif
 
-# if defined(THREAD_BOOST)
+# if defined(THREAD_STD)
+#  define PLUGIN_THREAD "Standard C++"
+#  include "thread_std.cpp"
+# elif defined(THREAD_BOOST)
 #  define PLUGIN_THREAD "Boost"
 #  include "thread_boost.cpp"
 # elif defined(THREAD_WINAPI)
