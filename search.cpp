@@ -817,7 +817,7 @@ public:
 
 	uint64_t size()
 	{
-		return s.size() + pos;
+		return this->s.size() + pos;
 	}
 
 	void clearBuffer()
@@ -834,7 +834,7 @@ public:
 	{
 		if (pos)
 		{
-			s.write(buffer.buf, pos);
+			this->s.write(buffer.buf, pos);
 			pos = 0;
 		}
 	}
@@ -843,7 +843,7 @@ public:
 	{
 		flushBuffer();
 #ifndef NO_DISK_FLUSH
-		s.flush();
+		this->s.flush();
 #endif
 	}
 
@@ -900,8 +900,8 @@ public:
 	void fillBuffer()
 	{
 		pos = 0;
-		uint64_t left = s.size() - s.position();
-		end = (uint32_t)s.read(buffer.buf, (size_t)(left < buffer.size ? left : buffer.size));
+		uint64_t left = this->s.size() - this->s.position();
+		end = (uint32_t)this->s.read(buffer.buf, (size_t)(left < buffer.size ? left : buffer.size));
 	}
 
 	void setReadBuffer(NODE* buf, uint32_t size)
@@ -1010,20 +1010,20 @@ template<class NODE>
 class BufferedInputStream : public ReadBuffer<InputStream<NODE>, NODE>
 {
 public:
-	BufferedInputStream(uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer(size) {}
-	BufferedInputStream(const char* filename, uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer(size) { open(filename); }
-	void open(const char* filename) { s.open(filename); buffer.allocate(); }
+	BufferedInputStream(uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer<InputStream<NODE>, NODE>(size) {}
+	BufferedInputStream(const char* filename, uint32_t size = STANDARD_BUFFER_SIZE) : ReadBuffer<InputStream<NODE>, NODE>(size) { open(filename); }
+	void open(const char* filename) { this->s.open(filename); this->buffer.allocate(); }
 };
 
 template<class NODE>
 class BufferedOutputStream : public WriteBuffer<OutputStream<NODE>, NODE>
 {
 public:
-	BufferedOutputStream(uint32_t size = STANDARD_BUFFER_SIZE) : WriteBuffer(size) {}
-	BufferedOutputStream(const char* filename, bool resume=false, uint32_t size = STANDARD_BUFFER_SIZE) : WriteBuffer(size) { open(filename, resume); }
-	void open(const char* filename, bool resume=false) { s.open(filename, resume); buffer.allocate(); }
+	BufferedOutputStream(uint32_t size = STANDARD_BUFFER_SIZE) : WriteBuffer<OutputStream<NODE>, NODE>(size) {}
+	BufferedOutputStream(const char* filename, bool resume=false, uint32_t size = STANDARD_BUFFER_SIZE) : WriteBuffer<OutputStream<NODE>, NODE>(size) { open(filename, resume); }
+	void open(const char* filename, bool resume=false) { this->s.open(filename, resume); this->buffer.allocate(); }
 #if defined(PREALLOCATE_EXPANDED) || defined(PREALLOCATE_COMBINING)
-	void preallocate(uint64_t size) { s.preallocate(size); }
+	void preallocate(uint64_t size) { this->s.preallocate(size); }
 #endif
 };
 
@@ -1031,10 +1031,10 @@ template<class NODE>
 class BufferedRewriteStream : public ReadBuffer<RewriteStream<NODE>, NODE>, public WriteBuffer<RewriteStream<NODE>, NODE>
 {
 public:
-	BufferedRewriteStream(uint32_t readSize = STANDARD_BUFFER_SIZE, uint32_t writeSize = STANDARD_BUFFER_SIZE) : ReadBuffer(readSize), WriteBuffer(writeSize) {}
-	BufferedRewriteStream(const char* filename, uint32_t readSize = STANDARD_BUFFER_SIZE, uint32_t writeSize = STANDARD_BUFFER_SIZE) : ReadBuffer(readSize), WriteBuffer(writeSize) { open(filename); }
-	void open(const char* filename) { s.open(filename); ReadBuffer<RewriteStream>::buffer.allocate(); WriteBuffer<RewriteStream>::buffer.allocate(); }
-	void truncate() { s.truncate(); }
+	BufferedRewriteStream(uint32_t readSize = STANDARD_BUFFER_SIZE, uint32_t writeSize = STANDARD_BUFFER_SIZE) : ReadBuffer<RewriteStream<NODE>, NODE>(readSize), WriteBuffer<RewriteStream<NODE>, NODE>(writeSize) {}
+	BufferedRewriteStream(const char* filename, uint32_t readSize = STANDARD_BUFFER_SIZE, uint32_t writeSize = STANDARD_BUFFER_SIZE) : ReadBuffer<RewriteStream<NODE>, NODE>(readSize), WriteBuffer<RewriteStream<NODE>, NODE>(writeSize) { open(filename); }
+	void open(const char* filename) { this->s.open(filename); ReadBuffer<RewriteStream<NODE>, NODE>::buffer.allocate(); WriteBuffer<RewriteStream<NODE>, NODE>::buffer.allocate(); }
+	void truncate() { this->s.truncate(); }
 };
 
 template<class NODE>
@@ -1257,7 +1257,7 @@ public:
 			}
 			heap[size++].end = pos;
 		}
-		std::sort(heap, heap+size, *(InputOffset*)this);
+		std::sort(heap, heap+size, *(InputOffset<NODE>*)this);
 		head = heap;
 		heap--; // heap[0] is now invalid, use heap[1] to heap[size] inclusively; head == heap[1]
 		head->pos--;
@@ -1265,11 +1265,11 @@ public:
 
 	InputHeapChunked(NODE* inputBase, HeapNode* inputHeap, unsigned count)
 	{
-		input = inputBase;
+		this->input = inputBase;
 		heap = inputHeap;
 		size = count;
 
-		std::sort(heap, heap+size, *(InputOffset*)this);
+		std::sort(heap, heap+size, *(InputOffset<NODE>*)this);
 		head = heap;
 		heap--;
 		head->pos--;
@@ -1281,7 +1281,7 @@ public:
 		delete[] heap;
 	}
 
-	const NODE* getHead() const { return head->pos == head->end ? NULL : input + head->pos; }
+	const NODE* getHead() const { return head->pos == head->end ? NULL : this->input + head->pos; }
 
 	bool next()
 	{
@@ -1324,13 +1324,13 @@ public:
 			if (c < size) // if (c+1 <= size)
 			{
 				HeapNode* pc2 = pc+1;
-				if (input[pc2->pos] < input[pc->pos])
+				if (this->input[pc2->pos] < this->input[pc->pos])
 				{
 					pc = pc2;
 					c++;
 				}
 			}
-			if (input[pp->pos] <= input[pc->pos])
+			if (this->input[pp->pos] <= this->input[pc->pos])
 				return;
 			HeapNode t = *pp;
 			*pp = *pc;
@@ -1344,8 +1344,8 @@ public:
 #ifdef DEBUG
 		for (int p=1; p<size; p++)
 		{
-			assert(p*2   > size || input[heap[p].pos] <= input[heap[p*2  ].pos]);
-			assert(p*2+1 > size || input[heap[p].pos] <= input[heap[p*2+1].pos]);
+			assert(p*2   > size || this->input[heap[p].pos] <= this->input[heap[p*2  ].pos]);
+			assert(p*2+1 > size || this->input[heap[p].pos] <= this->input[heap[p*2+1].pos]);
 		}
 #endif
 	}
@@ -1701,7 +1701,7 @@ void filterStreams(CLOSED* closed, BufferedRewriteStream<NODE> open[], int openC
 		return;
 	}
 	
-	InputHeap<BufferedRewriteStream> openHeap(open, openCount);
+	InputHeap<BufferedRewriteStream<NODE>, NODE> openHeap(open, openCount);
 	openHeap.next();
 
 	bool done = false;
